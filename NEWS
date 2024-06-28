@@ -1,6 +1,11 @@
 This file lists the most important updates in Agama (in reverse chronological order);
 breaking changes in API are listed at the end.
 
+June 2024:
+Added a Hermite method for orbit integration;
+implemented computation of projected potential, acceleration and its derivatives;
+added checks for unknown or irrelevant density/potential/DF parameters.
+
 May 2024:
 Implemented analytic convolution of 1d interpolators and determination of their
 roots and extrema.
@@ -134,6 +139,10 @@ Some of this functionality is not yet ported to Agama.
 
 -----------
 API Changes
+
+June 2024:
+[C++,Python] replaced projectedForce by a more general routine/method projectedEval, which
+computes any combination of projected potential, acceleration and its derivatives.
 
 March 2024:
 [C++] Extended the integration of variational equation, previously used for the estimation

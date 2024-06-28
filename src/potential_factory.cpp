@@ -51,43 +51,43 @@ static const int GALPOT_NRAD = 50;
     it is intended only to be used in factory methods such as 
     creating an instance of potential from its name 
     (e.g., passed as a string, or loaded from an ini file).
+    Implemented as a bitmask to enable testing for multiple choices in parseParam.
 */
 enum PotentialType {
-
-    PT_UNKNOWN,      ///< unspecified/not provided
-    PT_INVALID,      ///< provided but does not correspond to a known class
+    PT_UNKNOWN      = 0, ///< unspecified/not provided
+    PT_INVALID      = 1, ///< provided but does not correspond to a known class
 
     // density interpolators
-    PT_DENS_SPHHARM, ///< `DensitySphericalHarmonic`
-    PT_DENS_CYLGRID, ///< `DensityAzimuthalHarmonic`
+    PT_DENS_SPHHARM = 2, ///< `DensitySphericalHarmonic`
+    PT_DENS_CYLGRID = 4, ///< `DensityAzimuthalHarmonic`
 
     // generic potential expansions
-    PT_BASISSET,     ///< radial basis-set expansion: `BasisSet`
-    PT_MULTIPOLE,    ///< spherical-harmonic expansion:  `Multipole`
-    PT_CYLSPLINE,    ///< expansion in azimuthal angle with 2d interpolating splines in (R,z):  `CylSpline`
+    PT_BASISSET    = 16, ///< radial basis-set expansion: `BasisSet`
+    PT_MULTIPOLE   = 32, ///< spherical-harmonic expansion:  `Multipole`
+    PT_CYLSPLINE   = 64, ///< expansion in azimuthal angle with 2d interpolating splines in (R,z):  `CylSpline`
 
     // components of GalPot
-    PT_DISK,         ///< separable disk density model:  `Disk`
-    PT_SPHEROID,     ///< double-power-law 3d density model:  `Spheroid`
-    PT_NUKER,        ///< double-power-law surface density profile: `Nuker`
-    PT_SERSIC,       ///< Sersic profile:  `Sersic`
+    PT_DISK      = 1024, ///< separable disk density model:  `Disk`
+    PT_SPHEROID  = 2048, ///< double-power-law 3d density model:  `Spheroid`
+    PT_NUKER     = 4096, ///< double-power-law surface density profile: `Nuker`
+    PT_SERSIC    = 8192, ///< Sersic profile:  `Sersic`
 
     // analytic potentials that can't be used as source density for a potential expansion
-    PT_LOG,          ///< triaxial logaritmic potential:  `Logarithmic`
-    PT_HARMONIC,     ///< triaxial simple harmonic oscillator:  `Harmonic`
-    PT_KEPLERBINARY, ///< two point masses on a Kepler orbit: `KeplerBinary`
-    PT_UNIFORMACCELERATION,  ///< a spatially uniform but time-dependent acceleration: `UniformAcceleration`
-    PT_EVOLVING,     ///< a time-dependent series of potentials: `Evolving`
+    PT_LOG                 =  65536, ///< triaxial logaritmic potential:  `Logarithmic`
+    PT_HARMONIC            = 131072, ///< triaxial simple harmonic oscillator:  `Harmonic`
+    PT_KEPLERBINARY        = 262144, ///< two point masses on a Kepler orbit: `KeplerBinary`
+    PT_UNIFORMACCELERATION = 524288, ///< a spatially uniform but time-dependent acceleration: `UniformAcceleration`
+    PT_EVOLVING            =1048576, ///< a time-dependent series of potentials: `Evolving`
 
     // analytic potential models that can also be used as source density for a potential expansion
-    PT_NFW,          ///< spherical Navarro-Frenk-White profile:  `NFW`
-    PT_MIYAMOTONAGAI,///< axisymmetric Miyamoto-Nagai(1975) model:  `MiyamotoNagai`
-    PT_DEHNEN,       ///< spherical, axisymmetric or triaxial Dehnen(1993) density model:  `Dehnen`
-    PT_FERRERS,      ///< triaxial Ferrers model with finite extent:  `Ferrers`
-    PT_PLUMMER,      ///< spherical Plummer model:  `Plummer`
-    PT_ISOCHRONE,    ///< spherical isochrone model:  `Isochrone`
-    PT_PERFECTELLIPSOID,  ///< axisymmetric model of Kuzmin/de Zeeuw :  `PerfectEllipsoid`
-    PT_KING,         ///< generalized King (lowered isothermal) model, represented by Multipole
+    PT_NFW              =   4194304, ///< spherical Navarro-Frenk-White profile:  `NFW`
+    PT_MIYAMOTONAGAI    =   8388608, ///< axisymmetric Miyamoto-Nagai(1975) model:  `MiyamotoNagai`
+    PT_DEHNEN           =  16777216, ///< spherical, axisymmetric or triaxial Dehnen(1993) density model:  `Dehnen`
+    PT_FERRERS          =  33554432, ///< triaxial Ferrers model with finite extent:  `Ferrers`
+    PT_PLUMMER          =  67108864, ///< spherical Plummer model:  `Plummer`
+    PT_ISOCHRONE        = 134217728, ///< spherical isochrone model:  `Isochrone`
+    PT_PERFECTELLIPSOID = 268435456, ///< axisymmetric model of Kuzmin/de Zeeuw :  `PerfectEllipsoid`
+    PT_KING             = 536870912, ///< generalized King (lowered isothermal) model, represented by Multipole
 };
 
 /// parameters of various density/potential modifiers (not parsed or unit-converted);
@@ -138,19 +138,19 @@ struct AllParam: public ModifierParams
     double binary_ecc;                ///< binary eccentricity
     double binary_phase;              ///< orbital phase of the binary
     // parameters of potential expansions
-    unsigned int gridSizeR;  ///< number of radial grid points in Multipole and CylSpline potentials
-    unsigned int gridSizez;  ///< number of grid points in z-direction for CylSpline potential
-    double rmin, rmax;       ///< inner- and outermost grid node radii for Multipole and CylSpline
-    double zmin, zmax;       ///< grid extent in z direction for CylSpline
-    unsigned int lmax;       ///< number of angular terms in spherical-harmonic expansion
-    unsigned int mmax;       ///< number of angular terms in azimuthal-harmonic expansion
-    double smoothing;        ///< amount of smoothing in Multipole initialized from an N-body snapshot
-    unsigned int nmax;       ///< order of radial expansion for BasisSet (actual number of terms is nmax+1)
-    double eta;              ///< shape parameters of basis functions for BasisSet (0.5-CB, 1.0-HO, etc.)
-    double r0;               ///< scale radius of the basis functions for BasisSet
-    bool fixOrder;           ///< whether to limit the internal SH density expansion to the output order
-    std::string file;        ///< name of a file with coordinates of points, or coefficients of expansion
-    double lengthUnit;       ///< dimensional length unit for Logarithmic (taken from ExternalUnits)
+    unsigned int gridSizeR; ///< number of radial grid points in Multipole and CylSpline potentials
+    unsigned int gridSizez; ///< number of grid points in z-direction for CylSpline potential
+    unsigned int nmax;      ///< order of radial expansion for BasisSet (actual number of terms is nmax+1)
+    unsigned int lmax;      ///< number of angular terms in spherical-harmonic expansion
+    unsigned int mmax;      ///< number of angular terms in azimuthal-harmonic expansion
+    double rmin, rmax;      ///< inner- and outermost grid node radii for Multipole and CylSpline
+    double zmin, zmax;      ///< grid extent in z direction for CylSpline
+    double smoothing;       ///< amount of smoothing in Multipole initialized from an N-body snapshot
+    double eta;             ///< shape parameters of basis functions for BasisSet (0.5-CB, 1.0-HO, etc.)
+    double r0;              ///< scale radius of the basis functions for BasisSet
+    bool fixOrder;          ///< whether to limit the internal SH density expansion to the output order
+    std::string file;       ///< name of a file with coordinates of points, or coefficients of expansion
+    double lengthUnit;      ///< dimensional length unit for Logarithmic (taken from ExternalUnits)
     /// default constructor initializes the fields to some reasonable values
     AllParam(const units::ExternalUnits& converter) :
         ModifierParams(converter),
@@ -162,8 +162,8 @@ struct AllParam: public ModifierParams
         alpha(1.), beta(4.), gamma(1.),
         modulationAmplitude(0.), cutoffStrength(2.), sersicIndex(NAN), W0(NAN), trunc(1.),
         binary_q(0), binary_sma(0), binary_ecc(0), binary_phase(0),
-        gridSizeR(25), gridSizez(25), rmin(0), rmax(0), zmin(0), zmax(0),
-        lmax(6), mmax(6), smoothing(1.), nmax(12), eta(1.0), r0(0), fixOrder(false), lengthUnit(1)
+        gridSizeR(25), gridSizez(25), nmax(12), lmax(6), mmax(6), rmin(0), rmax(0), zmin(0), zmax(0),
+        smoothing(1.), eta(1.0), r0(0), fixOrder(false), lengthUnit(1)
     {}
 };
 
@@ -250,6 +250,60 @@ namespace{
 //        ----------------------------------------------------------------------------
 ///@{
 
+/** Extract a value from the array of key=value pairs that matches the given key1 or its synonym key2,
+    and assign it to the corresponding parameter in the AllParam structure if this makes sense.
+*/
+std::string popString(const utils::KeyValueMap& kvmap,
+    std::vector<std::string>& keys, const std::string& key1, const std::string& key2="",
+    bool isAllowed=true, const char* errorMessage=NULL)
+{
+    std::vector<std::string>::iterator found1=keys.end(), found2=keys.end();
+    for(std::vector<std::string>::iterator key=keys.begin(); key!=keys.end(); key++) {
+        if(utils::stringsEqual(*key, key1))
+            found1 = key;
+        if(!key2.empty() && utils::stringsEqual(*key, key2))
+            found2 = key;
+    }
+    if(found1 == keys.end() && found2 == keys.end())
+        return "";
+    if(found1 != keys.end() && found2 != keys.end())
+        throw std::runtime_error(
+            "Duplicate values for synonymous parameters " + *found1 + " and " + *found2);
+    std::vector<std::string>::iterator key = found1 != keys.end() ? found1 : found2;
+    const std::string value = kvmap.getString(*key);
+    if(value.empty())
+        throw std::runtime_error("Empty value for parameter " + *key);
+    if(!isAllowed)
+        throw std::runtime_error(errorMessage!=NULL ? errorMessage:
+            ("Parameter '" + *key + "' is not allowed for the given model").c_str());
+    // remove the parsed parameter from the list of keys
+    keys.erase(key);
+    return value;
+}
+
+inline void assignParam(double& param, const std::string& value, double unit=1.0)
+{
+    if(!value.empty())
+        param = utils::toDouble(value);
+    param *= unit;
+}
+
+inline void assignParam(bool& param, const std::string& value)
+{
+    if(!value.empty())
+        param = utils::toBool(value);
+}
+
+inline void assignParam(unsigned int& param, const std::string& value)
+{
+    if(value.empty())
+        return;
+    int result = utils::toInt(value);
+    if(result < 0)
+        throw std::runtime_error("Parse error: negative value "+value+" is not allowed");
+    param = result;
+}
+
 /** Parse the potential or density parameters contained in a text array of "key=value" pairs.
     \param[in] kvmap  is the array of string pairs "key" and "value", for instance,
     created from command-line arguments, or read from an INI file;
@@ -257,95 +311,151 @@ namespace{
     parameters (such as mass or scale radius) into internal units (may be a trivial converter);
     \return    the structure containing all possible potential/density parameters,
     including the reference to the unit converter, which may be used in subsequent routines
-    to interpret some of the parameters not parsed by this function (e.g. contained in text files)
+    to interpret some of the parameters not parsed by this function (e.g. contained in text files).
+    \throw std::runtime_error if the array contains parameters that are not allowed for the given model,
+    or if there are duplicate values for the same parameter.
 */
 AllParam parseParam(const utils::KeyValueMap& kvmap, const units::ExternalUnits& conv)
 {
     AllParam param(conv);
-    // potential / density params
-    param.potentialType       = getPotentialTypeByName(kvmap.getString("type"));
-    param.densityType         = getPotentialTypeByName(kvmap.getString("density"));
-    param.symmetryType        = getSymmetryTypeByName (kvmap.getString("symmetry"));
-    param.file                = kvmap.getString("file");
-    param.mass                = kvmap.getDouble("mass", param.mass)
-                              * conv.massUnit;
-    param.surfaceDensity      = kvmap.getDoubleAlt("surfaceDensity", "Sigma0", param.surfaceDensity)
-                              * conv.massUnit / pow_2(conv.lengthUnit);
-    param.densityNorm         = kvmap.getDoubleAlt("densityNorm", "rho0", param.densityNorm)
-                              * conv.massUnit / pow_3(conv.lengthUnit);
-    param.scaleRadius         = kvmap.getDoubleAlt("scaleRadius", "rscale", param.scaleRadius)
-                              * conv.lengthUnit;
-    param.scaleHeight         = kvmap.getDoubleAlt("scaleHeight", "scaleRadius2", param.scaleHeight)
-                              * conv.lengthUnit;
-    param.innerCutoffRadius   = kvmap.getDouble("innerCutoffRadius", param.innerCutoffRadius)
-                              * conv.lengthUnit;
-    param.outerCutoffRadius   = kvmap.getDouble("outerCutoffRadius", param.outerCutoffRadius)
-                              * conv.lengthUnit;
-    param.v0                  = kvmap.getDouble("v0", param.v0)
-                              * conv.velocityUnit;
-    param.Omega               = kvmap.getDouble("Omega", param.Omega)
-                              * conv.velocityUnit / conv.lengthUnit;
-    param.axisRatioY          = kvmap.getDoubleAlt("axisRatioY", "p", param.axisRatioY);
-    param.axisRatioZ          = kvmap.getDoubleAlt("axisRatioZ", "q", param.axisRatioZ);
-    param.alpha               = kvmap.getDouble("alpha", param.alpha);
-    param.beta                = kvmap.getDouble("beta",  param.beta);
-    param.gamma               = kvmap.getDouble("gamma", param.gamma);
-    param.modulationAmplitude = kvmap.getDouble("modulationAmplitude", param.modulationAmplitude);
-    param.cutoffStrength      = kvmap.getDoubleAlt("cutoffStrength", "xi", param.cutoffStrength);
-    param.sersicIndex         = kvmap.getDouble("sersicIndex", param.sersicIndex);
-    param.W0                  = kvmap.getDouble("W0", param.W0);
-    param.trunc               = kvmap.getDouble("trunc", param.trunc);
-    param.binary_q            = kvmap.getDouble("binary_q",     param.binary_q);
-    param.binary_sma          = kvmap.getDouble("binary_sma",   param.binary_sma)
-                              * conv.lengthUnit;
-    param.binary_ecc          = kvmap.getDouble("binary_ecc",   param.binary_ecc);
-    param.binary_phase        = kvmap.getDouble("binary_phase", param.binary_phase);
-    param.gridSizeR           = kvmap.getInt   ("gridSizeR", param.gridSizeR);
-    param.gridSizez           = kvmap.getInt   ("gridSizeZ", param.gridSizez);
-    param.rmin                = kvmap.getDouble("rmin", param.rmin)
-                              * conv.lengthUnit;
-    param.rmax                = kvmap.getDouble("rmax", param.rmax)
-                              * conv.lengthUnit;
-    param.zmin                = kvmap.getDouble("zmin", param.zmin)
-                              * conv.lengthUnit;
-    param.zmax                = kvmap.getDouble("zmax", param.zmax)
-                              * conv.lengthUnit;
-    param.lmax                = kvmap.getInt   ("lmax", param.lmax);
-    param.mmax                = kvmap.contains ("mmax") ? kvmap.getInt("mmax") : param.lmax;
-    param.smoothing           = kvmap.getDouble("smoothing", param.smoothing);
-    param.nmax                = kvmap.getInt   ("nmax", param.nmax);
-    param.eta                 = kvmap.getDouble("eta",  param.eta);
-    param.r0                  = kvmap.getDouble("r0",   param.r0)
-                              * conv.lengthUnit;
-    param.fixOrder            = kvmap.getBool  ("fixOrder", param.fixOrder);
-    param.lengthUnit          = conv.lengthUnit;
+    std::vector<std::string> keys = kvmap.keys();
+    // assign parameters, checking that they make sense for the given density/potential type
+    param.potentialType = getPotentialTypeByName(popString(kvmap, keys, "type", "", true));
+    param.densityType   = getPotentialTypeByName(popString(kvmap, keys, "density", "",
+        (param.potentialType == PT_UNKNOWN) ||
+        (param.potentialType & (PT_DENS_SPHHARM | PT_DENS_CYLGRID |
+        PT_BASISSET | PT_MULTIPOLE | PT_CYLSPLINE))));
+    PotentialType type  = param.densityType != PT_UNKNOWN ? param.densityType : param.potentialType;
+    bool massProvided = kvmap.contains("mass");
+    assignParam(param.mass,                popString(kvmap, keys, "mass", "",
+        type & (PT_DISK | PT_SPHEROID | PT_NUKER | PT_SERSIC | PT_KEPLERBINARY |
+        PT_NFW | PT_MIYAMOTONAGAI | PT_DEHNEN | PT_FERRERS | PT_PLUMMER |
+        PT_ISOCHRONE | PT_PERFECTELLIPSOID | PT_KING)),
+        conv.massUnit);
+    assignParam(param.surfaceDensity,      popString(kvmap, keys, "surfaceDensity", "Sigma0",
+        (type & (PT_DISK | PT_NUKER | PT_SERSIC)) && !massProvided,
+        massProvided ? "Parameters 'mass' and 'surfaceDensity' are mutually exclusive" : NULL),
+        conv.massUnit / pow_2(conv.lengthUnit));
+    assignParam(param.densityNorm,         popString(kvmap, keys, "densityNorm", "rho0",
+        (type & PT_SPHEROID) && !massProvided,
+        massProvided ? "Parameters 'mass' and 'densityNorm' are mutually exclusive" : NULL),
+        conv.massUnit / pow_3(conv.lengthUnit));
+    assignParam(param.scaleRadius,         popString(kvmap, keys, "scaleRadius", "rscale",
+        type & (PT_DISK | PT_SPHEROID | PT_NUKER | PT_SERSIC | PT_LOG |
+        PT_NFW | PT_MIYAMOTONAGAI | PT_DEHNEN | PT_FERRERS | PT_PLUMMER |
+        PT_ISOCHRONE | PT_PERFECTELLIPSOID | PT_KING)),
+        conv.lengthUnit);
+    assignParam(param.scaleHeight,         popString(kvmap, keys, "scaleHeight", "scaleRadius2",
+        type & (PT_DISK | PT_MIYAMOTONAGAI)),
+        conv.lengthUnit);
+    assignParam(param.innerCutoffRadius,   popString(kvmap, keys, "innerCutoffRadius", "",
+        type & PT_DISK),
+        conv.lengthUnit);
+    assignParam(param.outerCutoffRadius,   popString(kvmap, keys, "outerCutoffRadius", "",
+        type & (PT_SPHEROID | PT_NUKER)),
+        conv.lengthUnit);
+    assignParam(param.v0,                  popString(kvmap, keys, "v0", "",
+        type & PT_LOG),
+        conv.velocityUnit);
+    assignParam(param.Omega,               popString(kvmap, keys, "Omega", "",
+        type & PT_HARMONIC),
+        conv.velocityUnit / conv.lengthUnit);
+    assignParam(param.axisRatioY,          popString(kvmap, keys, "axisRatioY", "p",
+        type & (PT_SPHEROID | PT_NUKER | PT_SERSIC | PT_LOG | PT_HARMONIC | PT_DEHNEN | PT_FERRERS)));
+    assignParam(param.axisRatioZ,          popString(kvmap, keys, "axisRatioZ", "q",
+        type & (PT_SPHEROID | PT_NUKER | PT_SERSIC | PT_LOG | PT_HARMONIC | PT_DEHNEN | PT_FERRERS |
+        PT_PERFECTELLIPSOID)));
+    assignParam(param.alpha,               popString(kvmap, keys, "alpha", "",
+        type & (PT_SPHEROID | PT_NUKER)));
+    assignParam(param.beta,                popString(kvmap, keys, "beta", "",
+        type & (PT_SPHEROID | PT_NUKER)));
+    assignParam(param.gamma,               popString(kvmap, keys, "gamma", "",
+        type & (PT_SPHEROID | PT_NUKER | PT_DEHNEN)));
+    assignParam(param.modulationAmplitude, popString(kvmap, keys, "modulationAmplitude", "",
+        type & PT_DISK));
+    assignParam(param.cutoffStrength,      popString(kvmap, keys, "cutoffStrength", "xi",
+        type & (PT_SPHEROID | PT_NUKER)));
+    assignParam(param.sersicIndex,         popString(kvmap, keys, "sersicIndex", "",
+        type & (PT_DISK | PT_SERSIC)));
+    assignParam(param.W0,                  popString(kvmap, keys, "W0", "",
+        type & PT_KING));
+    assignParam(param.trunc,               popString(kvmap, keys, "trunc", "",
+        type & PT_KING));
+    assignParam(param.binary_q,            popString(kvmap, keys, "binary_q", "",
+        type & PT_KEPLERBINARY));
+    assignParam(param.binary_sma,          popString(kvmap, keys, "binary_sma", "",
+        type & PT_KEPLERBINARY),
+        conv.lengthUnit);
+    assignParam(param.binary_ecc,          popString(kvmap, keys, "binary_ecc", "",
+        type & PT_KEPLERBINARY));
+    assignParam(param.binary_phase,        popString(kvmap, keys, "binary_phase", "",
+        type & PT_KEPLERBINARY));
+    // parameters for the potential expansions
+    assignParam(param.gridSizeR,           popString(kvmap, keys, "gridSizeR", "",
+        param.potentialType & (PT_DENS_SPHHARM | PT_DENS_CYLGRID | PT_MULTIPOLE | PT_CYLSPLINE)));
+    assignParam(param.gridSizez,           popString(kvmap, keys, "gridSizez", "",
+        param.potentialType & (PT_DENS_CYLGRID | PT_CYLSPLINE)));
+    assignParam(param.nmax,                popString(kvmap, keys, "nmax", "",
+        param.potentialType & PT_BASISSET));
+    assignParam(param.lmax,                popString(kvmap, keys, "lmax", "",
+        param.potentialType & (PT_DISK | PT_SPHEROID | PT_NUKER | PT_SERSIC |
+        PT_DENS_SPHHARM | PT_BASISSET | PT_MULTIPOLE)));
+    param.mmax = param.lmax;  // update the default value before atttempting to parse the user-provided one
+    assignParam(param.mmax,                popString(kvmap, keys, "mmax", "",
+        param.potentialType & (PT_DISK | PT_SPHEROID | PT_NUKER | PT_SERSIC |
+        PT_DENS_SPHHARM | PT_DENS_CYLGRID | PT_BASISSET | PT_MULTIPOLE | PT_CYLSPLINE)));
+    assignParam(param.smoothing,           popString(kvmap, keys, "smoothing", "",
+        param.potentialType & PT_MULTIPOLE));
+    assignParam(param.rmin,                popString(kvmap, keys, "rmin", "",
+        param.potentialType & (PT_DENS_SPHHARM | PT_DENS_CYLGRID | PT_MULTIPOLE | PT_CYLSPLINE)),
+        conv.lengthUnit);
+    assignParam(param.rmax,                popString(kvmap, keys, "rmax", "",
+        param.potentialType & (PT_DENS_SPHHARM | PT_DENS_CYLGRID | PT_MULTIPOLE | PT_CYLSPLINE)),
+        conv.lengthUnit);
+    assignParam(param.zmin,                popString(kvmap, keys, "zmin", "",
+        param.potentialType & (PT_DENS_CYLGRID | PT_CYLSPLINE)),
+        conv.lengthUnit);
+    assignParam(param.zmax,                popString(kvmap, keys, "zmax", "",
+        param.potentialType & (PT_DENS_CYLGRID | PT_CYLSPLINE)),
+        conv.lengthUnit);
+    assignParam(param.eta,                 popString(kvmap, keys, "eta", "",
+        param.potentialType & PT_BASISSET));
+    assignParam(param.r0,                  popString(kvmap, keys, "r0", "",
+        param.potentialType & PT_BASISSET),
+        conv.lengthUnit);
+    assignParam(param.fixOrder,            popString(kvmap, keys, "fixOrder", "",
+        param.potentialType & (PT_DENS_SPHHARM | PT_DENS_CYLGRID |
+        PT_BASISSET | PT_MULTIPOLE | PT_CYLSPLINE)));
+    param.symmetryType = getSymmetryTypeByName(popString(kvmap, keys, "symmetry", "",
+        (param.potentialType & (PT_BASISSET | PT_MULTIPOLE | PT_CYLSPLINE)) &&
+        (param.densityType == PT_UNKNOWN /* no density model is provided */),
+        "Parameter 'symmetry' is only allowed for potential expansions constructed from "
+        "an N-body snapshot or from a user-defined density or potential model"));
 
-    // tweak: if 'type' is Plummer or NFW, but axis ratio is not unity or a cutoff radius is provided,
-    // replace it with an equivalent Spheroid model, because the dedicated potential models
-    // can only be spherical and non-truncated
-    PotentialType type = param.densityType != PT_UNKNOWN ? param.densityType : param.potentialType;
-    if( (type == PT_PLUMMER || type == PT_NFW) &&
-        (param.axisRatioY != 1 || param.axisRatioZ !=1 || param.outerCutoffRadius!=INFINITY) )
-    {
-        param.alpha = type == PT_PLUMMER ? 2 : 1;
-        param.beta  = type == PT_PLUMMER ? 5 : 3;
-        param.gamma = type == PT_PLUMMER ? 0 : 1;
-        if(param.outerCutoffRadius==INFINITY) {
-            param.densityNorm = (type == PT_PLUMMER ? 0.75 : 0.25) / M_PI * param.mass /
-                (pow_3(param.scaleRadius) * param.axisRatioY * param.axisRatioZ);
-        } else
-            param.densityNorm = NAN;    // will determine automatically from the total mass
-        if(param.densityType == type)
-            param.densityType = PT_SPHEROID;
-        else
-            param.potentialType = PT_SPHEROID;
+    // this parameter is allowed only for the Evolving potential, and will be parsed later
+    popString(kvmap, keys, "interpLinear", "linearInterp", param.potentialType == PT_EVOLVING);
+
+    // this parameter may or may not be used; whether it is allowed will be determined later
+    param.file = popString(kvmap, keys, "file");
+
+    // this parameter is used only for the Logarithmic potential, but is not user-assignable
+    param.lengthUnit = conv.lengthUnit;
+
+    // modifier params (not parsed or unit-converted at this stage; allowed for any model)
+    param.center     = popString(kvmap, keys, "center");
+    param.orientation= popString(kvmap, keys, "orientation");
+    param.rotation   = popString(kvmap, keys, "rotation");
+    param.scale      = popString(kvmap, keys, "scale");
+
+    // ensure that no unused (i.e. unknown) parameters remain in the input list
+    if(!keys.empty()) {
+        std::string unknownKeys;
+        for(unsigned int i=0; i<keys.size(); i++)
+            unknownKeys += i>0 ? ", " + keys[i] : keys[i];
+        throw std::runtime_error(
+            "Unknown parameter" + std::string(keys.size()>1 ? "s " : " ") + unknownKeys);
     }
 
-    // modifier params (not parsed or unit-converted at this stage)
-    param.center     = kvmap.getString("center");
-    param.orientation= kvmap.getString("orientation");
-    param.rotation   = kvmap.getString("rotation");
-    param.scale      = kvmap.getString("scale");
     return param;
 }
 
@@ -1560,7 +1670,7 @@ PtrPotential createPotential(
     // the procedure would have been straightforward (iterate over the elements of the input array
     // of parameters and create an instance of potential for each parameter group),
     // if not for two complicating factors:
-    // 1) Elements of the GalPot scheme (disk and spheroid density profiles) are considered
+    // 1) Elements of the GalPot scheme (disk/spheroid/nuker/sersic density profiles) are considered
     // together and create Ndisk+1 potential components:
     // each Disk group is represented by one potential component (DiskAnsatz) and two density
     // components ("residuals") that are added to the list of components of a CompositeDensity;

@@ -1,13 +1,68 @@
 /** \file    potential_utils.h
     \brief   General routines for various tasks associated with potential classes
     \author  Eugene Vasiliev
-    \date    2009-2016
+    \date    2009-2024
 */
 #pragma once
 #include "potential_base.h"
 #include "math_spline.h"
 
 namespace potential{
+
+/** Compute the projected (surface) density, i.e., the integral of rho(X,Y,Z) dZ,
+    with Z being the distance along the line of sight,
+    and the orientation of the observer's coordinate system X,Y,Z relative to the intrinsic
+    coordinate system x,y,z of the density profile is specified by the Euler rotation angles.
+    \param[in] dens is the density profile.
+    \param[in] pos  is the 2d point (X,Y) in the observer's system, centered on the object.
+    \param[in] orientation  specifies the orientation of the observer's coordinate system X,Y,Z
+    with respect to the intrinsic model coordinates, parametrized by three Euler angles;
+    if all three are zero, then X,Y,Z coincide with x,y,z.
+    \return  the integral \f$ \Sigma(X,Y) = \int_{-\infty}^{+\infty} \rho(X,Y,Z) dZ  \f$.
+*/
+double projectedDensity(
+    const BaseDensity& dens, const coord::PosProj& pos, const coord::Orientation& orientation);
+
+/** Compute any combination of the projected potential, gradient and hessian.
+    \param[in] pot  is the potential model.
+    \param[in] pos  is the 2d point (X,Y) in the observer's system, centered on the object.
+    \param[in] orientation  specifies the orientation of the observer's coordinate system X,Y,Z
+    with respect to the intrinsic model coordinates, parametrized by three Euler angles;
+    if all three are zero, then X,Y,Z coincide with x,y,z.
+    \param[out] value  if not NULL, will contain the integral of the potential difference between
+    the lines of sight passing through (X,Y) and (0,0), i.e.,
+    \f$ \int_{-\infty}^{+\infty} [\Phi(X,Y,Z) - \Phi(0,0,Z)] dZ  \f$.
+    \param[out] grad  if not NULL, will contain the integral of the potential gradient
+    \f$ \int_{-\infty}^{+\infty} \partial\Phi(X,Y,Z) / \partial P dZ,  P={X,Y}  \f$;
+    only the X and Y components are computed, the Z component is zero.
+    \param[out] hess  if not NULL, will contain the integral of the potential hessian
+    \f$ \int_{-\infty}^{+\infty} \partial^2\Phi(X,Y,Z) / \partial P \partial Q dZ,  P,Q={X,Y}  \f$;
+    only three components of the hessian are computed (X2, Y2 and XY), remaining ones are zero.
+    \throw std::runtime_error if the projected potential value is requested, but the potential
+    is singular at origin (this is a technical limitation that may be lifted eventually).
+*/
+void projectedEval(
+    const BasePotential& pot, const coord::PosProj& pos, const coord::Orientation& orientation,
+    double *value=NULL, coord::GradCar* grad=NULL, coord::HessCar* hess=NULL);
+
+/** Determine the length and orientation of principal axes of the density profile
+    within a given radius, using the ellipsoidally-weighted moment of inertia.
+    The coefficients of axis stretching kx,ky,kz are determined iteratively,
+    using the [modified] moment of inertia tensor
+    \f$  T_ij = \iiint d^3x \rho(x) x_i x_j  \f$,
+    where the integration is performed over the ellipsoidal region with axes
+    [kx*radius, ky*radius, kz*radius], such that the principal axes of this ellipsoid
+    have a ratio kx:ky:kz, and the orientation of the ellipsoid is also adjusted iteratively.
+    \param[in] dens  is the density profile.
+    \param[in] radius  is the sphericalized radius at which to measure the shape,
+    equal to the geometric mean of three axes of the actual ellipsoidal region.
+    \param[out] axes  will contain the three dimensionless coefficients of axis stretching,
+    kx,ky,kz (in decreasing order), with the product of three coefficients equal to unity.
+    \param[out] angles  if not NULL, will contain the three Euler rotation angles
+    describing the orientation of the ellipsoid.
+*/
+void principalAxes(const BaseDensity& dens, double radius,
+    /*output*/ double axes[3], double angles[3]=NULL);
 
 /** Compute the circular velocity \$ v_{circ} = \sqrt{R d\Phi/dR} \$ 
     at the given cylindrical radius R in the equatorial plane;

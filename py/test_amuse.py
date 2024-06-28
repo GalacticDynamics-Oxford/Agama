@@ -1,10 +1,14 @@
 #!/usr/bin/python
 
-from amuse.community.agama.interface import Agama
-from amuse.units import *
-from amuse.test.amusetest import TestWithMPI
-from amuse.ic.plummer import new_plummer_model
-from numpy.random import seed
+try:
+    from amuse.community.agama.interface import Agama
+    from amuse.units import *
+    from amuse.test.amusetest import TestWithMPI
+    from amuse.ic.plummer import new_plummer_model
+    from numpy.random import seed
+except ImportError:
+    import sys
+    sys.exit("\033[1;33mSKIPPED DUE TO AMUSE IMPORT ERROR\033[0m")
 
 class AgamaInterfaceTests(TestWithMPI):
 

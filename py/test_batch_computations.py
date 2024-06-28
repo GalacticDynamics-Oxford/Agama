@@ -57,8 +57,8 @@ agama.setUnits(length=2, velocity=3, mass=4e6)
 
 dens = agama.Density(type='plummer')
 pots = agama.Potential(type='dehnen', gamma=0)  # spherical potential
-potf = agama.Potential(type='plummer', q=0.75)  # flattened potential
-pott = agama.Potential(type='plummer', p=0.75, q=0.5)  # triaxial potential
+potf = agama.Potential(type='spheroid', alpha=2, beta=5, gamma=0, q=0.75)  # flattened Plummer potential
+pott = agama.Potential(type='spheroid', alpha=2, beta=5, gamma=0, p=0.75, q=0.5)  # triaxial Plummer potential
 actf = agama.ActionFinder(potf)
 actm = agama.ActionMapper(potf)
 df0  = agama.DistributionFunction(type='quasispherical', density=pots, potential=pots, r_a=2.0)
@@ -109,8 +109,11 @@ testCond('isArray(pots.force([[1,0,0],[2,0,0]]), (2,3))')  # equivalent
 testCond('isTuple(pots.forceDeriv(1,0,0), 2)')
 testCond('isArray(pots.forceDeriv(1,0,0)[0], (3,))')
 testCond('isArray(pots.forceDeriv(1,0,0)[1], (6,))')
-testCond('isArray(pots.projectedForce(1,0), (2,))')  # similar to projectedDensity, but produces two values for each input point consisting of two numbers
-testCond('isArray(pots.projectedForce([[1,0],[2,0],[3,2]],beta=(0,0,0),gamma=0), (3,2))')  # one can specify angles separately for each input point or one for all (or not specify them at all)
+testCond('isArray(pots.projectedEval(1,0,acc=True), (2,))')  # similar to projectedDensity, but produces two values for each input point consisting of two numbers
+testCond('isTuple(pots.projectedEval(1,1,pot=True,acc=True,der=True), 3)')  # evaluate three quantities at once: potential, acceleration and its derivatives
+testCond('isArray(pots.projectedEval([[1,0],[2,0],[3,2]],acc=True,beta=(0,0,0),gamma=0), (3,2))')  # one can specify angles separately for each input point or one for all (or not specify them at all)
+testCond('isArray(pots.projectedEval([[1,0],[1,2]],pot=True), (2,))')
+testCond('isArray(pots.projectedEval([[1,1],[2,2]],der=True), (2,3))')
 
 testFail('pots.Rcirc(2)')  # need a named argument: E=... or L=...
 testCond('pots.Rcirc(L=0) == 0')  # radius is zero for L==0,

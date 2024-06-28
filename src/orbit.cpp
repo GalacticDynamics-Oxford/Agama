@@ -51,19 +51,19 @@ bool RuntimeTrajectory::processTimestep(const double tbegin, const double tend)
 coord::PosVelCar BaseOrbitIntegrator::run(const double totalTime)
 {
     if(totalTime==0 || !isFinite(totalTime))  // don't bother
-        return getSol(solver.getTime());
+        return getSol(solver->getTime());
     size_t numSteps = 0;
     double sign = totalTime>0 ? +1 : -1;   // integrate forward (+1) or backward (-1) in time
-    double currentTime = solver.getTime(), endTime = totalTime + currentTime;
+    double currentTime = solver->getTime(), endTime = totalTime + currentTime;
     while(true) {
-        if(!(solver.doStep(sign>0 ? +0.0 : -0.0) * sign > 0.)) {
+        if(!(solver->doStep(sign>0 ? +0.0 : -0.0) * sign > 0.)) {
             // signal of error
             FILTERMSG(utils::VL_WARNING,
-                "OrbitIntegrator::integrate", "terminated at t="+utils::toString(currentTime));
+                "OrbitIntegrator", "terminated at t="+utils::toString(currentTime));
             break;
         }
         double prevTime = currentTime;
-        currentTime = fmin(solver.getTime()*sign, endTime*sign) * sign;
+        currentTime = fmin(solver->getTime()*sign, endTime*sign) * sign;
         bool contin = true;
         for(size_t i=0; contin && i<fncs.size(); i++)
             contin &= fncs[i]->processTimestep(prevTime, currentTime);
@@ -78,7 +78,7 @@ void OrbitIntegrator<CoordT>::init(const coord::PosVelCar& ic, double time)
 {
     double posvel[6];
     coord::toPosVel<coord::Car, CoordT>(ic).unpack_to(posvel);
-    solver.init(posvel, time);
+    solver->init(posvel, time);
 }
 
 // a different implementation for the cartesian case, where the integration is performed
@@ -88,7 +88,7 @@ void OrbitIntegrator<coord::Car>::init(const coord::PosVelCar& ic, double time)
 {
     double posvel[6];
     if(Omega) {
-        double ca=1, sa=0, t = time==time ? time : solver.getTime();
+        double ca=1, sa=0, t = time==time ? time : solver->getTime();
         math::sincos(Omega * t, sa, ca);
         posvel[0] = ic.x *ca - ic.y *sa;
         posvel[1] = ic.y *ca + ic.x *sa;
@@ -99,7 +99,7 @@ void OrbitIntegrator<coord::Car>::init(const coord::PosVelCar& ic, double time)
     }
     else
         ic.unpack_to(posvel);
-    solver.init(posvel, time);
+    solver->init(posvel, time);
 }
 
 template<>
@@ -107,7 +107,7 @@ coord::PosVelCar OrbitIntegrator<coord::Car>::getSolNative(double time) const
 {
     double data[6];
     for(int i=0; i<6; i++)
-        data[i] = solver.getSol(time, i);
+        data[i] = solver->getSol(time, i);
     if(Omega) {
         // integration is performed in the inertial frame; transform output to the rotating frame
         double ca=1, sa=0;
@@ -124,7 +124,7 @@ coord::PosVelCyl OrbitIntegrator<coord::Cyl>::getSolNative(double time) const
 {
     double data[6];
     for(int i=0; i<6; i++)
-        data[i] = solver.getSol(time, i);
+        data[i] = solver->getSol(time, i);
     if(data[0] < 0) {
         data[2] += M_PI;
         data[0]  = -data[0];
@@ -139,7 +139,7 @@ coord::PosVelSph OrbitIntegrator<coord::Sph>::getSolNative(double time) const
 {
     double data[6];
     for(int i=0; i<6; i++)
-        data[i] = solver.getSol(time, i);
+        data[i] = solver->getSol(time, i);
     double r = data[0];
     double phi = data[2];
     int signr = 1, signt = 1;
@@ -184,6 +184,31 @@ void OrbitIntegrator<coord::Car>::eval(const double time, const double x[], doub
     dxdt[3] = -grad.dx*ca + grad.dy*sa;
     dxdt[4] = -grad.dy*ca - grad.dx*sa;
     dxdt[5] = -grad.dz;
+}
+
+template<typename CoordT>
+void OrbitIntegrator<CoordT>::eval(const double, const double[], double[], double[]) const
+{
+    throw std::runtime_error("Hermite integration in non-Cartesian coordinates is not implemented");
+}
+
+template<>
+void OrbitIntegrator<coord::Car>::eval(const double time, const double xv[],
+    double d2xdt2[], double d3xdt3[]) const
+{
+    if(Omega)
+        throw std::runtime_error("Hermite integration in the rotating frame is not implemented");
+    coord::GradCar grad;
+    coord::HessCar hess;
+    potential.eval(coord::PosCar(xv[0], xv[1], xv[2]), NULL, &grad, &hess, time);
+    // time derivative of velocity
+    d2xdt2[0] = -grad.dx;
+    d2xdt2[1] = -grad.dy;
+    d2xdt2[2] = -grad.dz;
+    // time derivative of acceleration; NB: does not work in the rotating frame!!
+    d3xdt3[0] = -hess.dx2  * xv[3] - hess.dxdy * xv[4] - hess.dxdz * xv[5];
+    d3xdt3[1] = -hess.dxdy * xv[3] - hess.dy2  * xv[4] - hess.dydz * xv[5];
+    d3xdt3[2] = -hess.dxdz * xv[3] - hess.dydz * xv[4] - hess.dz2  * xv[5];
 }
 
 template<>

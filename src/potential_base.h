@@ -505,66 +505,8 @@ inline bool isSpherical(const BaseDensity& dens) {
     return  isSpherical(dens.symmetry()); }
 
 
-/** Compute the projected (surface) density, i.e., the integral of rho(X,Y,Z) dZ,
-    with Z being the distance along the line of sight,
-    and the orientation of the observer's coordinate system X,Y,Z relative to the intrinsic
-    coordinate system x,y,z of the density profile is specified by the Euler rotation angles.
-    \param[in] dens  is the density profile.
-    \param[in] X,Y are the coordinates in the observer's system
-    (still centered on the object but possibly rotated).
-    \param[in] orientation  specifies the orientation of the observer's coordinate system X,Y,Z
-    with respect to the intrinsic model coordinates, parametrized by three Euler angles;
-    if all three are zero, then X,Y,Z coincide with x,y,z.
-    \return  the integral \f$ \Sigma(X,Y) = \int_{-\infty}^{+\infty} \rho(X,Y,Z) dZ  \f$.
-*/
-double projectedDensity(const BaseDensity& dens, double X, double Y,
-    const coord::Orientation& orientation);
-
-/** Compute the projected force, i.e., the integrals of f_{X,Y}(X,Y,Z) dZ,
-    where f_{X,Y} are the two components of potential gradient dPhi/dX, dPhi/dY,
-    Z is the distance along the line of sight,
-    and the orientation of the observer's coordinate system X,Y,Z relative to the intrinsic
-    coordinate system x,y,z of the potential model is specified by the Euler rotation angles.
-    \param[in] pot  is the potential model.
-    \param[in] X,Y are the coordinates in the observer's system
-    (still centered on the object but possibly rotated)
-    \param[in] orientation  specifies the orientation of the observer's coordinate system X,Y,Z
-    with respect to the intrinsic model coordinates, parametrized by three Euler angles;
-    if all three are zero, then X,Y,Z coincide with x,y,z.
-    \param[out] fX  will contain the integral
-    \f$ \int_{-\infty}^{+\infty} \partial\Phi(X,Y,Z) / \partial X dZ  \f$.
-    \param[out] fY  will contain a similar integral for the Y-component of potential gradient;
-    note that fZ is always zero and hence does not need to be computed.
-*/
-void projectedForce(const BasePotential& pot, double X, double Y,
-    const coord::Orientation& orientation, /*output*/ double& fX, double& fY);
-
-
-/** Determine the length and orientation of principal axes of the density profile
-    within a given radius, using the ellipsoidally-weighted moment of inertia.
-    The coefficients of axis stretching kx,ky,kz are determined iteratively,
-    using the [modified] moment of inertia tensor
-    \f$  T_ij = \iiint d^3x \rho(x) x_i x_j  \f$,
-    where the integration is performed over the ellipsoidal region with axes
-    [kx*radius, ky*radius, kz*radius], such that the principal axes of this ellipsoid
-    have a ratio kx:ky:kz, and the orientation of the ellipsoid is also adjusted iteratively.
-    \param[in] dens  is the density profile.
-    \param[in] radius  is the sphericalized radius at which to measure the shape,
-    equal to the geometric mean of three axes of the actual ellipsoidal region.
-    \param[out] axes  will contain the three dimensionless coefficients of axis stretching,
-    kx,ky,kz (in decreasing order), with the product of three coefficients equal to unity.
-    \param[out] angles  if not NULL, will contain the three Euler rotation angles
-    describing the orientation of the ellipsoid.
-*/
-void principalAxes(const BaseDensity& dens, double radius,
-    /*output*/ double axes[3], double angles[3]=NULL);
-
-
 /** Find (spherical) radius corresponding to the given enclosed mass */
 double getRadiusByMass(const BaseDensity& dens, const double enclosedMass);
-
-/** Find the asymptotic power-law index of density profile at r->0 */
-double getInnerDensitySlope(const BaseDensity& dens);
 
 
 /** Scaling transformation for 3-dimensional integration over volume:

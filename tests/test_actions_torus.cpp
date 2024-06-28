@@ -25,7 +25,6 @@
 #include "utils_config.h"
 #include <iostream>
 #include <fstream>
-#include <ctime>
 #include <vector>
 
 const units::InternalUnits unit(units::galactic_Myr);//(1.*units::Kpc, 977.8*units::Myr);

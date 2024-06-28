@@ -86,7 +86,7 @@ public:
 
     /** initialize the code: parse the configuration parameters stored in the dictionary,
         check their correctness, load the input snapshot (if provided) */
-    void init(const utils::KeyValueMap& config);
+    void init(utils::KeyValueMap config);
 
     void initPotentialFromParticles();
 

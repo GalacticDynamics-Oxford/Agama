@@ -195,6 +195,23 @@ std::string pp(double num, unsigned int width);
 inline bool isComment(const char c) { return c=='#' || c==';'; }
 
 
+/*------- time measurement -------*/
+
+/// measurement of elapsed time
+class Timer {
+public:
+    Timer();
+    ~Timer();
+    /// return the number of wall-clock seconds passed since the creation of the object
+    /// (fractional if compiled in C++11 mode, otherwise integer)
+    double deltaSeconds() const;
+private:
+    class Impl;         ///< opaque internal data
+    const Impl* impl;   ///< internal object hiding the implementation details
+    Timer& operator= (const Timer&);  ///< assignment is disabled
+    Timer(const Timer&);              ///< copy constructor is disabled
+};
+
 /*------- convenience function -------*/
 
 /// check if a file with this name exists

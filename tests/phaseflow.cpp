@@ -171,14 +171,23 @@ void printInfo(std::ofstream& strmLog, const double timeSim, const galaxymodel::
     strmLog << '\n';
 }
 
+typedef shared_ptr<utils::KeyValueMap> PtrKeyValueMap;
+
 /// initial density profiles of model components
 std::vector<potential::PtrDensity> densities;
 
 /// construct the density of a single component and initialize its other parameters
-galaxymodel::FokkerPlanckComponent initComponent(const utils::KeyValueMap& args)
+galaxymodel::FokkerPlanckComponent initComponent(utils::KeyValueMap& args)
 {
     galaxymodel::FokkerPlanckComponent comp;
-    std::string density = args.getString("density");
+    comp.Mstar                  = args.popDouble("Mstar", comp.Mstar);
+    comp.captureRadius          = args.popDouble("captureRadius", comp.captureRadius);
+    comp.captureMassFraction    = args.popDouble("captureMassFraction", comp.captureMassFraction);
+    comp.captureRadiusScalingExp= args.popDouble("captureRadiusScalingExp", comp.captureRadiusScalingExp);
+    comp.sourceRate             = args.popDouble("sourceRate", comp.sourceRate);
+    comp.sourceRadius           = args.popDouble("sourceRadius", comp.sourceRadius);
+    // remaining arguments must specify the density profile or a file
+    std::string density         = args.getString("density");
     if(density.empty())
         throw std::invalid_argument("Need to provide density=... parameter");
     if(utils::fileExists(density))
@@ -192,12 +201,6 @@ galaxymodel::FokkerPlanckComponent initComponent(const utils::KeyValueMap& args)
         // this is why there is a global array of PtrDensity pointers
         comp.initDensity.reset(new potential::Sphericalized<potential::BaseDensity>(*densities.back()));
     }
-    comp.Mstar                  = args.getDouble("Mstar", comp.Mstar);
-    comp.captureRadius          = args.getDouble("captureRadius", comp.captureRadius);
-    comp.captureMassFraction    = args.getDouble("captureMassFraction", comp.captureMassFraction);
-    comp.captureRadiusScalingExp= args.getDouble("captureRadiusScalingExp", comp.captureRadiusScalingExp);
-    comp.sourceRate             = args.getDouble("sourceRate", comp.sourceRate);
-    comp.sourceRadius           = args.getDouble("sourceRadius", comp.sourceRadius);
     return comp;
 }
 
@@ -210,14 +213,21 @@ int main(int argc, char* argv[])
 
     // parse command-line arguments:
     // if only one argument was provided and it doesn't have a '=' symbol,
-    // it's assumed to be the name of an INI file with all parameters,
-    // otherwise all parameters are provided as command-line arguments (should have the form key=value).
-    utils::KeyValueMap args;
+    // it's assumed to be the name of an INI file with all parameters stored in one or more sections,
+    // otherwise all parameters are provided as command-line arguments (should have the form key=value),
+    // and in this case they are put into a single section.
+    std::vector<PtrKeyValueMap> sections;
+
+    // section containing the global parameters, should be named [PhaseFlow] in the INI file
+    PtrKeyValueMap globalSection;
+
     // parameters for each species of a multi-component model:
-    // if there is only one, they may be kept in the same INI section [PhaseFlow] as the global params,
+    // if there is only one, they may be kept in the same section as the global params,
     // or if there is no ini file, just provided among other command-line arguments;
-    // alternatively, the INI file should contain one or more sections with a 'density=...' line
-    std::vector<utils::KeyValueMap> compSections;
+    // alternatively, the INI file should contain one or more arbitrarily named sections
+    // with a 'density=...' line
+    std::vector<PtrKeyValueMap> compSections;
+
     // all parameters are combined into a single string forming the header written into the output files
     std::string header="phaseflow";
 
@@ -225,66 +235,67 @@ int main(int argc, char* argv[])
         // parse an INI file
         utils::ConfigFile config(argv[1]);
         std::vector<std::string> secNames = config.listSections();
-        bool haveGlobalParams = false;
         for(unsigned int i=0; i<secNames.size(); i++) {
-            if(secNames[i].empty()) continue;
-            const utils::KeyValueMap& section = config.findSection(secNames[i]);
-            if(utils::stringsEqual(secNames[i], "PhaseFlow")) {
-                haveGlobalParams = true;
-                args = section;
-            }
-            if(section.contains("density"))
-                compSections.push_back(section);
-            header += " " + section.dumpSingleLine();
+            if(secNames[i].empty())
+                continue;
+            sections.push_back(PtrKeyValueMap(new utils::KeyValueMap(config.findSection(secNames[i]))));
+            if(utils::stringsEqual(secNames[i], "PhaseFlow"))
+                globalSection = sections.back();
+            if(sections.back()->contains("density"))  // not mutually exclusive with the above condition
+                compSections.push_back(sections.back());
+            header += " " + sections.back()->dumpSingleLine();
         }
-        if(!haveGlobalParams || compSections.empty())
+        if(!globalSection || compSections.empty())
             throw std::invalid_argument(
                 "INI file should contain a section named [PhaseFlow] with global parameters, "
                 "and one or more sections with a density=... parameter");
     } else {
         // take the command-line arguments themselves (excluding the 0th)
-        args = utils::KeyValueMap(argc-1, argv+1);
-        if(args.contains("density"))
-            compSections.push_back(args);
+        sections.push_back(PtrKeyValueMap(new utils::KeyValueMap(argc-1, argv+1)));
+        globalSection = sections[0];
+        if(sections[0]->contains("density"))
+            compSections.push_back(sections[0]);
         else
             throw std::invalid_argument("Should provide a density=... parameter");
-        header += " " + args.dumpSingleLine();
+        header += " " + globalSection->dumpSingleLine();
     }
 
-    // first parse the global parameters
-    double eps          = args.getDouble   ("eps", 1e-2);
-    double dtmin        = args.getDouble   ("dtmin", 0);
-    double dtmax        = args.getDouble   ("dtmax", INFINITY);
-    bool initBH         = args.getBool     ("initBH", true);
-    double Mbh          = args.getDouble   ("Mbh", 0);
-    std::string fileOut = args.getStringAlt("fileOut", "fileOutput");
-    std::string fileLog = args.getString   ("fileLog", fileOut.empty() ? "" : fileOut+".log");
-    double timeOut      = args.getDoubleAlt("timeOut", "outputInterval", 0);
-    int nstepOut        = args.getInt      ("nstepOut", 0);
-    double timeTotal    = args.getDoubleAlt("time", "timeTotal", 0);
+    // first parse the global parameters, removing the known ones from the KeyValueMap;
+    // if the same section is used for specifying the parameters for the single component,
+    // the remaining parameters should describe its density profile and have no unknown keys.
+    double eps          = globalSection->popDouble   ("eps", 1e-2);
+    double dtmin        = globalSection->popDouble   ("dtmin", 0);
+    double dtmax        = globalSection->popDouble   ("dtmax", INFINITY);
+    bool initBH         = globalSection->popBool     ("initBH", true);
+    double Mbh          = globalSection->popDouble   ("Mbh", 0);
+    std::string fileOut = globalSection->popStringAlt("fileOut", "fileOutput");
+    std::string fileLog = globalSection->popString   ("fileLog", fileOut.empty() ? "" : fileOut+".log");
+    double timeOut      = globalSection->popDoubleAlt("timeOut", "outputInterval", 0);
+    int nstepOut        = globalSection->popInt      ("nstepOut", 0);
+    double timeTotal    = globalSection->popDoubleAlt("time", "timeTotal", 0);
     if(fileOut.empty())
         timeOut = nstepOut = 0;
     if(timeTotal <= 0)
         throw std::invalid_argument("Need to provide timeTotal=... parameter");
     galaxymodel::FokkerPlanckParams params;   // global parameters passed to the FokkerPlanckSolver
-    params.method          = (galaxymodel::FokkerPlanckMethod)args.getInt("method", params.method);
-    params.hmin            = args.getDouble("hmin", params.hmin);
-    params.hmax            = args.getDouble("hmax", params.hmax);
-    params.rmax            = args.getDouble("rmax", params.rmax);
-    params.gridSize        = args.getIntAlt("gridsize", "gridSizeDF", params.gridSize);
-    params.coulombLog      = args.getDouble("coulombLog", params.coulombLog);
+    params.method  = (galaxymodel::FokkerPlanckMethod)globalSection->popInt("method", params.method);
+    params.hmin            = globalSection->popDouble("hmin", params.hmin);
+    params.hmax            = globalSection->popDouble("hmax", params.hmax);
+    params.rmax            = globalSection->popDouble("rmax", params.rmax);
+    params.gridSize        = globalSection->popIntAlt("gridsize", "gridSizeDF", params.gridSize);
+    params.coulombLog      = globalSection->popDouble("coulombLog", params.coulombLog);
     if(params.coulombLog <= 0)
         throw std::invalid_argument("Need to provide coulombLog=... parameter "
             "controlling the relaxation rate (10 is a reasonable fiducial value)");
-    params.selfGravity     = args.getBool  ("selfGravity", params.selfGravity);
-    params.updatePotential = args.getBool  ("updatePotential", params.updatePotential);
-    params.lossConeDrain   = args.getBool  ("lossCone", params.lossConeDrain);
-    params.speedOfLight    = args.getDouble("speedOfLight", params.speedOfLight);
+    params.selfGravity     = globalSection->popBool  ("selfGravity", params.selfGravity);
+    params.updatePotential = globalSection->popBool  ("updatePotential", params.updatePotential);
+    params.lossConeDrain   = globalSection->popBool  ("lossCone", params.lossConeDrain);
+    params.speedOfLight    = globalSection->popDouble("speedOfLight", params.speedOfLight);
 
     // init all model components
     std::vector<galaxymodel::FokkerPlanckComponent> components;
     for(unsigned int i=0; i<compSections.size(); i++)
-        components.push_back(initComponent(compSections[i]));
+        components.push_back(initComponent(*compSections[i]));
 
     // output log file
     std::ofstream strmLog;

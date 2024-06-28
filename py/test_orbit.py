@@ -9,7 +9,7 @@ It also illustrates how this spline interpolation works, using a pure Python
 implementation of the agama.Orbit class.
 A second example demonstrates the computation of orbit derivatives.
 '''
-import numpy, sys
+import numpy, sys, time
 # if the module has been installed to the globally known directory, just import it
 try: import agama
 except ImportError:  # otherwise load the shared library from the parent folder
@@ -89,20 +89,44 @@ class Orbit(object):
         else:
             return self.x[i]
 
-def testAccuracy(pot, ic, time_in_periods, accuracy, Omega=0, ax=None):
+class Check(object):
+    def __init__(self):
+        self.ok = True
+    def __call__(self, value, limit):
+        if value > limit:
+            self.ok = False
+            return '%g \033[1;31m**\033[0m' % value
+        else:
+            return '%g' % value
+    def __nonzero__(self):  # Python 2
+        return self.ok
+    def __bool__(self):     # Python 3
+        return self.ok
 
+def testHermite(pot, ic, time_in_periods, accuracy):
+    check = Check()
+    inttime = pot.Tcirc(ic) * time_in_periods
+    t0 = time.time()
+    orb_dop = agama.orbit(potential=pot, ic=ic, time=inttime, trajsize=0, dtype=float, accuracy=accuracy, method='dop853')[1]
+    t1 = time.time()
+    orb_her = agama.orbit(potential=pot, ic=ic, time=inttime, trajsize=0, dtype=float, accuracy=accuracy, method='hermite')[1]
+    t2 = time.time()
+    E_dop = pot.potential(orb_dop[:,0:3]) + 0.5 * numpy.sum(orb_dop[:,3:6]**2, axis=1)
+    E_her = pot.potential(orb_her[:,0:3]) + 0.5 * numpy.sum(orb_her[:,3:6]**2, axis=1)
+    errE_dop = max(abs(E_dop/E_dop[0]-1))
+    errE_her = max(abs(E_her/E_her[0]-1))
+    print("Orbit integration with dop853,  accuracy %g: %6i steps, time=%.3f s, energy error=%s" %
+        (accuracy, len(orb_dop), t1-t0, check(errE_dop, accuracy**0.5)))
+    print("Orbit integration with hermite, accuracy %g: %6i steps, time=%.3f s, energy error=%s" %
+        (accuracy, len(orb_her), t2-t1, check(errE_her, accuracy**0.5)))
+    return bool(check)
+
+def testAccuracy(pot, ic, time_in_periods, accuracy, Omega=0, ax=None):
+    check = Check()
     time = pot.Tcirc(ic) * time_in_periods
     def JacobiEnergy(orb):
         return ( pot.potential(orb[:,0:3]) + 0.5 * numpy.sum(orb[:,3:6]**2, axis=1)
             -Omega * (orb[:,0] * orb[:,4] - orb[:,1] * orb[:,3]) )
-
-    ok = [True]
-    def check(value, limit):
-        if value > limit:
-            ok[0] = False
-            return '%g \033[1;31m**\033[0m' % value
-        else:
-            return '%g' % value
 
     # "exact" orbit computed with very high accuracy and returned as an agama.Orbit instance
     orb_exact = agama.orbit(potential=pot, ic=ic, time=time, Omega=Omega, dtype=object, accuracy=1e-15)
@@ -162,22 +186,14 @@ def testAccuracy(pot, ic, time_in_periods, accuracy, Omega=0, ax=None):
         ax.set_xlim(0, time)
         ax.set_xlabel('time')
         ax.text(0.5, 0.98, 'accuracy=%g' % accuracy, ha='center', va='top', transform=ax.transAxes)
-    return ok[0]
+    return bool(check)
 
 def testDerivatives(pot, ic, time_in_periods, accuracy, Omega, ax=None):
-
-    ok = [True]
-    def check(value, limit):
-        if value > limit:
-            ok[0] = False
-            return '%g \033[1;31m**\033[0m' % value
-        else:
-            return '%g' % value
-
+    check = Check()
     time = pot.Tcirc(ic) * time_in_periods
     delta_ic = 1e-8 * numpy.random.normal(size=6)  # perturbation to the initial conditions
     orb, der = agama.orbit(potential=pot, ic=[ic, ic+delta_ic], time=time, Omega=Omega,
-        trajsize=1000, dtype=float, accuracy=accuracy, der=True)
+        trajsize=1000, dtype=float, accuracy=accuracy, der=True, verbose=False)
     times = orb[0,0]
     jac = numpy.dstack(der[0])  # size: (trajsize,6,6); jac[i] is the Jacobian matrix at time t[i]
     linear_dif = jac.dot(delta_ic)
@@ -193,7 +209,9 @@ def testDerivatives(pot, ic, time_in_periods, accuracy, Omega, ax=None):
         ax.set_xlim(0, time)
         ax.set_xlabel('time')
         ax.set_ylabel('deviations from initial orbit')
-    return ok[0]
+        ax.text(0.02, 0.98, 'solid - difference between nearby orbits\ndotted - deviation vectors',
+            ha='left', va='top', transform=ax.transAxes)
+    return bool(check)
 
 if __name__ == '__main__':
     plot = len(sys.argv)>1
@@ -203,11 +221,14 @@ if __name__ == '__main__':
     else:
         ax = None, None, None
     agama.setUnits(length=1, velocity=1, mass=1)
-    pot = agama.Potential(type='spheroid', mass=1e10, scaleradius=1, p=0.7, q=0.4)
+    numpy.random.seed(42)
+    pot = agama.Potential(type='spheroid', mass=1e10, scaleradius=1, gamma=1, beta=4, alpha=1, p=0.7, q=0.4)
     ic  = numpy.array([1,0,0.5,0.,50.,0.])
     ok  = testAccuracy(pot, ic, -100, 1e-8,  50., ax[0])  # default accuracy
     ok &= testAccuracy(pot, ic, -100, 1e-10, 50., ax[1])  # higher  accuracy
     ok &= testDerivatives(pot, ic, 100, 1e-8, 50., ax[2])
+    ok &= testHermite(pot, ic, 1000, 1e-4)
+    ok &= testHermite(pot, ic, 1000, 1e-6)
     if plot:
         print('The numerically computed orbit accumulates energy error (green curve) and '
               'gradually deviates from the true orbit due to phase drift(blue curve).\n'

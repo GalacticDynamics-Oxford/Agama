@@ -11,7 +11,12 @@ framework (in particular, Agama does not keep track of units: all angles must be
 and length, velocity and time scales should be in agreement - e.g., if distances are in kpc,
 and velocities are in km/s, then the proper motions are in units of km/s/kpc = 0.211 mas/yr).
 '''
-import numpy, astropy.coordinates as coord, astropy.units as unit
+try:
+    import numpy, astropy.coordinates as coord, astropy.units as unit
+except ImportError:
+    import sys
+    sys.exit("\033[1;33mSKIPPED DUE TO ASTROPY IMPORT ERROR\033[0m")
+
 # if the module has been installed to the globally known directory, just import it
 try: import agama
 except ImportError:  # otherwise load the shared library from the parent folder

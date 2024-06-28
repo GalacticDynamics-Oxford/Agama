@@ -76,7 +76,7 @@ void OdeSolverDOP853::init(const double stateNew[], double timeNew)
     // copy the vector x
     for(int d=0; d<NDIM; d++)
         state[d] = stateNew[d];
-    if(timeNew==timeNew)
+    if(timeNew == timeNew)
         time = timeNew;
     // obtain the derivatives dx/dt
     odeSystem.eval(time, stateNew, /*where to store the derivs*/ &state[NDIM]);
@@ -398,6 +398,100 @@ double OdeSolverDOP853::getSol(double t, unsigned int i) const
     // interpolation coefs rcont1..rcont8 are stored in the 'state' array at various offsets
     return   state[i+2*NDIM] + p * (state[i+3*NDIM] + q * (state[i+4*NDIM] + p * (state[i+5*NDIM] +
         q * (state[i+6*NDIM] + p * (state[i+7*NDIM] + q * (state[i+8*NDIM] + p *  state[i+9*NDIM]))))));
+}
+
+OdeSolverHermite::OdeSolverHermite(const IOdeSystemHermite& _odeSystem, double _accRel) :
+    BaseOdeSolver(_odeSystem),
+    odeSystem(_odeSystem),
+    NDIM(odeSystem.size()),
+    accRel(1.5 * pow(_accRel, 0.2)),  // empirical approximate match to dop853's accuracy parameter
+    timePrev(time), nextTimeStep(0),
+    state(NDIM * 5)
+{}
+
+void OdeSolverHermite::init(const double stateNew[], double timeNew)
+{
+    for(int d=0; d<NDIM; d++)  // copy the vector x
+        state[d+NDIM*2] = stateNew[d];
+    if(timeNew == timeNew)
+        time = timeNew;
+    if(nextTimeStep == 0)  // initial timestep assignment
+        nextTimeStep = initTimeStep(odeSystem, time, stateNew, 0, pow(accRel, 8));
+}
+
+double OdeSolverHermite::doStep(double dt)
+{
+    int numVar = NDIM/2;
+    double
+        *oldpos = &state[0],
+        *oldvel = oldpos + numVar,
+        *oldacc = oldvel + numVar,
+        *oldjrk = oldacc + numVar,
+        *newpos = oldjrk + numVar,
+        *newvel = newpos + numVar,
+        *newacc = newvel + numVar,
+        *newjrk = newacc + numVar,
+        *snap   = newjrk + numVar,
+        *crackle= snap   + numVar;
+    for(int i=0; i<NDIM; i++)
+        state[i] = state[i+NDIM*2];
+    // compute acceleration and jerk at the beginning of step
+    odeSystem.eval(time, oldpos, /*output*/ oldacc, oldjrk);
+    // use the previously estimated timestep if no overriding value is provided
+    double sign = std::signbit(dt) ? -1 : +1;
+    double timeStep = dt!=0 ? dt : nextTimeStep*sign;
+    nextTimeStep = timeStep;
+    int nreject = dt==0 ? 0 : 999;  // if dt is provided, do not attempt to reduce it
+
+    do {
+        dt = nextTimeStep;
+        // predict the coordinates/velocities at the end of timestep
+        for(int i=0; i<numVar; i++) {
+            newpos[i] = oldpos[i] + dt * (oldvel[i] + 0.5 * dt * (oldacc[i] + 1./3 * dt * oldjrk[i]));
+            newvel[i] = oldvel[i] + dt * (oldacc[i] + 0.5 * dt *  oldjrk[i]);
+        }
+        // compute acceleration and jerk at the end of step, using predicted pos/vel
+        odeSystem.eval(time + dt, newpos, /*output*/ newacc, newjrk);
+        double sumasq=0, sumjsq=0, sumssq=0, sumcsq=0;
+        for(int i=0; i<numVar; i++) {
+            // store the estimated values of snap and crackle at the beginning of timestep
+            snap   [i] =-(4 * oldjrk[i] + 2 * newjrk[i]) / dt + 6 * (newacc[i] - oldacc[i]) / pow_2(dt);
+            crackle[i] = 6 * (oldjrk[i] +     newjrk[i] - 2 * (newacc[i] - oldacc[i]) / dt) / pow_2(dt);
+            sumasq += pow_2(newacc[i]);
+            sumjsq += pow_2(newjrk[i]);
+            sumssq += pow_2(snap  [i]);
+            sumcsq += pow_2(crackle[i]);
+        }
+        // compute new timestep using Aarseth's magic criterion
+        nextTimeStep = accRel * sqrt((sqrt(sumasq * sumssq) + sumjsq) / (sqrt(sumjsq * sumcsq) + sumssq));
+        // repeat if new estimate of timestep was substantially less than the actually used one
+    } while(nextTimeStep < dt * 0.5 && ++nreject < 3);
+
+    // compute corrected positions/velocities at the end of timestep
+    for(int i=0; i<numVar; i++) {
+        // first compute corrected velocity, then position - otherwise won't get 4th order accuracy
+        // (see Hut&Makino, The Art of computational science, vol.2, ch.11.4)
+        newvel[i] = oldvel[i] + 0.5 * dt * (oldacc[i] + newacc[i] + 1./6 * dt * (oldjrk[i] - newjrk[i]));
+        newpos[i] = oldpos[i] + 0.5 * dt * (oldvel[i] + newvel[i] + 1./6 * dt * (oldacc[i] - newacc[i]));
+    }
+
+    timePrev = time;
+    time += dt;
+    return dt;
+}
+
+double OdeSolverHermite::getSol(double t, unsigned int ind) const
+{
+    size_t numVar = NDIM/2;  // dimension of either coordinate or momentum vector
+    size_t i = ind % numVar;
+    double deltat = t - timePrev;
+    if(ind < numVar) {  // interpolate position
+        return state[i+0*numVar] + deltat * (state[i+numVar] + deltat/2*(state[i+2*numVar] +
+            deltat/3*(state[i+3*numVar] + deltat/4*(state[i+8*numVar] + deltat/5*state[i+9*numVar]))));
+    } else {  // interpolate velocity
+        return state[i+1*numVar] + deltat*(state[i+2*numVar] + deltat/2*(state[i+3*numVar] +
+            deltat/3*(state[i+8*numVar] + deltat/4*state[i+9*numVar])));
+    }
 }
 
 

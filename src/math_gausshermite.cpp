@@ -68,7 +68,14 @@ std::vector<double> computeClassicMoments(const BaseInterpolator1d& fnc)
         moments[m] = fnc.integrate(fnc.xmin(), fnc.xmax(), m);
     if(moments[0] != 0) {
         moments[1] /= moments[0];
-        moments[2] = sqrt(fmax(0, moments[2] / moments[0] - pow_2(moments[1])));
+        double disp = moments[2] / moments[0] - pow_2(moments[1]);
+        // safety check: for a narrowly peaked function, the second moment may be dominated
+        // by the noise in the tails, rather than the width of the peak itself.
+        // To prevent it from becoming very small or even negative, impose the lower limit
+        // of std.dev. to be the width of one grid cell near the peak of the function.
+        ptrdiff_t ind = std::max((ptrdiff_t)0, std::min((ptrdiff_t)fnc.xvalues().size()-2,
+            math::binSearch(moments[1], &fnc.xvalues()[0], fnc.xvalues().size())));
+        moments[2] = sqrt(fmax(pow_2(fnc.xvalues()[ind+1]-fnc.xvalues()[ind]), disp));
     }
     return moments;
 }
@@ -407,7 +414,7 @@ Matrix<double> computeGaussHermiteMatrix(int N, const std::vector<double>& grid,
         case 3: return computeGaussHermiteMatrix(
             BsplineInterpolator1d<3>(grid), order, ampl, center, width);
         default:
-            throw std::invalid_argument("computeGaussHermiteMatrix: wrong B-spline degree");
+            throw std::invalid_argument("computeGaussHermiteMatrix: invalid B-spline degree");
     }
 }
 

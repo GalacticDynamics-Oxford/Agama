@@ -17,8 +17,40 @@
 #ifdef _MSC_VER
 #pragma warning(disable:4996)  // prevent deprecation error on getenv
 #endif
+#if __cplusplus >= 201103L
+// have a C++11 compatible compiler
+#include <chrono>
+#else
+#include <ctime>
+#endif
+
 
 namespace utils {
+
+class Timer::Impl {
+public:
+#if __cplusplus >= 201103L
+    const std::chrono::time_point<std::chrono::steady_clock> tbegin;
+    Impl() : tbegin(std::chrono::steady_clock::now()) {}
+    double deltaSeconds() const {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - tbegin).count() * 1e-3;
+    }
+#else
+    const std::time_t tbegin;
+    Impl() : tbegin(std::time(NULL)) {}
+    double deltaSeconds() const {
+        return std::difftime(std::time(NULL), tbegin);
+    }
+#endif
+};
+
+Timer::Timer() : impl(new Timer::Impl()) {}
+
+Timer::~Timer() { delete impl; }
+
+double Timer::deltaSeconds() const { return impl->deltaSeconds(); }
+
 
 bool fileExists(const std::string& fileName)
 {

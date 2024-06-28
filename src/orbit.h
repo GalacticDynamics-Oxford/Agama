@@ -112,13 +112,13 @@ public:
 
 /** Assorted parameters of orbit integration */
 struct OrbitIntParams {
-    //math::OdeSolverType solver;///< choice of the ODE integrator (at the moment there is only one)
-    double accuracy;             ///< accuracy parameter for the ODE integrator
-    size_t maxNumSteps;          ///< upper limit on the number of steps of the ODE integrator
+    double accuracy;     ///< accuracy parameter for the ODE integrator
+    size_t maxNumSteps;  ///< upper limit on the number of steps of the ODE integrator
+    bool useHermite;     ///< choice of the ODE integrator
 
     /// assign default values
-    OrbitIntParams(double _accuracy=1e-8, size_t _maxNumSteps=1e8) :
-        accuracy(_accuracy), maxNumSteps(_maxNumSteps) {}
+    OrbitIntParams(double _accuracy=1e-8, size_t _maxNumSteps=1e8, bool _useHermite=false) :
+        accuracy(_accuracy), maxNumSteps(_maxNumSteps), useHermite(_useHermite) {}
 };
 
 /** Interface for the orbit integrator in the given potential, optionally in a reference frame
@@ -155,11 +155,11 @@ struct OrbitIntParams {
     populate it with newly constructed runtime functions that do not have any external references,
     run the orbit, and then close the nested scope block to ensure correct finalization.
 */
-class BaseOrbitIntegrator: public math::IOdeSystem {
+class BaseOrbitIntegrator: public math::IOdeSystemHermite {
     const size_t maxNumSteps;        ///< maximum allowed number of integration steps
     std::vector<PtrRuntimeFnc> fncs; ///< list of runtime functions attached to the given orbit
 protected:
-    math::OdeSolverDOP853 solver;    ///< the actual ODE integrator
+    shared_ptr<math::BaseOdeSolver> solver; ///< the actual ODE integrator
 public:
     /// gravitational potential in which the orbit is computed (accessible to runtime functions)
     const potential::BasePotential& potential;
@@ -172,9 +172,13 @@ public:
         const OrbitIntParams& params)
     :
         maxNumSteps(params.maxNumSteps),
-        solver(*this, params.accuracy),
         potential(_potential), Omega(_Omega)
-    {}
+    {
+        if(params.useHermite)
+            solver.reset(new math::OdeSolverHermite(*this, params.accuracy));
+        else
+            solver.reset(new math::OdeSolverDOP853 (*this, params.accuracy));
+    }
 
     virtual ~BaseOrbitIntegrator() {}
 
@@ -237,6 +241,10 @@ public:
 
     /// IOdeSystem interface: equations of motion
     virtual void eval(const double t, const double x[], double dxdt[]) const;
+
+    /// IOdeSystemHermite interface: equations of motion for the Hermite integrator
+    /// (implemented only in Cartesian coordinates)
+    virtual void eval(const double t, const double x[], double d2xdt2[], double d3xdt3[]) const;
 
     /// IOdeSystem: provide a tighter accuracy tolerance when |Epot| >> |Ekin+Epot|
     /// to improve the total energy conservation

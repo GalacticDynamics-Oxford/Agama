@@ -61,15 +61,15 @@ def makePotentialModel():
 
     # Axisymmetric flattened spheroidal potential for the nuclear star cluster (Chatzopoulos+ 2015)
     params_NSC = dict(type='Spheroid',
-        mass=6.1e7, gamma=0.71, axisRatioZ=0.73,
+        mass=6.1e7, gamma=0.71, beta=4, alpha=1, axisRatioZ=0.73,
         scaleRadius=0.0059, alpha=1, beta=4, outerCutoffRadius=0.1)
 
     # two-component axisymmetric flatten spheroidal potential for the nuclear stellar disk (Sormani+ 2020)
     params_NSD = [
-        dict(type='Spheroid', densityNorm=2.00583e12, gamma=0, beta=0,
+        dict(type='Spheroid', densityNorm=2.00583e12, gamma=0, beta=0, alpha=1,
             axisRatioZ=0.37, outerCutoffRadius=0.00506, cutoffStrength=0.72),
-        dict(type='Spheroid',densityNorm=1.53e12, gamma=0,
-            beta=0, axisRatioZ=0.37, outerCutoffRadius=0.0246, cutoffStrength=0.79) ]
+        dict(type='Spheroid',densityNorm=1.53e12, gamma=0, beta=0, alpha=1,
+            axisRatioZ=0.37, outerCutoffRadius=0.0246, cutoffStrength=0.79) ]
 
     # analytic bar density (Sormani+ 2022)
     dens_bar = makeBarDensity()
@@ -88,7 +88,7 @@ def makePotentialModel():
             innerCutoffRadius=12, sersicIndex=1) ] # molecular gas disk
 
     # Einasto Dark matter potential with rho_{-2} = 2.216e7 Msun/kpc^3 and r_{-2} = 16.42 kpc
-    params_dark = dict(type='Spheroid', densitynorm=2.774e11, beta=0, gamma=0,
+    params_dark = dict(type='Spheroid', densitynorm=2.774e11, gamma=0, beta=0, alpha=1,
         outerCutoffRadius=8.682e-6, cutoffStrength = 0.1704)
 
     # all spheroidal components put into a single axisymmetric Multipole potential

@@ -76,10 +76,10 @@ const char* usage =
     "VERSION=3.0   " __DATE__ "\n";
 
 // print a message and exit
-void printfail(const char* msg)
+inline void printfail(const char* msg)
 {
     std::cerr << msg << '\n';
-    exit(0);
+    exit(1);
 }
 
 // construct the distribution function from an N-body snapshot
@@ -108,24 +108,29 @@ math::LogLogSpline fitSphericalIsotropicDF(const particles::ParticleArrayCar& bo
 // main program begins here
 int main(int argc, char* argv[])
 {
-    if(argc<=1)  // print help and exit
-        printfail(usage);
+    if(argc<=1) {  // print help and exit
+        std::cout << usage;
+        return 0;
+    }
 
-    // parse command-line parameters
+    // combine all command-line arguments to form the output snapshot header
     utils::KeyValueMap args(argc-1, argv+1);
+    std::string header="mkspherical " + args.dumpSingleLine();
+
+    // parse command-line arguments, removing (popping) the processed ones from the key-value map
     std::string inputdensity   = args.getString("density");
-    std::string inputpotential = args.getString("potential");
-    std::string inputsnap      = args.getString("in");
-    std::string outputsnap     = args.getString("out");
-    std::string outputformat   = args.getString("format", "Text");
-    std::string outputtab      = args.getString("tab");
-    int seed      = args.getInt("seed");
-    int nbody     = args.getInt("nbody");
-    int gridsize  = args.getInt("gridsizer", 50);
-    double rmin   = args.getDouble("rmin", 0.);
-    double rmax   = args.getDouble("rmax", 0.);
-    double mbh    = args.getDouble("mbh",  0.);
-    bool extractdf= args.getBool("extractdf", false);
+    std::string inputpotential = args.popString("potential");
+    std::string inputsnap      = args.popString("in");
+    std::string outputsnap     = args.popString("out");
+    std::string outputformat   = args.popString("format", "Text");
+    std::string outputtab      = args.popString("tab");
+    int seed      = args.popInt("seed");
+    int nbody     = args.popInt("nbody");
+    int gridsize  = args.popInt("gridsizer", 50);
+    double rmin   = args.popDouble("rmin", 0.);
+    double rmax   = args.popDouble("rmax", 0.);
+    double mbh    = args.popDouble("mbh",  0.);
+    bool extractdf= args.popBool("extractdf", false);
     if(!(inputsnap.empty() ^ inputdensity.empty()))
         printfail("Must provide either density=... or in=... as input");
     if((!outputsnap.empty() && nbody==0) || (outputsnap.empty() && nbody>0))
@@ -150,6 +155,8 @@ int main(int argc, char* argv[])
             catch(std::exception&) {
                 // try to read the input file as if it contained a DensitySphericalHarmonic model
                 dens = potential::readDensity(inputdensity);
+                // if succeeded, remove the 'density' argument from the list
+                args.unset("density");
             }
         } else
             dens = potential::createDensity(args);
@@ -217,9 +224,6 @@ int main(int argc, char* argv[])
             potential::Sphericalized<potential::BaseDensity>(*dens),
             potential::Sphericalized<potential::BasePotential>(*pot)) :
         fitSphericalIsotropicDF(bodies, *pot, phasevol, gridsize);
-
-    // combine all command-line arguments to form the output snapshot header
-    std::string header="mkspherical " + args.dumpSingleLine();
 
     // now ripe the fruit: create an output table and/or
     // generate an N-body representation of the spherical model

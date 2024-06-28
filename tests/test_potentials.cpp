@@ -252,7 +252,7 @@ bool testPotentialAtPoint(const potential::BasePotential& potential,
 bool testPrincipalAxes(double radius, double p, double q, double alpha, double beta, double gamma)
 {
     const coord::PosCar point(0.5, 0.6, 0.7);  // fiducial point for checking the rotated density
-    const std::string params = "type=spheroid gamma=0";
+    const std::string params = "type=spheroid gamma=0 beta=4 alpha=1";
     potential::PtrDensity den0 = potential::createDensity(utils::KeyValueMap(params +
         " p=" + utils::toString(p, 16) +
         " q=" + utils::toString(q, 16) +
@@ -398,10 +398,10 @@ int main() {
 
     std::vector<potential::PtrPotential> pots;
     addPot(pots, "type=Plummer, mass=10, scaleRadius=5");
-    addPot(pots, "type=Isochrone, mass=1, scaleRadius=");
+    addPot(pots, "type=Isochrone, mass=3, scaleRadius=2");
     addPot(pots, "type=NFW, mass=10, scaleRadius=10");
     addPot(pots, "type=MiyamotoNagai, mass=5, scaleRadius=2, scaleHeight=0.2");
-    addPot(pots, "type=Logarithmic, mass=1, scaleRadius=0.01, p=0.8, q=0.5");
+    addPot(pots, "type=Logarithmic, v0=2, scaleRadius=0.01, p=0.8, q=0.5");
     addPot(pots, "type=Ferrers, mass=1, scaleRadius=0.9, p=0.8, q=0.5");
     addPot(pots, "type=Dehnen, mass=2, scaleRadius=1, gamma=1.5");
     addPot(pots, "type=PerfectEllipsoid, q=0.6");

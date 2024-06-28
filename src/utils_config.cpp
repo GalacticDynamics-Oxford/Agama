@@ -75,63 +75,55 @@ std::string KeyValueMap::getString(const std::string& key, const std::string& de
 std::string KeyValueMap::getStringAlt(const std::string& key1, 
     const std::string& key2, const std::string& defaultValue) const
 {
-    std::string result = getString(key1);
-    if(result.empty())
-        result = getString(key2, defaultValue);
-    return result;
+    if(contains(key1)) {
+        if(contains(key2))
+            throw std::runtime_error(
+                "KeyValueMap: Duplicate values for synonymous parameters " + key1 + " and " + key2);
+        else
+            return getString(key1);
+    } else {
+        if(contains(key2))
+            return getString(key2);
+        else
+            return defaultValue;
+    }
 }
 
 double KeyValueMap::getDouble(const std::string& key, double defaultValue) const
 {
     std::string result = getString(key);
-    if(result.empty())
-        return defaultValue;
-    else
-        return toDouble(result);
+    return result.empty() ? defaultValue : toDouble(result);
 }
 
 double KeyValueMap::getDoubleAlt(const std::string& key1, 
     const std::string& key2, double defaultValue) const
 {
-    std::string result = getString(key1);
-    if(result.empty())
-        return getDouble(key2, defaultValue);
-    else
-        return toDouble(result);
+    std::string result = getStringAlt(key1, key2);
+    return result.empty() ? defaultValue : toDouble(result);
 }
 
 int KeyValueMap::getInt(const std::string& key, int defaultValue) const
 {
     std::string result = getString(key);
-    if(result.empty())
-        return defaultValue;
-    else
-        return toInt(result);
+    return result.empty() ? defaultValue : toInt(result);
 }
 
 int KeyValueMap::getIntAlt(const std::string& key1,
     const std::string& key2, int defaultValue) const
 {
-    std::string result = getString(key1);
-    if(result.empty())
-        return getInt(key2, defaultValue);
-    else
-        return toInt(result);
+    std::string result = getStringAlt(key1, key2);
+    return result.empty() ? defaultValue : toInt(result);
 }
 
 bool KeyValueMap::getBool(const std::string& key, bool defaultValue) const
 {
-    return toBool(getString(key, defaultValue?"True":"False"));
+    return toBool(getString(key, defaultValue ? "True" : "False"));
 }
 
 bool KeyValueMap::getBoolAlt(const std::string& key1,
     const std::string& key2, bool defaultValue) const
 {
-    std::string result = getString(key1);
-    if(result.empty())
-        return toBool(getString(key2, defaultValue?"True":"False"));
-    else
-        return toBool(result);
+    return toBool(getStringAlt(key1, key2, defaultValue ? "True" : "False"));
 }
 
 std::vector<double> KeyValueMap::getDoubleVector(const std::string& key,
@@ -142,7 +134,6 @@ std::vector<double> KeyValueMap::getDoubleVector(const std::string& key,
         return defaultValues;
     else
         return toDoubleVector(splitString(result, ", "));
-
 }
 
 void KeyValueMap::set(const std::string& key, const std::string& value)
@@ -158,7 +149,7 @@ void KeyValueMap::set(const std::string& key, const std::string& value)
 
 void KeyValueMap::set(const std::string& key, const char* value)
 {
-   set(key, std::string(value));
+    set(key, std::string(value));
 }
 
 void KeyValueMap::set(const std::string& key, const double value, unsigned int width)
@@ -186,6 +177,7 @@ bool KeyValueMap::unset(const std::string& key)
     for(unsigned int ik=0; ik<items.size(); ik++)
         if(!items[ik].first.empty() && stringsEqual(items[ik].first, key)) {
             items.erase(items.begin()+ik);
+            modified = true;
             return true;
         }
     return false;

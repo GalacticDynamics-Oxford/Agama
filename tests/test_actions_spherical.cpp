@@ -109,7 +109,7 @@ int main()
     addPot(pots, "type=Spheroid gamma=2.3 beta=2.7 alpha=2 scaleRadius=100000 densitynorm=1");
     allok &= testPotential(potential::Composite(pots));
     // a very shallow potential at small radii
-    addPot(pots, "type=Spheroid gamma=-2.0 beta=4.0 alpha=2.0 densitynorm=0.3183098861837907 gridsizer=64");
+    addPot(pots, "type=Spheroid gamma=-2.0 beta=4.0 alpha=2.0 densitynorm=0.3183098861837907");
     allok &= testPotential(*pots.back());
     // just a typical case: a marginal central singularity
     addPot(pots, "type=Dehnen gamma=2");

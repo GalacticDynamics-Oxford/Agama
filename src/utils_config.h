@@ -41,6 +41,7 @@ public:
     std::string getString(const std::string& key, const std::string& defaultValue="") const;
 
     /// return value from either of the two variants of key
+    /// \throw std::runtime_error if both keys are present in the map
     std::string getStringAlt(const std::string& key1, const std::string& key2,
         const std::string& defaultValue="") const;
 
@@ -69,7 +70,73 @@ public:
     std::vector<double> getDoubleVector(const std::string& key,
         const std::vector<double>& defaultValues) const;
 
-    /// set a string value
+    /// retrieve a string value and remove it from the map if it exists, otherwise return defaultValue
+    std::string popString(const std::string& key, const std::string& defaultValue="") {
+        std::string result = getString(key, defaultValue);
+        unset(key);
+        return result;
+    }
+
+    /// retrieve a floating-point value and remove it from the map if it exists
+    double popDouble(const std::string& key, const double defaultValue=0) {
+        double result = getDouble(key, defaultValue);
+        unset(key);
+        return result;
+    }
+
+    /// retrieve an integer value and remove it from the map if it exists
+    int popInt(const std::string& key, const int defaultValue=0) {
+        int result = getInt(key, defaultValue);
+        unset(key);
+        return result;
+    }
+
+    /// retrieve a boolean value and remove it from the map if it exists
+    bool popBool(const std::string& key, const bool defaultValue=false) {
+        bool result = getBool(key, defaultValue);
+        unset(key);
+        return result;
+    }
+
+    /// retrieve a string value for one of the two alternative keys
+    /// and remove it from the map if it exists, otherwise return defaultValue
+    /// \throw std::runtime_error if both keys are found in the map
+    std::string popStringAlt(const std::string& key1, const std::string& key2,
+        const std::string& defaultValue="") {
+        std::string result = getStringAlt(key1, key2, defaultValue);
+        unset(key1);  // only one of the two alternative keys can be present in the map;
+        unset(key2);  // attempting to unset a non-existent one does nothing
+        return result;
+    }
+
+    /// retrieve a floating-point value for key1 or key2 and remove it from the map if it exists
+    double popDoubleAlt(const std::string& key1, const std::string& key2,
+        const double defaultValue=0) {
+        double result = getDoubleAlt(key1, key2, defaultValue);
+        unset(key1);
+        unset(key2);
+        return result;
+    }
+
+    /// retrieve an integer value for key1 or key2 and remove it from the map if it exists
+    int popIntAlt(const std::string& key1, const std::string& key2,
+        const int defaultValue=0) {
+        int result = getIntAlt(key1, key2, defaultValue);
+        unset(key1);
+        unset(key2);
+        return result;
+    }
+
+    /// retrieve a boolean value for key1 or key2 and remove it from the map if it exists
+    bool popBoolAlt(const std::string& key1, const std::string& key2,
+        const bool defaultValue=false) {
+        bool result = getBoolAlt(key1, key2, defaultValue);
+        unset(key1);
+        unset(key2);
+        return result;
+    }
+
+    /// set a string value (add or replace an existing one)
     void set(const std::string& key, const std::string& value);
 
     /// set a string value
@@ -90,7 +157,9 @@ public:
     /// attempt to delete a key from the list; return true if it existed
     bool unset(const std::string& key);
 
-    /// parse a key=value pair and append it to the map (does not change `modified` flag)
+    /// parse a key=value pair and append it to the map (does not change `modified` flag);
+    /// this method is called to populate the map on construction.
+    /// \throw std::runtime_error if the key already exists in the map
     void add(const char* keyValue);
 
     /// dump the entire map into an array of strings, retaining all entries
@@ -133,6 +202,9 @@ public:
     /// \param[in]  secName  is the section name; if it did not exist, first create an empty section.
     /// \return a non-const reference to a section: it may be used to modify the values in the ini file
     KeyValueMap& findSection(const std::string& secName);
+
+    /// same as the above, but return a read-only reference to an existing section
+    /// \throw std::runtime_error if the section with the given name does not exist
     const KeyValueMap& findSection(const std::string& secName) const;
 
 private:

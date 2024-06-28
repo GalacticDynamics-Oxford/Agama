@@ -148,6 +148,8 @@ class Agama(GravitationalDynamics, GravityFieldCode):
             elif param_name=='particles':
                 self.particles.add_particles(v)
                 #print('added %i particles'%len(v))
+            elif param_name=='channel_type' or param_name=='redirection':
+                pass  # do not confuse Agama with the AMUSE-specific parameters
             else:
                 params.append(param_name+'='+str(v))
         if black_hole_provided and not speed_of_light_provided and unit_converter is not None:

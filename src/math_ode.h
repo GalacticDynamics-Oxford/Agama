@@ -44,6 +44,12 @@ public:
     virtual unsigned int size() const = 0;
 };
 
+class IOdeSystemHermite: public IOdeSystem {
+public:
+    using IOdeSystem::eval;
+    virtual void eval(const double t, const double xv[], double d2xdt2[], double d3xdt3[]) const = 0;
+};
+
 /** Prototype of a function that is used in integration of second-order
     linear ordinary differential equation systems with variable coefficients:
     d2x(t) / dt2 = A(t) x(t) + B(t) dx(t)/dt,
@@ -131,6 +137,28 @@ private:
     double timePrev;             ///< value of time at the beginning of the completed timestep
     double nextTimeStep;         ///< length of next timestep (not the one just completed)
     std::vector<double> state;   ///< 10*NDIM values: x, dx/dt, and 8 interpolation coefs for dense output
+};
+
+
+/** 4th order Hermite scheme with two function evaluations per timestep,
+    requires a special type of ODE system that provides second and third time derivatives of x */
+class OdeSolverHermite: public BaseOdeSolver {
+public:
+    OdeSolverHermite(const IOdeSystemHermite& _odeSystem, double _accRel=1e-8);
+    virtual void init(const double stateNew[], double timeNew=NAN);
+    virtual double doStep(double dt = 0);
+    virtual double getSol(double t, unsigned int ind) const;
+    /// return the estimate for the length of the next timestep
+    /// (the actual timestep may happen to be shorter, if the error is unacceptably large)
+    inline double getTimeStep() const { return nextTimeStep; }
+private:
+    /// the object providing the r.h.s. of the ODE
+    const IOdeSystemHermite& odeSystem; ///< interface for evaluating the acceleration and its derivative
+    const int NDIM;                     ///< number of equations
+    const double accRel;                ///< relative tolerance parameter
+    double timePrev;                    ///< value of time at the beginning of the completed timestep
+    double nextTimeStep;                ///< length of next timestep (not the one just completed)
+    std::vector<double> state;          ///< 5*NDIM values
 };
 
 

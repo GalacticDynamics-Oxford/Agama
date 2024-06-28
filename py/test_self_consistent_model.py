@@ -173,7 +173,7 @@ if __name__ == "__main__":
             verbose = False)
 
         potential_init = agama.Potential(type='spheroid',
-            gamma=1, beta=3, mass=20.0, scaleRadius=5.0, outerCutoffRadius=40.0)
+            gamma=1, beta=3, alpha=1, mass=20.0, scaleRadius=5.0, outerCutoffRadius=40.0)
         df_comp1 = agama.DistributionFunction(type='quasispherical',
             density=potential_init, potential=potential_init)
         df_comp2 = agama.DistributionFunction(type='doublepowerlaw',

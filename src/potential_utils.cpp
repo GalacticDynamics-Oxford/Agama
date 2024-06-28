@@ -6,10 +6,25 @@
 #include <cassert>
 #include <stdexcept>
 #include <fstream>   // for writing debug info
+#ifndef _MSC_VER
+#include <alloca.h>
+#else
+#include <malloc.h>
+#endif
 
 namespace potential{
 
 namespace{  // internal routines
+
+/// if defined, use the integrateNdim routine for computing the projected density;
+/// it takes a somewhat larger number of evaluations, but performs vectorized calls to density()
+#define PROJ_DENSITY_VECTORIZED
+
+/// relative accuracy of integration of projected density/potential
+static const double EPSREL_DENSITY_INT = 1e-4;
+
+/// max. number of density evaluations for multidimensional integration
+static const size_t MAX_NUM_EVAL_INT = 10000;
 
 /// relative accuracy of root-finders for radius
 static const double ACCURACY_ROOT = 1e-10;
@@ -38,6 +53,175 @@ static const int GLORDER1 = 6;   // for shorter segments
 static const int GLORDER2 = 10;  // for larger segments
 /// the choice between short and long segments is determined by the ratio between consecutive nodes
 static const double GLRATIO = 2.0;
+
+// --------- computation of projected density, potential and its derivatives --------- //
+
+/// helper class for integrating the density along the line of sight
+class ProjectedDensityIntegrand: public math::IFunctionNoDeriv, public math::IFunctionNdim {
+    const BaseDensity& dens;  ///< the density model
+    const double X, Y, R;     ///< coordinates in the image plane
+    const coord::Orientation& orientation; ///< converion between intrinsic and observed coords
+public:
+    ProjectedDensityIntegrand(const BaseDensity& _dens, const coord::PosProj& pos,
+        const coord::Orientation& _orientation)
+    :
+        dens(_dens), X(pos.X), Y(pos.Y), R(sqrt(X*X+Y*Y)), orientation(_orientation) {}
+    virtual double value(double s) const
+    {
+        // unscale the input scaled coordinate, which lies in the range (0..1);
+        double dZds, Z = unscale(math::ScalingDoubleInf(R), s, &dZds);
+        return nan2num(dens.density(orientation.fromRotated(coord::PosCar(X, Y, Z))) * dZds);
+    }
+    virtual void eval(const double vars[], double values[]) const {
+        values[0] = value(vars[0]);
+    }
+    // vectorized version of the integrand
+    virtual void evalmany(const size_t npoints, const double vars[], double values[]) const
+    {
+        coord::PosCar* points = static_cast<coord::PosCar*>(alloca(npoints * sizeof(coord::PosCar)));
+        double* dZds = static_cast<double*>(alloca(npoints * sizeof(double)));
+        for(size_t i=0; i<npoints; i++) {
+            double Z = unscale(math::ScalingDoubleInf(R), vars[i], &dZds[i]);
+            points[i] = orientation.fromRotated(coord::PosCar(X, Y, Z));
+        }
+        dens.evalmanyDensityCar(npoints, points, values);
+        for(size_t i=0; i<npoints; i++)
+            values[i] = nan2num(values[i] * dZds[i]);
+    }
+    virtual unsigned int numVars()   const { return 1; }
+    virtual unsigned int numValues() const { return 1; }
+};
+
+/// helper class for integrating the potential, acceleration and its derivatives along the line of sight
+class ProjectedEvalIntegrand: public math::IFunctionNdim {
+    const BasePotential& pot; ///< the potential
+    const double X, Y, R;     ///< coordinates in the image plane
+    const coord::Orientation& orientation;  ///< converion between intrinsic and observed coords
+    const bool needPhi, needGrad, needHess; ///< which quantities are needed
+public:
+    ProjectedEvalIntegrand(const BasePotential& _pot, const coord::PosProj& pos,
+        const coord::Orientation& _orientation, bool _needPhi, bool _needGrad, bool _needHess)
+    :
+        pot(_pot), X(pos.X), Y(pos.Y), R(sqrt(X*X+Y*Y)), orientation(_orientation),
+        needPhi(_needPhi), needGrad(_needGrad), needHess(_needHess)
+    {
+        if(needPhi && !isFinite(pot.value(coord::PosCar(0, 0, 0))) )
+            throw std::runtime_error("Potential must be finite at origin");
+    }
+
+    virtual unsigned int numVars()   const { return 1; }
+    virtual unsigned int numValues() const { return int(needPhi) + 2*int(needGrad) + 3*int(needHess); }
+
+    virtual void eval(const double vars[], double values[]) const
+    {
+        // unscale the input scaled coordinate, which lies in the range (0..1);
+        double dZds, Z = unscale(math::ScalingDoubleInf(R), vars[0], &dZds), Phi, Phi0;
+        coord::GradCar grad_int, grad_obs;  // gradient in the intrinsic and observed systems
+        coord::HessCar hess_int, hess_obs;  // same for hessian
+        pot.eval(orientation.fromRotated(coord::PosCar(X, Y, Z)),
+            needPhi? &Phi : NULL, needGrad? &grad_int : NULL, needHess? &hess_int : NULL);
+        int numOutputs = 0;
+        if(needPhi) {
+            pot.eval(coord::PosCar(0, 0, Z), &Phi0);
+            values[numOutputs++] = nan2num((Phi-Phi0) * dZds);
+        }
+        if(needGrad) {
+            grad_obs = orientation.toRotated(grad_int);
+            values[numOutputs++] = nan2num(grad_obs.dx * dZds);
+            values[numOutputs++] = nan2num(grad_obs.dy * dZds);
+        }
+        if(needHess) {
+            hess_obs = orientation.toRotated(hess_int);
+            values[numOutputs++] = nan2num(hess_obs.dx2  * dZds);
+            values[numOutputs++] = nan2num(hess_obs.dy2  * dZds);
+            values[numOutputs++] = nan2num(hess_obs.dxdy * dZds);
+        }
+    }
+};
+
+/// helper class for computing the principal axes of the ellipsoidally-weighted inertia tensor
+class PrincipalAxesIntegrand: public math::IFunctionNdim {
+    const BaseDensity& dens;        ///< the density model
+    const coord::SymmetryType sym;  ///< cached value of its symmetry
+    const double ax, ay, az;        ///< current estimates of principal axes
+    const coord::Orientation& orientation;  ///< orientation of principal axes
+public:
+    PrincipalAxesIntegrand(const BaseDensity& _dens, double axes[],
+        const coord::Orientation& _orientation)
+    :
+        dens(_dens), sym(_dens.symmetry()),
+        ax(axes[0]), ay(axes[1]), az(axes[2]), orientation(_orientation)
+    {}
+
+    virtual void eval(const double vars[], double values[]) const {  // unused
+        evalmany(1, vars, values);
+    }
+
+    // vectorized version of the integrand
+    virtual void evalmany(const size_t npoints, const double vars[], double values[]) const
+    {
+        // The input point(s) are always taken from one octant in the xyz space,
+        // but depending on the symmetry of the density profile, we may need to add mirrored points.
+        // For simplicity, consider only two cases: triaxial (no need to mirror) and anything else.
+        int ncopies = isTriaxial(sym) ? 1 : 8;
+
+        // 0. allocate various temporary arrays on the stack - no need to delete them manually
+        // positions in cylindrical coords (unscaled from the input variables)
+        coord::PosCar* pos = static_cast<coord::PosCar*>(
+             alloca(npoints * ncopies * sizeof(coord::PosCar)));
+        // jacobian of coordinate transformation at each point (all copies of one point share one jac)
+        double* jac = static_cast<double*>(alloca(npoints * sizeof(double)));
+        // values of density at each point
+        double* val = static_cast<double*>(alloca(npoints * ncopies * sizeof(double)));
+
+        // 1. unscale the input variables and create mirrored copies of each point, if necessary
+        for(size_t i=0; i<npoints; i++) {
+            coord::PosCar postmp = toPosCar(unscaleCoords(&vars[i*3], /*output*/ &jac[i]));
+            postmp.x *= ax;
+            postmp.y *= ay;
+            postmp.z *= az;
+            pos[i*ncopies] = orientation.fromRotated(postmp);
+            if(ncopies == 8) {
+                postmp.z *= -1;
+                pos[i*8+1] = orientation.fromRotated(postmp);
+                postmp.y *= -1;
+                pos[i*8+2] = orientation.fromRotated(postmp);
+                postmp.z *= -1;
+                pos[i*8+3] = orientation.fromRotated(postmp);
+                postmp.x *= -1;
+                pos[i*8+4] = orientation.fromRotated(postmp);
+                postmp.z *= -1;
+                pos[i*8+5] = orientation.fromRotated(postmp);
+                postmp.y *= -1;
+                pos[i*8+6] = orientation.fromRotated(postmp);
+                postmp.z *= -1;
+                pos[i*8+7] = orientation.fromRotated(postmp);
+            }
+        }
+
+        // 2. compute the density for all these points at once
+        dens.evalmanyDensityCar(npoints * ncopies, pos, val);
+
+        // 3. multiply by jacobian and output the density weighted by x_i x_j,
+        // accounting for all mirrored copies of the input point
+        const unsigned int numvals = numValues();
+        std::fill(values, values + npoints * numvals, 0);
+        for(size_t i=0; i < npoints * ncopies; i++) {
+            size_t o = i / ncopies;
+            val[i] *= jac[o];
+            values[o*numvals  ] += nan2num(val[i] * pow_2(pos[i].x));
+            values[o*numvals+1] += nan2num(val[i] * pow_2(pos[i].y));
+            values[o*numvals+2] += nan2num(val[i] * pow_2(pos[i].z));
+            if(numvals==6) {
+                values[o*numvals+3] += nan2num(val[i] * pos[i].x * pos[i].y);
+                values[o*numvals+4] += nan2num(val[i] * pos[i].x * pos[i].z);
+                values[o*numvals+5] += nan2num(val[i] * pos[i].y * pos[i].z);
+            }
+        }
+    }
+    virtual unsigned int numVars()   const { return 3; }
+    virtual unsigned int numValues() const { return isTriaxial(sym) ? 3 : 6; }
+};
 
 // -------- routines for conversion between energy, radius and angular momentum --------- //
 
@@ -287,21 +471,133 @@ public:
 }  // internal namespace
 
 
-std::vector<double> createInterpolationGrid(const BasePotential& potential, double accuracy)
+double projectedDensity(const BaseDensity& dens, const coord::PosProj& pos,
+    const coord::Orientation& orientation)
 {
-    // create a grid in log-radius with spacing depending on the local variation of the potential
-    std::vector<double> grid = math::createInterpolationGrid(ScalePhi(potential), accuracy);
+#ifndef PROJ_DENSITY_VECTORIZED
+    return math::integrateAdaptive(ProjectedDensityIntegrand(dens, X, Y, orientation),
+        0, 1, EPSREL_DENSITY_INT);
+#else
+    // use integrateNdim as the adaptive integration engine with vectorization
+    double xlower[1] = {0}, xupper[1] = {1}, result;
+    math::integrateNdim(ProjectedDensityIntegrand(dens, pos, orientation),
+        xlower, xupper, EPSREL_DENSITY_INT, /*maxNumEval*/ MAX_NUM_EVAL_INT, &result);
+    return result;
+#endif
+}
 
-    // convert to grid in radius
-    for(size_t i=0, size=grid.size(); i<size; i++)
-        grid[i] = exp(grid[i]);
+void projectedEval(
+    const BasePotential& pot, const coord::PosProj& pos, const coord::Orientation& orientation,
+    double *value, coord::GradCar* grad, coord::HessCar* hess)
+{
+    double xlower[1] = {0}, xupper[1] = {1}, result[6], error[6]; int neval;
+    math::integrateNdim(
+        ProjectedEvalIntegrand(pot, pos, orientation, value!=NULL, grad!=NULL, hess!=NULL),
+        xlower, xupper, EPSREL_DENSITY_INT, /*maxNumEval*/ MAX_NUM_EVAL_INT, result, error, &neval);
+    int numOutputs = 0;
+    if(value) {
+        *value = result[numOutputs++];
+    }
+    if(grad) {
+        grad->dx = result[numOutputs++];
+        grad->dy = result[numOutputs++];
+        grad->dz = 0;
+    }
+    if(hess) {
+        hess->dx2  = result[numOutputs++];
+        hess->dy2  = result[numOutputs++];
+        hess->dxdy = result[numOutputs++];
+        hess->dz2  = hess->dxdz = hess->dydz = 0;
+    }
+}
 
-    // erase innermost grid nodes where the value of potential is too close to Phi(0) (within roundoff)
-    double Phi0 = potential.value(coord::PosCyl(0,0,0));
-    while(grid.size() > 2  &&  potential.value(coord::PosCyl(grid[0],0,0)) < Phi0 * (1-MIN_REL_DIFFERENCE))
-        grid.erase(grid.begin());
+void principalAxes(const BaseDensity& dens, double radius,
+    /*output*/ double axes[3], double angles[3])
+{
+    if(isUnknown(dens.symmetry()))
+        throw std::runtime_error("symmetry is not provided");
+    if(isSpherical(dens)) {
+        axes[0] = axes[1] = axes[2] = 1;
+        if(angles)
+            angles[0] = angles[1] = angles[2] = 0;
+        return;
+    }
+    // TODO: need a special treatment of axisymmetric systems
+    double xlower[3] = {0, 0, 0};
+    double xupper[3] = {math::scale(math::ScalingSemiInf(), radius), 0.5, 0.25};
+    double result[6] = {0};
+    coord::Orientation orientation;
+    axes[0] = axes[1] = axes[2] = 1.0;
+    double prev2[3], prev[3]={0};
+    for(int numiter=0, numprev=0; numiter<20; numiter++, numprev++) {
+        for(int i=0; i<3; i++) {
+            prev2[i] = prev[i];
+            prev [i] = axes[i];
+        }
+        math::integrateNdim(PrincipalAxesIntegrand(dens, axes, orientation),
+            xlower, xupper, EPSREL_DENSITY_INT, MAX_NUM_EVAL_INT, result);
+        double norm = 0;
+        for(int i=0; i<6; i++)
+            norm = fmax(norm, fabs(result[i]));
+        math::Matrix<double> inertia(3, 3);
+        inertia(0, 0) = result[0] / norm;
+        inertia(1, 1) = result[1] / norm;
+        inertia(2, 2) = result[2] / norm;
+        inertia(0, 1) = inertia(1, 0) = result[3] / norm;
+        inertia(0, 2) = inertia(2, 0) = result[4] / norm;
+        inertia(1, 2) = inertia(2, 1) = result[5] / norm;
+        math::SVDecomp svd(inertia);  // equivalent to eigendecomposition for symmetric matrices
+        std::vector<double> S = svd.S();
+        math::Matrix<double> U = svd.U();
+        // U may turn out to have determinant of -1 instead of 1,
+        // in which case we need to flip the sign of one column
+        double detU =
+            U(0,0) * (U(1,1) * U(2,2) - U(1,2) * U(2,1)) +
+            U(0,1) * (U(1,2) * U(2,0) - U(1,0) * U(2,2)) +
+            U(0,2) * (U(1,0) * U(2,1) - U(1,1) * U(2,0));
+        if(detU < 0) {
+            U(0,0) *= -1;
+            U(1,0) *= -1;
+            U(2,0) *= -1;
+        }
+        for(int i=0; i<3; i++) {
+            axes[i] = sqrt(S[i]);
+            for(int j=0; j<3; j++)
+                orientation.mat[j*3+i] = U(i, j);
+        }
+        norm = cbrt(axes[0] * axes[1] * axes[2]);
+        for(int i=0; i<3; i++)
+            axes[i] /= norm;
+        if(fabs(prev[0]-axes[0]) + fabs(prev[1]-axes[1]) + fabs(prev[2]-axes[2]) < EPSREL_DENSITY_INT)
+            break;
+        else if(numprev>=2) {
+            // Aitken's acceleration trick - extrapolate the slowly convergent series
+            double extr[3];
+            for(int i=0; i<3; i++)
+                extr[i] = axes[i] - pow_2(axes[i] - prev[i]) / (axes[i] - 2*prev[i] + prev2[i]);
+            // accept the result only if it keeps axes in the same order (precaution)
+            if(extr[0] >= extr[1] && extr[1] >= extr[2] && extr[2] > 0) {
+                norm = cbrt(extr[0] * extr[1] * extr[2]);
+                for(int i=0; i<3; i++)
+                    axes[i] = extr[i] /= norm;
+                numprev = 0;
+            }
+        }
+    }
 
-    return grid;
+    // convert the rotation matrix into Euler angles
+    if(angles) {
+        // this provides angles in the range -pi..pi for alpha & gamma, and 0..pi for beta
+        orientation.toEulerAngles(angles[0], angles[1], angles[2]);
+        // further restrict beta to the range 0..pi/2
+        if(angles[1] > 0.5*M_PI) {
+            angles[1] = M_PI-angles[1];
+            angles[0] = M_PI+angles[0];
+            angles[2] = M_PI-angles[2];
+        }
+        angles[0] = fmod(angles[0]+M_PI, M_PI*2) - M_PI;  // restrict alpha to -pi..pi
+        angles[2] = fmod(angles[2]+M_PI, M_PI);           // restrict gamma to 0..pi
+    }
 }
 
 double v_circ(const BasePotential& potential, double R)
@@ -432,6 +728,23 @@ void findRoots(const BasePotential& pot, double E,
     /*output*/ double &Zm, double &Z1, double &Z2)
 {
     PotentialFinder(pot, E, X, Y, orientation).findRoots(Zm, Z1, Z2);
+}
+
+std::vector<double> createInterpolationGrid(const BasePotential& potential, double accuracy)
+{
+    // create a grid in log-radius with spacing depending on the local variation of the potential
+    std::vector<double> grid = math::createInterpolationGrid(ScalePhi(potential), accuracy);
+
+    // convert to grid in radius
+    for(size_t i=0, size=grid.size(); i<size; i++)
+        grid[i] = exp(grid[i]);
+
+    // erase innermost grid nodes where the value of potential is too close to Phi(0) (within roundoff)
+    double Phi0 = potential.value(coord::PosCyl(0,0,0));
+    while(grid.size() > 2  &&  potential.value(coord::PosCyl(grid[0],0,0)) < Phi0 * (1-MIN_REL_DIFFERENCE))
+        grid.erase(grid.begin());
+
+    return grid;
 }
 
 // -------- Same tasks implemented as an interpolation interface -------- //

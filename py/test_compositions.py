@@ -26,7 +26,7 @@ numpy.array([1,2,3])
 ]
 params = [
 dict(type='disk',         center=centers[0], scaleheight=0.2),
-dict(type='spheroid',     center=centers[0]),
+dict(type='spheroid',     center=centers[0], gamma=1, beta=4, alpha=1),
 dict(type='ferrers',      center=centers[0], p=0.8, q=0.6),
 dict(type='plummer',      center=centers[1]),
 dict(type='sersic',       center=centers[1]),

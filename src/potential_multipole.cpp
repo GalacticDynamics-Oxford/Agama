@@ -455,9 +455,11 @@ void chooseGridRadii(const particles::ParticleArray<coord::PosCyl>& particles,
     determine the coefficients s, U and W.
     Here v = l for the inward and v = -l-1 for the outward extrapolation.
     This corresponds to the density profile extrapolated as rho ~ r^(s-2).
+    A safety measure is to ensure that the slope of l>0 harmonics (s) is no smaller/larger
+    than that of the l=0 (s0) for inward/outward extrapolation.
 */
 void computeExtrapolationCoefs(double Phi1, double Phi2, double dPhi1,
-    double r1, double r2, int v, double& s, double& U, double& W)
+    double r1, double r2, int v, double s0, /*output*/ double& s, double& U, double& W)
 {
     double lnr = log(r2/r1);
     double num1 = r1*dPhi1, num2 = v*Phi1, den1 = Phi1, den2 = Phi2 * exp(-v*lnr);
@@ -486,6 +488,10 @@ void computeExtrapolationCoefs(double Phi1, double Phi2, double dPhi1,
     // or else the potential would grow indefinitely, even as slowly as log(r), which is not allowed
     if(v<0  && (!isFinite(s) || s>=0))
         s = -2;   // results in a r^-4 falloff for the outward density extrapolation
+    if(v>0)   // inward, l>0
+        s = fmax(s, s0);
+    if(v<-1)  // outward, l>0
+        s = fmin(s, s0);
     if(s != v) {  // non-degenerate case of a power-law extrapolation
         U = (r1*dPhi1 - v*Phi1) / (s-v);
         W = (r1*dPhi1 - s*Phi1) / (v-s);
@@ -524,11 +530,8 @@ PtrPotential initAsympt(const std::vector<double>& radii,
     for(unsigned int c=0; c<nc; c++) {
         int l = math::SphHarmIndices::index_l(c);
         computeExtrapolationCoefs(Phi[c][index1], Phi[c][index2], dPhi[c][index1],
-            radii[index1], radii[index2], inner ? l : -l-1,
+            radii[index1], radii[index2], inner ? l : -l-1, /*slope of the l=0 harmonic*/ S[0],
             /*output*/ S[c], U[c], W[c]);
-        // TODO: may need to constrain the slope of l>0 harmonics so that it doesn't exceed
-        // that of the l=0 one; this is enforced in the constructor of PowerLawMultipole,
-        // but the slope should already have been adjusted before computing the coefs U and W.
         if(l==0)
             FILTERMSG(utils::VL_DEBUG, "Multipole",
                 std::string("Power-law index of ")+(inner?"inner":"outer")+
@@ -1395,11 +1398,12 @@ PowerLawMultipole::PowerLawMultipole(double _r0, bool _inner,
     const std::vector<double>& _W) :
     ind(math::getIndicesFromCoefs(_U)), r0sq(_r0*_r0), inner(_inner), S(_S), U(_U), W(_W) 
 {
-    // safeguard against errors in slope determination - 
-    // ensure that all harmonics with l>0 do not asymptotically overtake the principal one (l=0)
+    // safeguard against errors in slope determination -
+    // ensure that all harmonics with l>0 do not asymptotically overtake the principal one (l=0).
+    // update: this is now constrained in computeExtrapolationCoefs, hence the assertion.
     for(unsigned int c=1; c<S.size(); c++)
         if(U[c]!=0 && ((inner && S[c] < S[0]) || (!inner && S[c] > S[0])) )
-            S[c] = S[0];
+            assert(!"invalid slope for l>0 harmonics"); //S[c] = S[0];
 }
 
 void PowerLawMultipole::evalCyl(const coord::PosCyl &pos,
@@ -1508,7 +1512,8 @@ MultipoleInterp1d::MultipoleInterp1d(
     // compute the extrapolation coefficients at small r;
     // if s>0, the potential is finite at r=0 and equal to W
     double s, U, W;
-    computeExtrapolationCoefs(Phi[0][0], Phi[0][1], dPhi[0][0], radii[0], radii[1], 0, /*output*/s, U, W);
+    computeExtrapolationCoefs(Phi[0][0], Phi[0][1], dPhi[0][0], radii[0], radii[1], 0, /*unused*/NAN,
+        /*output*/s, U, W);
     invPhi0 = s>0 ? 1./W : 0;
 
     // set up a logarithmic radial grid
@@ -1669,7 +1674,8 @@ MultipoleInterp2d::MultipoleInterp2d(
     // compute the extrapolation coefficients at small r;
     // if s>0, the potential is finite at r=0 and equal to W
     double s, U, W;
-    computeExtrapolationCoefs(Phi[0][0], Phi[0][1], dPhi[0][0], radii[0], radii[1], 0, /*output*/s, U, W);
+    computeExtrapolationCoefs(Phi[0][0], Phi[0][1], dPhi[0][0], radii[0], radii[1], 0, /*unused*/NAN,
+        /*output*/s, U, W);
     invPhi0 = s>0 ? 1./W : 0;
 
     // set up a 2D grid in ln(r) and tau = cos(theta)/(sin(theta)+1):

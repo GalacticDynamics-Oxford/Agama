@@ -2,7 +2,7 @@
 # illustrate the use of Torus Machine for transformation from action/angle to position/velocity
 import agama, numpy, matplotlib.pyplot as plt
 ax = plt.subplots(2,2, figsize=(15,10))[1]
-pot = agama.Potential(type='Plummer', mass=10, axisratioz=.6)
+pot = agama.Potential(type='Spheroid', gamma=0, beta=5, alpha=2, mass=10, axisratioz=.6)  # flattened Plummer
 act = numpy.array([1.0, 2.0, 3.0])  # Jr, Jz, Jphi - some fiducial values
 am = agama.ActionMapper(pot)  # J,theta -> x,v (Torus)
 af = agama.ActionFinder(pot)  # x,v -> J,theta (Staeckel fudge)

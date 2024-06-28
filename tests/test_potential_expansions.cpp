@@ -76,13 +76,10 @@ PtrPotential createFromFile(
 // test the accuracy of potential, force and density approximation at different radii
 bool testAverageError(const potential::BasePotential& p1, const potential::BasePotential& p2, double eps)
 {
-    double gamma = getInnerDensitySlope(p2);
-    std::string fileName = std::string("test_potential_") + p1.name() + "_" + p2.name() + 
-        "_gamma" + utils::toString(gamma);
     std::ofstream strm;
     if(output) {
-        writePotential(std::string("test_potential_") + p1.name() + "_gamma" + utils::toString(gamma), p1);
-        strm.open(fileName.c_str());
+        writePotential(std::string("test_potential_") + p1.name() + ".ini", p1);
+        strm.open((std::string("test_potential_") + p1.name() + "_" + p2.name()).c_str());
     }
     // total density-weighted rms errors in potential, force and density, and total weight
     double totWeightedDifP=0, totWeightedDifF=0, totWeightedDifD=0, totWeight=0;
@@ -129,12 +126,9 @@ bool testAverageError(const potential::BasePotential& p1, const potential::BaseP
 // test the accuracy of density approximation at different radii
 bool testAverageError(const potential::BaseDensity& p1, const potential::BaseDensity& p2, double eps)
 {
-    double gamma = getInnerDensitySlope(p2);
-    std::string fileName = std::string("test_density_") + p1.name() + "_" + p2.name() + 
-        "_gamma" + utils::toString(gamma);
     std::ofstream strm;
     if(output)
-        strm.open(fileName.c_str());
+        strm.open((std::string("test_density_") + p1.name() + "_" + p2.name()).c_str());
     double totWeightedDif=0, totWeight=0;  // total density-weighted rms error and total weight
     const double dlogR=0.1;
     const int nptbin=5000;

@@ -33,7 +33,6 @@
 #include <iostream>
 #include <fstream>
 #include <cmath>
-#include <ctime>
 #include <stdexcept>
 
 namespace df{
@@ -507,7 +506,7 @@ void printoutInfo(const galaxymodel::SelfConsistentModel& model)
 int main()
 {
     int numIterations=5;
-    std::time_t start_t = std::time(NULL);
+    utils::Timer timer;
     // read parameters from the INI file
     const std::string iniFileName = "../data/SCM_MW.ini";
     utils::ConfigFile ini(iniFileName);
@@ -632,8 +631,8 @@ int main()
         doIteration(model);
         printoutInfo(model);
     }
-    std::time_t finish_t = std::time(NULL);
-    std::cout << finish_t - start_t << " secs to build the model\n";
+    std::cout << utils::toString(timer.deltaSeconds(), 3) + " secs to build the model\n";
+    utils::Timer timer2;
 
     // output various profiles
     galaxymodel::GalaxyModel modelStars(*model.totalPotential, *model.actionFinder, *dfStellar);
@@ -661,5 +660,5 @@ int main()
         *model.components[2]->getDensity(), *model.totalPotential, /*beta*/ 0., /*kappa*/ 1.),
         format, extUnits);
 
-    std::cout << std::time(NULL) - finish_t << " secs to compute diagnostics\n";
+    std::cout << utils::toString(timer2.deltaSeconds(), 3) + " secs to compute diagnostics\n";
 }

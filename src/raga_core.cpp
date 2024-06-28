@@ -10,7 +10,6 @@
 #include <fstream>
 #include <stdexcept>
 #include <algorithm>
-#include <ctime>
 
 namespace raga {
 
@@ -99,7 +98,7 @@ void RagaCore::doEpisode(double episodeLength)
         return;
     utils::msg(utils::VL_MESSAGE, "Raga",
         "Starting episode at time " + utils::toString(paramsRaga.timeCurr));
-    std::time_t wallClockStartEpisode = std::time(NULL);
+    utils::Timer timer;
 
     int numtasks = tasks.size();
     for(int task=0; task<numtasks; task++)
@@ -152,10 +151,9 @@ void RagaCore::doEpisode(double episodeLength)
         }
     }   // end parallel for
 
-    double wallClockDurationEpisode = std::max(1., difftime(std::time(NULL), wallClockStartEpisode));
     utils::msg(utils::VL_MESSAGE, "Raga",
         utils::toString(nbody) + " particles, " +
-        utils::toString(nbody / wallClockDurationEpisode) + " orbits/s");
+        utils::toString(nbody / timer.deltaSeconds()) + " orbits/s");
 
     std::ofstream strmLog;
     if(!paramsRaga.fileLog.empty())
@@ -173,7 +171,8 @@ void RagaCore::doEpisode(double episodeLength)
     }
 }
 
-void RagaCore::init(const utils::KeyValueMap& config)
+// note that "config" is passed by value, since it is modified inside this method
+void RagaCore::init(utils::KeyValueMap config)
 {
     // a header line written in the output file contains all parameters from the ini file
     paramsTrajectory.header = paramsRelaxation.header = "Raga " + config.dumpSingleLine();
@@ -184,22 +183,22 @@ void RagaCore::init(const utils::KeyValueMap& config)
     paramsPotential.rmin      = config.getDouble("rmin", paramsPotential.rmin);
     paramsPotential.rmax      = config.getDouble("rmax", paramsPotential.rmax);
     paramsPotential.lmax      = config.getInt   ("lmax", paramsPotential.lmax);
-    bh.mass  = config.getDouble("Mbh",          bh.mass);
-    bh.q     = config.getDouble("binary_q",     bh.q);
-    bh.sma   = config.getDouble("binary_sma",   bh.sma);
-    bh.ecc   = config.getDouble("binary_ecc",   bh.ecc);
-    bh.phase = config.getDouble("binary_phase", bh.phase);
+    bh.mass  = config.popDouble("Mbh",          bh.mass);
+    bh.q     = config.popDouble("binary_q",     bh.q);
+    bh.sma   = config.popDouble("binary_sma",   bh.sma);
+    bh.ecc   = config.popDouble("binary_ecc",   bh.ecc);
+    bh.phase = config.popDouble("binary_phase", bh.phase);
 
     // global parameters of the simulation
-    paramsRaga.accuracy       = config.getDouble("accuracy",    orbit::OrbitIntParams().accuracy);
-    paramsRaga.maxNumSteps    = config.getDouble("maxNumSteps", orbit::OrbitIntParams().maxNumSteps);
-    paramsRaga.fileInput      = config.getString("fileInput");
-    paramsRaga.fileLog        = config.getString("fileLog",
+    paramsRaga.accuracy       = config.popDouble("accuracy",    orbit::OrbitIntParams().accuracy);
+    paramsRaga.maxNumSteps    = config.popDouble("maxNumSteps", orbit::OrbitIntParams().maxNumSteps);
+    paramsRaga.fileInput      = config.popString("fileInput");
+    paramsRaga.fileLog        = config.popString("fileLog",
         paramsRaga.fileInput.empty() ? "" : paramsRaga.fileInput+".log");
-    paramsRaga.timeEnd        = config.getDouble("timeTotal", paramsRaga.timeEnd);
-    paramsRaga.timeCurr       = config.getDouble("timeInit", paramsRaga.timeCurr);
-    paramsRaga.episodeLength  = config.getDouble("episodeLength", paramsRaga.timeEnd-paramsRaga.timeCurr);
-    paramsRaga.updatePotential= config.getBool  ("updatePotential", paramsRaga.updatePotential);
+    paramsRaga.timeEnd        = config.popDouble("timeTotal", paramsRaga.timeEnd);
+    paramsRaga.timeCurr       = config.popDouble("timeInit", paramsRaga.timeCurr);
+    paramsRaga.episodeLength  = config.popDouble("episodeLength", paramsRaga.timeEnd-paramsRaga.timeCurr);
+    paramsRaga.updatePotential= config.popBool  ("updatePotential", paramsRaga.updatePotential);
     if(!paramsRaga.updatePotential)
         utils::msg(utils::VL_MESSAGE, "Raga", "Potential update is disabled ([Raga]/updatePotential)");
     if(!paramsRaga.fileLog.empty()) {
@@ -208,26 +207,26 @@ void RagaCore::init(const utils::KeyValueMap& config)
     }
 
     // parameters of individual tasks
-    paramsTrajectory.outputFilename = config.getString("fileOutput");
-    paramsPotential. outputFilename = config.getString("fileOutputPotential");
-    paramsRelaxation.outputFilename = config.getString("fileOutputRelaxation");
-    paramsLosscone.  outputFilename = config.getString("fileOutputLosscone");
-    paramsBinary.    outputFilename = config.getString("fileOutputBinary");
+    paramsTrajectory.outputFilename = config.popString("fileOutput");
+    paramsPotential. outputFilename = config.popString("fileOutputPotential");
+    paramsRelaxation.outputFilename = config.popString("fileOutputRelaxation");
+    paramsLosscone.  outputFilename = config.popString("fileOutputLosscone");
+    paramsBinary.    outputFilename = config.popString("fileOutputBinary");
     paramsTrajectory.outputInterval =
     paramsPotential. outputInterval =
-    paramsRelaxation.outputInterval = config.getDouble("outputInterval");
-    paramsTrajectory.outputFormat   = config.getString("fileOutputFormat", paramsTrajectory.outputFormat);
+    paramsRelaxation.outputInterval = config.popDouble("outputInterval");
+    paramsTrajectory.outputFormat   = config.popString("fileOutputFormat", paramsTrajectory.outputFormat);
     if(paramsTrajectory.outputInterval<=0 || paramsTrajectory.outputFilename.empty())
         utils::msg(utils::VL_MESSAGE, "Raga",
             "Snapshot output is disabled ([Raga]/outputInterval, [Raga]/fileOutput)");
     paramsPotential. numSamplesPerEpisode =
     paramsRelaxation.numSamplesPerEpisode =
-        std::max(1, config.getInt("numSamplesPerEpisode", paramsRelaxation.numSamplesPerEpisode));
-    paramsRelaxation.coulombLog       = config.getDouble("coulombLog", paramsRelaxation.coulombLog);
-    paramsRelaxation.gridSizeDF       = config.getInt   ("gridSizeDF", paramsRelaxation.gridSizeDF);
-    paramsLosscone.captureMassFraction= config.getDouble("captureMassFraction", paramsLosscone.captureMassFraction);
+        std::max(1, config.popInt("numSamplesPerEpisode", paramsRelaxation.numSamplesPerEpisode));
+    paramsRelaxation.coulombLog       = config.popDouble("coulombLog", paramsRelaxation.coulombLog);
+    paramsRelaxation.gridSizeDF       = config.popInt   ("gridSizeDF", paramsRelaxation.gridSizeDF);
+    paramsLosscone.captureMassFraction= config.popDouble("captureMassFraction", paramsLosscone.captureMassFraction);
     paramsLosscone.speedOfLight       =
-    paramsBinary.  speedOfLight       = config.getDouble("speedOfLight", paramsBinary.speedOfLight);
+    paramsBinary.  speedOfLight       = config.popDouble("speedOfLight", paramsBinary.speedOfLight);
     if((bh.sma>0 || paramsLosscone.speedOfLight<INFINITY) && bh.mass==0)
         // binary semimajor axis or speed of light were set without a black hole, so it has no effect
         utils::msg(utils::VL_MESSAGE, "Raga", "No central black hole!");
@@ -264,24 +263,18 @@ void RagaCore::init(const utils::KeyValueMap& config)
     if(config.contains("type") || config.contains("file"))
     {   // create a user-defined potential
         paramsRaga.initPotentialExternal = true;
-        if(particles.size() > 0) {
-            std::string type = config.getString("type");
-            if( utils::stringsEqual(type, potential::Multipole::myName()) ||
-                utils::stringsEqual(type, potential::BasisSet ::myName()) ||
-                utils::stringsEqual(type, potential::CylSpline::myName()) )
-            {
-                // if potential type is Multipole or CylSpline, construct it from the input particles
-                utils::msg(utils::VL_MESSAGE, "Raga", "Creating "+type+
-                    " potential from "+utils::toString(particles.size())+" particles and erasing them");
-                ptrPot = potential::createPotential(config, particles);
-                particles.data.clear();
-            } else {
-                utils::msg(utils::VL_MESSAGE, "Raga", "Creating "+type+
-                    " potential ignoring "+utils::toString(particles.size())+" particles");
-                ptrPot = potential::createPotential(config);
-            }
+        std::string type = config.getString("type");
+        if((utils::stringsEqual(type, potential::Multipole::myName()) ||
+            utils::stringsEqual(type, potential::BasisSet ::myName()) ||
+            utils::stringsEqual(type, potential::CylSpline::myName())) &&
+            particles.size() > 0)
+        {
+            utils::msg(utils::VL_MESSAGE, "Raga", "Creating "+type+" potential from "+
+                utils::toString(particles.size())+" particles and erasing them");
+            ptrPot = potential::createPotential(config, particles);
+            particles.data.clear();
         } else {
-            utils::msg(utils::VL_MESSAGE, "Raga", "Creating analytic potential");
+            utils::msg(utils::VL_MESSAGE, "Raga", "Creating "+type+" potential");
             ptrPot = potential::createPotential(config);
         }
     } else {

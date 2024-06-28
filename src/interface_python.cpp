@@ -1398,9 +1398,9 @@ PyObject* allocateOutput(npy_intp numPoints, double* buffer[3]=NULL, int C=0)
     "  scaleHeight=...   scale height of the model (currently applicable to MiyamotoNagai and Disk).\n" \
     "  p=...   or  axisRatioY=...   axis ratio y/x, i.e., intermediate to long axis " \
     "(applicable to triaxial potential models such as Dehnen and Ferrers, " \
-    "and to Spheroid, Nuker or Sersic density models; when used with Plummer and NFW profiles, " \
-    "they are converted into equivalent Spheroid models).\n" \
-    "  q=...   or  axisRatioZ=...   short to long axis (z/x).\n" \
+    "and to Spheroid, Nuker or Sersic density models).\n" \
+    "  q=...   or  axisRatioZ=...   short to long axis (z/x) (applicable to the same model types " \
+    "as above plus the axisymmetric PerfectEllipsoid).\n" \
     "  gamma=...  central cusp slope (applicable for Dehnen, Spheroid or Nuker).\n" \
     "  beta=...   outer density slope (Spheroid or Nuker).\n" \
     "  alpha=...  strength of transition from the inner to the outer slopes (Spheroid or Nuker).\n" \
@@ -1677,6 +1677,7 @@ potential::PtrDensity Density_initFromDict(PyObject* namedArgs)
             throw std::invalid_argument("Argument 'density' must be either a string, "
                 "or an instance of Density class, or a function providing that interface");
         params.unset("density");
+        params.unset("symmetry");
         // create a density expansion (if params['type'] is provided) or use the input density directly,
         // and add any relevant modifiers on top of it (if corresponding params are provided)
         return potential::createDensity(params, dens, *conv);
@@ -1852,9 +1853,9 @@ public:
     virtual void processPoint(npy_intp indexPoint)
     {
         outputBuffer[indexPoint] =
-            projectedDensity(dens,
+            projectedDensity(dens, coord::PosProj(
                 /*X*/ inputBuffer[indexPoint*2  ] * conv->lengthUnit,
-                /*Y*/ inputBuffer[indexPoint*2+1] * conv->lengthUnit,
+                /*Y*/ inputBuffer[indexPoint*2+1] * conv->lengthUnit),
                 coord::Orientation(
                     alpha[indexPoint % alpha.size()],
                     beta [indexPoint % beta .size()],
@@ -2503,6 +2504,7 @@ potential::PtrPotential Potential_initFromDict(PyObject* namedArgs)
             if(params.getString("type").empty())
                 throw std::invalid_argument("'type' argument must be provided");
             params.unset("density");
+            params.unset("symmetry");
             // the constructor of a potential expansion may be evaluating the input density
             // in an OpenMP-parallelized loop, so we need to release GIL beforehand
             PyReleaseGIL unlock;
@@ -2522,6 +2524,7 @@ potential::PtrPotential Potential_initFromDict(PyObject* namedArgs)
             // attempt to construct a potential expansion from a user-provided potential model
             // or use the input potential itself, and possibly add modifiers on top of the result
             params.unset("potential");
+            params.unset("symmetry");
             // possibly passing a user-defined python function to the potential construction routine
             // that may be evaluating it in an OpenMP-parallelized loop, so need to release GIL
             PyReleaseGIL unlock;
@@ -2751,49 +2754,104 @@ PyObject* Potential_forceDeriv(PyObject* self, PyObject* args, PyObject* namedAr
     return FncPotentialForce<true>(args, namedArgs, *((PotentialObject*)self)->pot).run(/*chunk*/1024);
 }
 
-/// compute the projected force for an array of points
-class FncPotentialProjectedForce: public BatchFunction {
+/// compute the projected potential, acceleration and its derivatives for an array of points
+class FncPotentialProjectedEval: public BatchFunction {
     const potential::BasePotential& pot;
-    const std::vector<double> alpha, beta, gamma;
-    double* outputBuffer;
+    const std::vector<double> alpha, beta, gamma; // conversion between observed and intrinsic coords
+    double *outputPot, *outputAcc, *outputDer;    // raw buffers for output quantities
 public:
-    FncPotentialProjectedForce(PyObject* input, PyObject* namedArgs,
+    FncPotentialProjectedEval(PyObject* input, PyObject* namedArgs,
         const potential::BasePotential& _pot) :
         BatchFunction(input, /*input length*/ 2),
         pot(_pot),
         alpha(getOptionalArrayArg(namedArgs, "alpha", numPoints, false)),
         beta (getOptionalArrayArg(namedArgs, "beta" , numPoints, false)),
-        gamma(getOptionalArrayArg(namedArgs, "gamma", numPoints, false))
+        gamma(getOptionalArrayArg(namedArgs, "gamma", numPoints, false)),
+        outputPot(NULL), outputAcc(NULL), outputDer(NULL)
     {
-        if(!PyErr_Occurred()) {
-            outputObject = allocateOutput<2>(numPoints, &outputBuffer);
-            assert(!alpha.empty() && !beta.empty() && !gamma.empty());
+        if(PyErr_Occurred())  // e.g., an error in parsing the angles - keep outputObject=NULL
+            return;
+        assert(!alpha.empty() && !beta.empty() && !gamma.empty());
+        double* outputBuffers[3];
+        bool needPot = toBool(getItemFromPyDict(namedArgs, "pot", true), false);
+        bool needAcc = toBool(getItemFromPyDict(namedArgs, "acc", true), false);
+        bool needDer = toBool(getItemFromPyDict(namedArgs, "der", true), false);
+        if(needPot) {
+            if(needAcc) {
+                if(needDer) {
+                    outputObject = allocateOutput<1, 2, 3>(numPoints, outputBuffers);
+                    outputDer = outputBuffers[2];
+                } else {
+                    outputObject = allocateOutput<1, 2   >(numPoints, outputBuffers);
+                }
+                outputAcc = outputBuffers[1];
+            } else {  // no needAcc
+                if(needDer) {
+                    outputObject = allocateOutput<1,    3>(numPoints, outputBuffers);
+                    outputDer = outputBuffers[1];
+                } else {
+                    outputObject = allocateOutput<1      >(numPoints, outputBuffers);
+                }
+            }
+            outputPot = outputBuffers[0];
+        } else {  // no needPot
+            if(needAcc) {
+                if(needDer) {
+                    outputObject = allocateOutput<   2, 3>(numPoints, outputBuffers);
+                    outputDer = outputBuffers[1];
+                } else {
+                    outputObject = allocateOutput<   2   >(numPoints, outputBuffers);
+                }
+                outputAcc = outputBuffers[0];
+            } else {  // no needAcc
+                if(needDer) {
+                    outputObject = allocateOutput<      3>(numPoints, outputBuffers);
+                    outputDer = outputBuffers[0];
+                } else {
+                    PyErr_SetString(PyExc_RuntimeError, "Nothing to compute!");
+                }
+            }
         }
     }
+
     virtual void processPoint(npy_intp indexPoint)
     {
-        double fX, fY;
-        projectedForce(pot,
+        double Phi;
+        coord::GradCar grad;
+        coord::HessCar hess;
+        projectedEval(pot, coord::PosProj(
             /*X*/ inputBuffer[indexPoint*2  ] * conv->lengthUnit,
-            /*Y*/ inputBuffer[indexPoint*2+1] * conv->lengthUnit,
+            /*Y*/ inputBuffer[indexPoint*2+1] * conv->lengthUnit),
             coord::Orientation(
                 alpha[indexPoint % alpha.size()],
                 beta [indexPoint % beta .size()],
                 gamma[indexPoint % gamma.size()]),
-            /*output*/ fX, fY);
-        outputBuffer[indexPoint*2+0] = -fX / pow_2(conv->velocityUnit);
-        outputBuffer[indexPoint*2+1] = -fY / pow_2(conv->velocityUnit);
+            /*output*/
+            outputPot ? &Phi  : NULL,
+            outputAcc ? &grad : NULL,
+            outputDer ? &hess : NULL);
+        if(outputPot)
+            outputPot[indexPoint] = Phi / pow_2(conv->velocityUnit) * conv->lengthUnit;
+        if(outputAcc) {
+            outputAcc[indexPoint*2+0] = -grad.dx / pow_2(conv->velocityUnit);
+            outputAcc[indexPoint*2+1] = -grad.dy / pow_2(conv->velocityUnit);
+        }
+        if(outputDer) {
+            outputDer[indexPoint*3+0] = -hess.dx2  / pow_2(conv->velocityUnit) / conv->lengthUnit;
+            outputDer[indexPoint*3+1] = -hess.dy2  / pow_2(conv->velocityUnit) / conv->lengthUnit;
+            outputDer[indexPoint*3+2] = -hess.dxdy / pow_2(conv->velocityUnit) / conv->lengthUnit;
+        }
     }
 };
 
-PyObject* Potential_projectedForce(PyObject* self, PyObject* args, PyObject* namedArgs)
+PyObject* Potential_projectedEval(PyObject* self, PyObject* args, PyObject* namedArgs)
 {
     // args may be just two numbers (a single position X,Y), or a Nx2 array of several positions;
-    // namedArgs may be empty or contain up to three rotation angles
-    static const char* keywords[] = {"alpha", "beta", "gamma", NULL};
+    // namedArgs specify which quantities to compute and may contain up to three rotation angles
+    static const char* keywords[] = {"pot", "acc", "der", "alpha", "beta", "gamma", NULL};
     if(!checkNamedArgs(namedArgs, keywords))
         return NULL;
-    return FncPotentialProjectedForce(args, namedArgs, *((PotentialObject*)self)->pot).run(/*chunk*/64);
+    return FncPotentialProjectedEval(args, namedArgs, *((PotentialObject*)self)->pot).run(/*chunk*/64);
 }
 
 /// compute the radius of a circular orbit as a function of energy or Lz
@@ -2942,18 +3000,31 @@ static PyMethodDef Potential_methods[] = {
       "and the matrix of force derivatives stored as dFx/dx,dFy/dy,dFz/dz,dFx/dy,dFy/dz,dFz/dx; "
       "or if the input was an array of N points, then both items in the tuple are 2d arrays "
       "with sizes Nx3 and Nx6, respectively"},
-    { "projectedForce", (PyCFunction)Potential_projectedForce, METH_VARARGS | METH_KEYWORDS,
-      "Compute projected force (integral of the force along the line of sight, computed "
-      "analogously to surface density) at a given point or array of points\n"
+    { "projectedEval", (PyCFunction)Potential_projectedEval, METH_VARARGS | METH_KEYWORDS,
+      "Compute any combination of projected potential, acceleration, and its derivatives "
+      "(integral of the corresponding quantities along the line of sight Z, computed "
+      "analogously to surface density) at a given point X,Y or array of points.\n"
       "Positional arguments: \n"
       "  a pair of floats (X,Y) or a 2d Nx2 array: coordinates in the image plane.\n"
       "Keyword arguments:\n"
+      "  pot (optional, default False): whether to compute the projected potential.\n"
+      "  acc (optional, default False): whether to compute the projected acceleration.\n"
+      "  der (optional, default False): whether to compute the projected acceleration derivatives.\n"
       "  alpha, beta, gamma (optional, default 0): three angles specifying the orientation "
       "of the image plane in the intrinsic coordinate system of the model; "
       "in particular, beta is the inclination angle. "
       "Angles can be single numbers or arrays of the same length as the number of points.\n"
-      "Returns: a tuple of two float (for a single point) or a Nx2 array of floats - the X and Y "
-      "components of force integrated along the line of sight Z perpendicular to the image plane."},
+      "Returns: one, two or three arrays, one for each requested quantity.\n"
+      "Potential is a single number or an array of the same length as the number of input points. "
+      "Since the integral of Phi(X,Y,Z) dZ diverges logarithmically at large |Z|, "
+      "the actual integration is carried out for the potential difference Phi(X,Y,Z)-Phi(0,0,Z), "
+      "and is currently not implemented for potentials that are singular at origin.\n"
+      "Acceleration is two numbers or an array of shape (numpoints,2) containing the X and Y "
+      "components of projected acceleration (partial derivatives of projected potential "
+      "with the minus sign); the Z component is identically zero and is not computed.\n"
+      "Derivatives of acceleration are three numbers (integrals of d2Phi/dX2, d2Phi/dY2, d2Phi/dXdY; "
+      "other components are identically zero and are not computed), "
+      "or an array of shape (numpoints,3).\n"},
     { "Rcirc", (PyCFunction)Potential_Rcirc, METH_VARARGS | METH_KEYWORDS,
       "Find the radius of a circular orbit corresponding to either the given z-component "
       "of angular momentum L or energy E; the potential is averaged over the azimuthal angle (phi) "
@@ -3673,6 +3744,12 @@ df::PtrDistributionFunction DistributionFunction_initInterpolated(PyObject* name
 /// attempt to construct an elementary distribution function from the parameters provided in dictionary
 df::PtrDistributionFunction DistributionFunction_initFromDict(PyObject* namedArgs)
 {
+    // obtain other parameters as key=value pairs
+    utils::KeyValueMap params = convertPyDictToKeyValueMap(namedArgs);
+    if(!params.contains("type"))
+        throw std::invalid_argument("Should provide the type='...' argument");
+    std::string type = params.getString("type");
+
     // density and potential are needed for some types of DF, but are otherwise unnecessary
     PyObject *pot_obj = PyDict_GetItemString(namedArgs, "potential");  // borrowed reference or NULL
     potential::PtrPotential pot;
@@ -3680,6 +3757,7 @@ df::PtrDistributionFunction DistributionFunction_initFromDict(PyObject* namedArg
         pot = getPotential(pot_obj);
         if(!pot)
             throw std::invalid_argument("Argument 'potential' must be a valid Potential object");
+        params.unset("potential");
     }
     PyObject *dens_obj = PyDict_GetItemString(namedArgs, "density");
     potential::PtrDensity dens;
@@ -3687,14 +3765,9 @@ df::PtrDistributionFunction DistributionFunction_initFromDict(PyObject* namedArg
         dens = getDensity(dens_obj);
         if(!dens)
             throw std::invalid_argument("Argument 'density' must be a valid Density object");
+        params.unset("density");
     } else
         dens = pot;
-
-    // obtain other parameters as key=value pairs
-    utils::KeyValueMap params = convertPyDictToKeyValueMap(namedArgs);
-    if(!params.contains("type"))
-        throw std::invalid_argument("Should provide the type='...' argument");
-    std::string type = params.getString("type");
 
 #if 0
     if(utils::stringsEqual(type, "Interp1"))
@@ -7130,6 +7203,10 @@ static const char* docstringOrbit =
     "  accuracy (optional, default 1e-8):  relative accuracy of the ODE integrator.\n"
     "  maxNumSteps (optional, default 1e8):  upper limit on the number of steps in the ODE integrator.\n"
     "  dtype (optional, default 'float32'):  storage data type for trajectories (see below).\n"
+    "  method (optional, string):  choice of the ODE integrator, available variants are "
+    "'dop853' (default; 8th order Runge-Kutta) or 'hermite' (4th order, may be more efficient "
+    "in the regime of low accuracy).\n"
+    "  verbose (optional, default True):  whether to display progress when integrating multiple orbits.\n"
     "Returns:\n"
     "  depending on the arguments, one or a tuple of several data containers (one for each target, "
     "plus an extra one for trajectories if trajsize>0, plus another one for deviation vectors "
@@ -7205,15 +7282,16 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
     double Omega = 0.;
     int haveDer  = 0;
     int haveLyap = 0;
+    int verbose  = 1;
     int dtype = NPY_FLOAT;
     PyObject *ic_obj = NULL, *time_obj = NULL, *timestart_obj = NULL, *pot_obj = NULL,
-        *targets_obj = NULL, *trajsize_obj = NULL, *dtype_obj = NULL;
+        *targets_obj = NULL, *trajsize_obj = NULL, *dtype_obj = NULL, *method_obj = NULL;
     static const char* keywords[] =
-        {"ic", "time", "timestart", "potential", "targets", "trajsize",
-         "der", "lyapunov", "Omega", "accuracy", "maxNumSteps", "dtype", NULL};
-    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "|OOOOOOiiddiO", const_cast<char**>(keywords),
-        &ic_obj, &time_obj, &timestart_obj, &pot_obj, &targets_obj, &trajsize_obj,
-        &haveDer, &haveLyap, &Omega, &params.accuracy, &params.maxNumSteps, &dtype_obj))
+        {"ic", "time", "timestart", "potential", "targets", "trajsize", "der",
+        "lyapunov", "Omega", "accuracy", "maxNumSteps", "dtype", "method", "verbose", NULL};
+    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "|OOOOOOiiddiOOi", const_cast<char**>(keywords),
+        &ic_obj, &time_obj, &timestart_obj, &pot_obj, &targets_obj, &trajsize_obj, &haveDer, &haveLyap,
+        &Omega, &params.accuracy, &params.maxNumSteps, &dtype_obj, &method_obj, &verbose))
         return NULL;
 
     // check if deviation vectors are needed (if yes, the output contains yet another array)
@@ -7225,6 +7303,24 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
     // check if Lyapunov exponent is needed (if yes, the output contains yet another extra item)
     if(haveLyap != 0 && haveLyap != 1) {
         PyErr_SetString(PyExc_TypeError, "Argument 'lyapunov' must be a boolean");
+        return NULL;
+    }
+
+    // choice of orbit integrator
+    if(method_obj != NULL) {
+        std::string method_str = toString(method_obj);
+        if(utils::stringsEqual(method_str, "hermite"))
+            params.useHermite = true;
+        else if(!utils::stringsEqual(method_str, "dop853")) {
+            PyErr_SetString(PyExc_ValueError,
+                "Unknown ODE integation method (valid values are 'dop853' or 'hermite')");
+            return NULL;
+        }
+    }
+
+    // whether to show the progress indicator
+    if(verbose != 0 && verbose != 1) {
+        PyErr_SetString(PyExc_TypeError, "Argument 'verbose' must be a boolean or an int 0/1");
         return NULL;
     }
 
@@ -7427,7 +7523,8 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
 
     // finally, run the orbit integration
     volatile npy_intp numComplete = 0;
-    volatile time_t tprint = time(NULL), tbegin = tprint;
+    utils::Timer timer;
+    double tprint = 0;
     std::string errorMessage;
     if(!fail) {
         // the GIL must be released when running an OpenMP-parallelized loop
@@ -7533,10 +7630,10 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
 #pragma omp atomic
 #endif
             ++numComplete;
-            if(numOrbits > 1) {
-                time_t tnow = time(NULL);
-                if(difftime(tnow, tprint)>=1.) {
-                    tprint = tnow;
+            if(numOrbits > 1 && verbose) {
+                double deltat = timer.deltaSeconds();
+                if(deltat-tprint >= 1) {
+                    tprint = deltat;
                     PyAcquireGIL lock;
                     PySys_WriteStdout("%li/%li orbits complete\r",
                         (long int)numComplete, (long int)numOrbits);
@@ -7545,9 +7642,9 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
             }
         }
     }
-    if(numOrbits > 1)
+    if(numOrbits > 1 && verbose)
         PySys_WriteStdout("%li orbits complete (%.4g orbits/s)\n",
-            (long int)numComplete, numComplete * 1. / difftime(time(NULL), tbegin));
+            (long int)numComplete, numComplete / timer.deltaSeconds());
     if(cbrk.triggered()) {
         fail = true;
         errorMessage = cbrk.message();
