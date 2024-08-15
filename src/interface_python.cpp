@@ -2831,15 +2831,15 @@ public:
             outputAcc ? &grad : NULL,
             outputDer ? &hess : NULL);
         if(outputPot)
-            outputPot[indexPoint] = Phi / pow_2(conv->velocityUnit) * conv->lengthUnit;
+            outputPot[indexPoint] = Phi / (pow_2(conv->velocityUnit) * conv->lengthUnit);
         if(outputAcc) {
             outputAcc[indexPoint*2+0] = -grad.dx / pow_2(conv->velocityUnit);
             outputAcc[indexPoint*2+1] = -grad.dy / pow_2(conv->velocityUnit);
         }
         if(outputDer) {
-            outputDer[indexPoint*3+0] = -hess.dx2  / pow_2(conv->velocityUnit) / conv->lengthUnit;
-            outputDer[indexPoint*3+1] = -hess.dy2  / pow_2(conv->velocityUnit) / conv->lengthUnit;
-            outputDer[indexPoint*3+2] = -hess.dxdy / pow_2(conv->velocityUnit) / conv->lengthUnit;
+            outputDer[indexPoint*3+0] = -hess.dx2  / (pow_2(conv->velocityUnit) / conv->lengthUnit);
+            outputDer[indexPoint*3+1] = -hess.dy2  / (pow_2(conv->velocityUnit) / conv->lengthUnit);
+            outputDer[indexPoint*3+2] = -hess.dxdy / (pow_2(conv->velocityUnit) / conv->lengthUnit);
         }
     }
 };

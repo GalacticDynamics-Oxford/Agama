@@ -60,9 +60,8 @@ def makePotentialModel():
     params_BH = dict(type='Plummer', mass=4.1e6, scaleRadius=1e-3)
 
     # Axisymmetric flattened spheroidal potential for the nuclear star cluster (Chatzopoulos+ 2015)
-    params_NSC = dict(type='Spheroid',
-        mass=6.1e7, gamma=0.71, beta=4, alpha=1, axisRatioZ=0.73,
-        scaleRadius=0.0059, alpha=1, beta=4, outerCutoffRadius=0.1)
+    params_NSC = dict(type='Spheroid', mass=6.1e7, gamma=0.71, beta=4, alpha=1,
+        axisRatioZ=0.73, scaleRadius=0.0059, outerCutoffRadius=0.1)
 
     # two-component axisymmetric flatten spheroidal potential for the nuclear stellar disk (Sormani+ 2020)
     params_NSD = [
