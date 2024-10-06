@@ -56,7 +56,7 @@ gridv_fit = numpy.linspace(vmin, vmax, ngrid)
 integ = agama.bsplineIntegrals(degree, gridv_fit)
 
 def getampl(params):
-    """
+    r"""
     Determine the full array of B-spline amplitudes from the provided array of parameters,
     from the condition  \sum_{k=1}^{N_ampl} integ_k ampl_k = 1.
     """
@@ -144,7 +144,7 @@ histll = numpy.histogram(lastloglike - (currmeanll+nparams*0.5), bins=gridll, de
 plt.plot(gridll.repeat(2)[1:-1], histll.repeat(2))
 plt.plot(gridll, 1/scipy.special.gamma(0.5*nparams) * numpy.maximum(0,-gridll)**(0.5*nparams-1) *
     numpy.exp(gridll), 'r', lw=2)
-plt.xlabel('$\ln L - \ln L_{\sf max}$')
+plt.xlabel(r'$\ln L - \ln L_{\sf max}$')
 plt.savefig('example_vdf_fit_bspline_emcee_corner.png')
 plt.close()
 
@@ -175,9 +175,9 @@ plt.fill_between(gridv_plot, numpy.percentile(profs, 16, axis=0), numpy.percenti
     alpha=0.5, color='g', lw=0)
 plt.plot([numpy.nan], [numpy.nan], c='g', label='B-spline fit%s' % (' (deconvolved)' if addErrors else ''))
 plt.legend(loc='upper left', frameon=False)
-plt.text(0.98, 0.98, '$\overline{v}=%.3f\pm%.3f$' % (numpy.mean(meanv), numpy.std(meanv)),
+plt.text(0.98, 0.98, r'$\overline{v}=%.3f\pm%.3f$' % (numpy.mean(meanv), numpy.std(meanv)),
     ha='right', va='top', transform=plt.gca().transAxes)
-plt.text(0.98, 0.92, '$\sigma=%.3f\pm%.3f$' % (numpy.mean(sigmav), numpy.std(sigmav)),
+plt.text(0.98, 0.92, r'$\sigma=%.3f\pm%.3f$' % (numpy.mean(sigmav), numpy.std(sigmav)),
     ha='right', va='top', transform=plt.gca().transAxes)
 
 plt.savefig('example_vdf_fit_bspline_final_profiles.png')

@@ -7,37 +7,40 @@ include Makefile.local
 # and contains the list of source files and folders
 include Makefile.list
 
-LIBNAME  = agama.lib
-PYDNAME  = agama.pyd
+LIBNAME_SHARED = agama.pyd
+LIBNAME_STATIC = agama.lib
 OBJECTS = $(SOURCES:.cpp=.obj)
 OBJECTS = obj/$(OBJECTS:  = obj/)
 TORUSOBJ= $(TORUSSRC:.cc=.obj)
 TORUSOBJ= obj/$(TORUSOBJ:  = obj/)
 TESTEXE = $(TESTSRCS:.cpp=.exe)
 TESTEXE = exe/$(TESTEXE:  = exe/)
-CXXFLAGS = $(CXXFLAGS) -I$(SRCDIR)
+COMPILE_FLAGS_ALL = $(COMPILE_FLAGS_ALL) -I$(SRCDIR)
 
 # this is the default target (build all), if make is launched without parameters
-all: $(OBJDIR) $(EXEDIR) $(LIBNAME) $(PYDNAME) $(TESTEXE)
+all: $(OBJDIR) $(EXEDIR) lib $(TESTEXE)
 
-$(LIBNAME): $(OBJECTS) $(TORUSOBJ) Makefile.local
-	lib.exe $(OBJECTS) $(TORUSOBJ) $(LINK_FLAGS) /out:$(LIBNAME)
+# one may recompile just the library by running 'make lib'
+lib: $(LIBNAME_STATIC) $(LIBNAME_SHARED)
 
-$(PYDNAME): $(OBJECTS) $(TORUSOBJ) Makefile.local
-	link.exe $(OBJECTS) $(TORUSOBJ) $(LINK_FLAGS) /dll /out:$(PYDNAME) /implib:agama_pyd.lib
+$(LIBNAME_STATIC): $(OBJECTS) $(TORUSOBJ) Makefile Makefile.local Makefile.list
+	lib.exe $(OBJECTS) $(TORUSOBJ) /out:$(LIBNAME_STATIC)
+
+$(LIBNAME_SHARED): $(OBJECTS) $(TORUSOBJ) Makefile Makefile.local Makefile.list
+	link.exe $(OBJECTS) $(TORUSOBJ) $(LINK_FLAGS_ALL) $(LINK_FLAGS_LIB) $(LINK_FLAGS_LIB_AND_EXE_STATIC) /dll /out:$(LIBNAME_SHARED) /implib:agama_pyd.lib
 	del agama_pyd.lib
 	del agama_pyd.exp
 
-$(TESTEXE): $(LIBNAME) Makefile.local
+$(TESTEXE): $(LIBNAME_STATIC) Makefile.local
 
 {src}.cpp{obj}.obj:
-	$(CC) $(CXXFLAGS) $(COMPILE_FLAGS) -c $< -Foobj/
+	$(CC) $(COMPILE_FLAGS_ALL) $(COMPILE_FLAGS_LIB) -c $< -Foobj/
 
 {src/torus}.cc{obj}.obj:
-	$(CC) $(CXXFLAGS) $(COMPILE_FLAGS) -c $< -Foobj/
+	$(CC) $(COMPILE_FLAGS_ALL) $(COMPILE_FLAGS_LIB) -c $< -Foobj/
 
 {tests}.cpp{exe}.exe:
-	$(CC) -Fe: "$@" -Foobj/tmp.obj "$<" $(CXXFLAGS) /link $(LIBNAME) $(EXE_FLAGS)
+	$(CC) -Fe: "$@" -Foobj/tmp.obj "$<" $(COMPILE_FLAGS_ALL) /link $(LINK_FLAGS_LIB_AND_EXE_STATIC) $(LIBNAME_STATIC)
 
 $(OBJDIR):
 	mkdir $(OBJDIR)
@@ -51,4 +54,4 @@ test:
 	python alltest.py
 
 clean:
-	del $(OBJDIR)\*.obj $(EXEDIR)\*.exe $(LIBNAME) $(PYDNAME)
+	del $(OBJDIR)\*.obj $(EXEDIR)\*.exe $(LIBNAME_SHARED) $(LIBNAME_STATIC)

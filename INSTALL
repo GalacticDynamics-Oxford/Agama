@@ -6,36 +6,63 @@ There are two alternative ways of building and installing the library:
 - automatic, using the provided script setup.py (preferred)
 - manual
 
-In the automatic mode, go to the root folder of the archive (containing setup.py) and run
-  python setup.py install --user
-(or python3 with the same arguments), and follow the instructions.
-(Note that the '--user' argument appears to be unnecessary for Anaconda).
+In the automatic mode, the configuration and the installation of third-party libraries
+needed by the C++ library are managed by the setup.py script, which in the end compiles
+the Python extension module and all C++ executables (tests and example programs).
+Note that the following Python packages are prerequisites that need to be installed before
+running setup.py: numpy, setuptools, wheel; in addition, scipy and matplotlib are recommended
+(they are used by many example programs, but are not strictly necessary).
+To install the library in recent python distributions (3.10 and newer), unpack the archive,
+go to its root folder (the one containing setup.py) and run
+  pip install .
+One may run pip without unpacking the archive:
+  pip install agama.zip
+or even install from the PyPI repository (this procedure is equivalent to downloading
+the archive with the latest commit from github and feeding it to pip):
+  pip install agama
+In older python distributions, one may run the setup.py script directly:
+  python setup.py install
+In both cases, one may need to add a command-line argument '--user' to install the package for
+the current user only instead of system-wide, although this is not necessary with Anaconda
+or various virtual environment systems.
+
 The setup script may ask permission for downloading/installing additional third-party
 libraries (most importantly, GSL); if the installation needs to be fully automated,
-one may add '--yes' to the command-line arguments to skip the confirmation questions.
-Note that starting from Python 3.10, running "setup.py install" is deprecated;
-the suggested alternative, which can be used with earlier versions as well, is to use pip:
-in the same folder, you may run
-  pip install --user ./
-or even without unpacking, just run
-  pip install --user agama.zip
-or install from the PyPI repository (which downloads the latest commit archive from github):
-  pip install --user agama
+one may add '--yes' to the command-line arguments of setup.py to skip the confirmation questions.
+For the pip-driven installation to work, one needs to have the following packages pre-installed:
+numpy, setuptools and wheel. The '--yes' flag cannot be directly passed to pip; instead, run
+  pip install . --config-settings --build-option=--yes
+or for older version of pip,
+  pip install . --install-option=--yes
+One may also need to add another flag '--no-build-isolation' when installing via pip.
 Note that pip hides most of the messages printed during installation, but the questions
-requiring user input should nevertheless appear on the screen.
+requiring user input should nevertheless appear on the screen, although they may possibly be
+interleaved with other output from the compiler. Passing a '-v' flag to pip disables hiding
+the messages from the compilation.
+
 The setup.py script will determine the supported compilation options, download and compile
 missing third-party libraries, compile the Agama library itself and the Python interface for it,
 and install it to the user-specific site-packages folder in your current python distribution
-(most likely $HOME/.local/lib/pythonX.Y/site-packages/agama).
+(e.g., $HOME/.local/lib/pythonX.Y/site-packages/agama).
+
 On Windows, the compiler (MSVC) requires a somewhat different treatment, but the setup.py script
 is adapted for this situation (it runs a different build program, nmake, and uses Makefile.msvc
 instead of ordinary Makefile, still creating a Makefile.local automatically during the setup).
 Before running the setup script from Windows terminal, one needs to initialize the command-line
 build tools by running "vcvarsall.bat".
 
+The Makefile contains instructions for building both static and shared versions of the library
+(on Linux/MacOS: agama.a and agama.so, on Windows+MSVC: agama.lib and agama.pyd).
+The shared library serves as the python extension module, and is also linked to all executable
+programs by default; however, it is possible to link them to the static library instead,
+by setting the environment variable AGAMA_STATIC to any non-empty value. In this case, executable
+files are much larger in size, but are fully autonomous (i.e. can be copied anywhere), whereas
+with the shared linking, the file agama.so must be present in the same folder as the executable.
+On Windows+MSVC, static linking is the only option.
+
 In the manual mode, follow these steps:
 
-1a. Install the required libraries (presently only GSL >= 1.15, configure with CFLAGS=-fPIC):
+1a. Install the required libraries (presently only GSL >= 1.15, built with CFLAGS=-fPIC):
     ftp://ftp.gnu.org/gnu/gsl/gsl-latest.tar.gz
 1b. Although not compulsory, you may want to download and install optional libraries:
     - Eigen library for highly optimized linear algebra routines - highly recommended,
@@ -53,8 +80,8 @@ In the manual mode, follow these steps:
     - UNSIO library for reading/writing N-body snapshots in various formats:
     http://projets.lam.fr/projects/unsio
     (without it only the text format is supported).
-    - Cuba library for multidimensional integration (the alternative, and actually preferred,
-    is Cubature library that is bundled with this distribution):
+    - Cuba library for multidimensional integration (the alternative, which is actually preferred,
+    is the Cubature library that is bundled with this distribution):
     http://www.feynarts.de/cuba/
     Note: since Agama is compiled to a shared library, any external libraries to be statically linked
     with it need to be compiled with -fPIC flag.
@@ -66,7 +93,7 @@ In the manual mode, follow these steps:
     This file is also created by setup.py, so you may re-use it later if you need to manually
     recompile the library.
 3.  Run 'make' to compile everything:
-    first the shared library is built and placed into lib/agama.so,
+    first the shared library agama.so and the static library libagama.a are built,
     then the tests and example programs are compiled and placed into exe folder.
 4.  Run 'make test' to run a series of tests (may need up to a few minutes).
 5.  In order to make the Python extension module available for import, it should be either copied
@@ -95,7 +122,7 @@ compiled, or in the site-packages/agama folder where it was installed. This is d
 or
 > make test
 and should take no more than a few minutes, displaying "OK" or "FAILED" for each test program
-(or possibly "UNKNOWN" for a few Python programs that rely on external libraries such as astropy or
+(or possibly "SKIPPED" for a few Python programs that rely on external libraries such as astropy or
 amuse, which is not a critical error).
 Of course one may run these tests individually (C++ programs compiled and placed into exe/ subfolder,
 or python scripts in the py/ subfolder), in which case they print out more information.

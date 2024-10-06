@@ -6,59 +6,67 @@ include Makefile.local
 # and contains the list of source files and folders
 include Makefile.list
 
-# some OS-dependent wizardry needed to ensure that the executables are linked to
-# the shared library using a relative path, so that it will be looked for in the same
-# folder as the executables (a symlink is created as exe/agama.so -> agama.so).
-# This allows the executables to be copied/moved to and run from any other folder
-# without the need to put agama.so into a system-wide folder such as /usr/local/lib,
-# or add it to LD_LIBRARY_PATH, provided that a copy of the shared library or a symlink
-# to it resides in the same folder as the executable program.
-ifeq ($(shell uname -s),Darwin)
-# on MacOS we need to modify the header of the shared library, which is then
-# automatically used to embed the correct relative path into each executable
-SO_FLAGS += -Wl,-install_name,@executable_path/agama.so
-else
-# on Linux we need to pass this flag to every compiled executable in the exe/ subfolder
-EXE_FLAGS += -Wl,-rpath,'$$ORIGIN'
-endif
-
-LIBNAME  = agama.so
+LIBNAME_SHARED = agama.so
+LIBNAME_STATIC = agama.a
 OBJECTS  = $(patsubst %.cpp,$(OBJDIR)/%.o,$(SOURCES))
 TESTEXE  = $(patsubst %.cpp,$(EXEDIR)/%.exe,$(TESTSRCS))
 TORUSOBJ = $(patsubst %.cc,$(OBJDIR)/%.o,$(TORUSSRC))
 TESTEXEFORTRAN = $(patsubst %.f,$(EXEDIR)/%.exe,$(TESTFORTRAN))
-CXXFLAGS += -I$(SRCDIR)
+COMPILE_FLAGS_ALL += -I$(SRCDIR)
 
 # this is the default target (build all), if make is launched without parameters
-all:  $(LIBNAME) $(TESTEXE) $(TESTEXEFORTRAN) nemo amuse
+all:  lib $(TESTEXE) $(TESTEXEFORTRAN) nemo amuse
 
-# one may recompile just the shared library by running 'make lib'
-lib:  $(LIBNAME)
+# one may recompile just the shared and static versions of the library by running 'make lib'
+lib:  $(LIBNAME_STATIC) $(LIBNAME_SHARED)
 
-$(LIBNAME):  $(OBJECTS) $(TORUSOBJ) Makefile Makefile.local
-	$(LINK) -shared -o $(LIBNAME) $(OBJECTS) $(TORUSOBJ) $(LINK_FLAGS) $(CXXFLAGS) $(SO_FLAGS)
+$(LIBNAME_STATIC):  $(OBJECTS) $(TORUSOBJ) Makefile Makefile.local Makefile.list
+	$(AR) ru $(LIBNAME_STATIC) $(OBJECTS) $(TORUSOBJ)
 
+$(LIBNAME_SHARED):  $(OBJECTS) $(TORUSOBJ) Makefile Makefile.local Makefile.list
+	$(LINK) -shared -o $(LIBNAME_SHARED) $(OBJECTS) $(TORUSOBJ) $(LINK_FLAGS_ALL) $(LINK_FLAGS_LIB) $(LINK_FLAGS_LIB_AND_EXE_STATIC)
+
+# two possible choices for linking the executable programs:
+# 1. shared (default) uses the shared library agama.so, which makes the overall code size smaller,
+# but requires that the library is present in the same folder as the executable files.
+# 2. static (turned on by declaring an environment variable AGAMA_STATIC) uses the static library libagama.a
+# together with all other third-party libraries (libgsl.a, libgslcblas.a, possibly nemo, unsio, glpk, etc.)
+# but notably _excluding_ python, since it is used only in two places:
+# (a) the python extension module (which is the shared library itself), and
+# (b) in math::quadraticOptimizationSolve when compiled with HAVE_CVXOPT,
+# but the latter function is not used by any other part of the library or test/example programs,
+# except the "solveOpt" function provided by the Python interface (again).
+# So it is safe to ignore python in static linking of C++/C/Fortran programs.
+
+ifndef AGAMA_STATIC
 # for each executable file, first make sure that the exe/ folder exists,
 # and create a symlink named agama.so pointing to ../agama.so in that folder if needed
 # (if this was an actual file and not a symlink, then delete it first and then create a symlink)
-$(EXEDIR)/%.exe:  $(TESTSDIR)/%.cpp $(LIBNAME)
+$(EXEDIR)/%.exe:  $(TESTSDIR)/%.cpp $(LIBNAME_SHARED)
 	@mkdir -p $(EXEDIR)
-	@[ -f $(EXEDIR)/$(LIBNAME) -a ! -L $(EXEDIR)/$(LIBNAME) ] && rm $(EXEDIR)/$(LIBNAME) || true
-	@[ -L $(EXEDIR)/$(LIBNAME) ] || ln -s ../$(LIBNAME) $(EXEDIR)/$(LIBNAME)
-	$(LINK) -o "$@" "$<" $(CXXFLAGS) $(LIBNAME) $(EXE_FLAGS)
+	@[ -f $(EXEDIR)/$(LIBNAME_SHARED) -a ! -L $(EXEDIR)/$(LIBNAME_SHARED) ] && rm $(EXEDIR)/$(LIBNAME_SHARED) || true
+	@[ -L $(EXEDIR)/$(LIBNAME_SHARED) ] || ln -s ../$(LIBNAME_SHARED) $(EXEDIR)/$(LIBNAME_SHARED)
+	$(LINK) -o "$@" "$<" $(COMPILE_FLAGS_ALL) $(LIBNAME_SHARED) $(LINK_FLAGS_ALL) $(LINK_FLAGS_EXE_SHARED)
+$(TESTEXEFORTRAN):  $(TESTSDIR)/$(TESTFORTRAN) $(LIBNAME_SHARED)
+	-$(FC) -o "$@" $(TESTSDIR)/$(TESTFORTRAN) $(LIBNAME_SHARED) $(LINK_FLAGS_ALL) $(LINK_FLAGS_EXE_SHARED)
+else
+$(EXEDIR)/%.exe:  $(TESTSDIR)/%.cpp $(LIBNAME_STATIC)
+	@mkdir -p $(EXEDIR)
+	$(LINK) -o "$@" "$<" $(COMPILE_FLAGS_ALL) $(LIBNAME_STATIC) $(LINK_FLAGS_ALL) $(LINK_FLAGS_LIB_AND_EXE_STATIC)
+$(TESTEXEFORTRAN):  $(TESTSDIR)/$(TESTFORTRAN) $(LIBNAME_STATIC)
+	-$(FC) -o "$@" $(TESTSDIR)/$(TESTFORTRAN) $(LIBNAME_STATIC) $(LINK_FLAGS_ALL) $(LINK_FLAGS_LIB_AND_EXE_STATIC) $(LINK_FLAGS_EXE_STATIC_NONCPP)
+endif
 
-$(TESTEXEFORTRAN):  $(TESTSDIR)/$(TESTFORTRAN) $(LIBNAME)
-	-$(FC) -o "$@" $(TESTSDIR)/$(TESTFORTRAN) $(LIBNAME) $(CXXFLAGS) $(EXE_FLAGS)
 
 $(OBJDIR)/%.o:  $(SRCDIR)/%.cpp Makefile.local
 	@mkdir -p $(OBJDIR)
-	$(CXX) -c $(CXXFLAGS) $(COMPILE_FLAGS) -o "$@" "$<"
+	$(CXX) -c $(COMPILE_FLAGS_ALL) $(COMPILE_FLAGS_LIB) -o "$@" "$<"
 
 $(OBJDIR)/%.o:  $(TORUSDIR)/%.cc Makefile.local
-	$(CXX) -c $(CXXFLAGS) $(COMPILE_FLAGS) -o "$@" "$<"
+	$(CXX) -c $(COMPILE_FLAGS_ALL) $(COMPILE_FLAGS_LIB) -o "$@" "$<"
 
 clean:
-	rm -f $(OBJDIR)/*.o $(OBJDIR)/*.d $(EXEDIR)/*.exe $(LIBNAME) $(EXEDIR)/$(LIBNAME)
+	rm -f $(OBJDIR)/*.o $(OBJDIR)/*.d $(EXEDIR)/*.exe $(LIBNAME_SHARED) $(EXEDIR)/$(LIBNAME_SHARED) $(LIBNAME_STATIC)
 
 # run tests (both C++ and python)
 test:
@@ -74,8 +82,8 @@ NEMO_PLUGIN = $(NEMOOBJ)/acc/agama.so
 
 nemo: $(NEMO_PLUGIN)
 
-$(NEMO_PLUGIN): $(LIBNAME)
-	-cp $(LIBNAME) $(NEMO_PLUGIN)
+$(NEMO_PLUGIN): $(LIBNAME_SHARED)
+	-cp $(LIBNAME_SHARED) $(NEMO_PLUGIN)
 else
 nemo:
 endif
@@ -103,7 +111,7 @@ $(AMUSE_WORKER): py/interface_amuse.py $(SRCDIR)/interface_amuse.cpp $(OBJECTS) 
 	cp py/test_amuse.py      $(AMUSE_WORKER_DIR)
 	-$(AMUSE_DIR)/build.py --type=H $(AMUSE_INTERFACE) AgamaInterface -o "$(AMUSE_WORKER_DIR)/worker_code.h"
 	-$(AMUSE_DIR)/build.py --type=c $(AMUSE_INTERFACE) AgamaInterface -o "$(AMUSE_WORKER_DIR)/worker_code.cpp"
-	-$(MPICXX) -o "$@" "$(AMUSE_WORKER_DIR)/worker_code.cpp" $(SRCDIR)/interface_amuse.cpp $(OBJECTS) $(TORUSOBJ) $(LINK_FLAGS) $(CXXFLAGS) $(MUSE_LD_FLAGS)
+	-$(MPICXX) -o "$@" "$(AMUSE_WORKER_DIR)/worker_code.cpp" $(SRCDIR)/interface_amuse.cpp $(COMPILE_FLAGS_ALL) $(LIBNAME_STATIC) $(LINK_FLAGS_ALL) $(LINK_FLAGS_LIB_AND_EXE_STATIC) $(MUSE_LD_FLAGS)
 
 else
 amuse:

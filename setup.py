@@ -9,6 +9,8 @@ or via pip:
 (here . means that it should take the files from the current folder);
 the former approach is more verbose (this could be amended by providing -q flag to setup.py),
 but is deprecated starting from Python 3.10; the latter one (with pip) might fail on older systems.
+Note that when installing via pip, it may fail to find the prerequisite packages (numpy,setuptools,wheel);
+the solution is to disable build isolation (add a command-line argument --no-build-isolation)
 
 The setup script recognizes some environment variables:
 CXX  will set the compiler;
@@ -70,7 +72,7 @@ def say(text):
     if not sys.stdout.isatty():
         # output was redirected, but we still try to send the message to the terminal
         try:
-            with open('/dev/tty','w') as out:
+            with open('/dev/tty' if not MSVC else 'CONOUT$', 'w') as out:
                 out.write(text)
                 out.flush()
         except:
@@ -79,7 +81,7 @@ def say(text):
 
 # asking a yes/no question and parse the answer (raise an exception in case of ambiguous answer)
 def ask(q):
-    say(q)
+    say(q if q.endswith('\n') else q+'\n')
     if forceYes:
         result='y'
         say('y\n')
@@ -89,14 +91,18 @@ def ask(q):
         # if the input was redirected and no answer was provided,
         # try to read it directly from the true terminal, if it is available
         try:
-            with open('/dev/tty','r') as stdin:
+            with open('/dev/tty' if not MSVC else 'CONIN$', 'r') as stdin:
                 result=stdin.readline()
             sys.stdout.write(result)  # and duplicate the entered text to stdout, for posterity
         except:
             result=''  # no reply => will produce an error
     result = result.rstrip()
     if not result:
-        raise ValueError('No valid response was provided')
+        raise ValueError('No valid response (y/n) was provided.\n'
+        'If you see this message and did not have a chance to enter the response at all (e.g. when using pip or '
+        'other non-interactive installation procedure), try running the setup.py script with the --yes flag to provide '
+        'automatic affirmative responses to all questions. If installing via pip, this flag can be passed as '
+        '--config-settings --build-option=--yes, or in older versions, as --install-option=--yes')
     return distutils.util.strtobool(result)   # this may still fail if the result is not boolean
 
 # get the list of all files in the given directories (including those in nested directories)
@@ -117,33 +123,32 @@ def compressList(src):
 # find out which required and optional 3rd party libraries are present, and create Makefile.local
 def createMakefile():
 
-    say("\n    ==== Checking supported compiler options and available libraries ====\n\n")
+    say('\n    ==== Checking supported compiler options and available libraries ====\n\n')
     # determine the C++ compiler and any externally provided flags:
-    try: CXXFLAGS = os.environ['CFLAGS'].split()
-    except KeyError: CXXFLAGS = []
-    try: LINK_FLAGS = os.environ['LDFLAGS'].split()
-    except KeyError: LINK_FLAGS = []
+    try: COMPILE_FLAGS_ALL = os.environ['CFLAGS'].split()
+    except KeyError: COMPILE_FLAGS_ALL = []
+    try: LINK_FLAGS_ALL = os.environ['LDFLAGS'].split()
+    except KeyError: LINK_FLAGS_ALL = []
     # default compilation flags for both the shared library and all example programs that use it
     if MSVC:
-        CXXFLAGS += ['/W3', '-wd4244', '-wd4267', '/O2', '/EHsc', '/nologo']
+        COMPILE_FLAGS_ALL += ['/W3', '-wd4244', '-wd4267', '/O2', '/EHsc', '/nologo']
         LINK_DIR_FLAG = '/LIBPATH:'  # prefix for library search path
         COMPILE_OUT_FLAG = '/Fe:'    # prefix for output file
     else:
-        CXXFLAGS += ['-fPIC', '-Wall', '-O2']
+        COMPILE_FLAGS_ALL += ['-fPIC', '-Wall', '-O2']
         LINK_DIR_FLAG = '-L'
         COMPILE_OUT_FLAG = '-o'
-    # additional compilation flags for the shared library only (paths to Python, GSL and other third-party libs)
-    COMPILE_FLAGS = []
-    # additional compilation/linking flags for example programs only (not the shared library)
-    EXE_FLAGS = []
-    for LINK_FLAG in LINK_FLAGS:   # add paths to libraries to the linking flags for executable programs
-        if LINK_FLAG.startswith('-L'): EXE_FLAGS.append(LINK_FLAG)
+    # additional compilation and linking flags
+    COMPILE_FLAGS_LIB = []  # compilation of the shared library only (paths to Python, GSL and other third-party libs)
+    LINK_FLAGS_LIB = []  # linking of the shared library (path to libpythonXX.so, etc.)
+    LINK_FLAGS_LIB_AND_EXE_STATIC = []  # linking of the shared library and any executables that use the static library (paths to third-party libs)
+    LINK_FLAGS_EXE_SHARED = []  # linking of executables that use the shared library
 
     # check if a given test code compiles with given flags
     def runCompiler(code='int main(){}\n', flags='', dest=None):
         with open('test.cpp', 'w') as f: f.write(code)
         if dest is None: dest='test.out'
-        cmd = '%s %s test.cpp %s %s %s' % (CC, ' '.join(CXXFLAGS+EXE_FLAGS), COMPILE_OUT_FLAG, dest, flags)
+        cmd = '%s %s test.cpp %s %s %s' % (CC, ' '.join(COMPILE_FLAGS_ALL), COMPILE_OUT_FLAG, dest, flags)
         print(cmd)
         result = subprocess.call(cmd, shell=True)
         os.remove('test.cpp')
@@ -180,22 +185,39 @@ def createMakefile():
             elif CC=='gcc':   CC='g++'
             elif CC=='clang': CC='clang++'
 
-    if os.path.isdir(EXTRAS_DIR+'/include'):   # if it was created in the previous invocation of setup.py
-        COMPILE_FLAGS += ['-I'+EXTRAS_DIR+'/include']  # it might already contain some useful stuff
-    if os.path.isdir(EXTRAS_DIR+'/lib'):
-        LINK_FLAGS += [LINK_DIR_FLAG+EXTRAS_DIR+'/lib']
+    if os.path.isdir(EXTRAS_DIR + '/include'):   # if it was created in the previous invocation of setup.py
+        COMPILE_FLAGS_ALL += ['-I' + EXTRAS_DIR + '/include']  # it might already contain some useful stuff
+    if os.path.isdir(EXTRAS_DIR + '/lib'):
+        LINK_FLAGS_ALL += [LINK_DIR_FLAG + EXTRAS_DIR + '/lib']
 
     # [1a]: check if a compiler exists at all
     if not runCompiler():
-        raise CompileError("Could not locate a compiler (set CXX=... environment variable to override)")
+        raise CompileError('Could not locate a compiler (set CXX=... environment variable to override)')
 
-    # [1b]: test if OpenMP is supported (optional but highly recommended)
+    # [1b]: on MacOS, set the machine architecture explicitly to avoid mismatch between x86_64 and arm64 on the Apple Silicon platform
+    if MACOS:
+        ARCH_FLAG = '-arch '+uname[4]  # could be x86_64 or arm64
+        if runCompiler(flags=ARCH_FLAG):
+            COMPILE_FLAGS_ALL += [ARCH_FLAG]
+
+    # [1c]: test the -march flag (optional, allows architecture-dependent compiler optimizations)
+    if not MSVC and not MACOS:
+        ARCH_FLAG = '-march=native'
+        if runCompiler(flags=ARCH_FLAG):
+            COMPILE_FLAGS_ALL += [ARCH_FLAG]
+
+    # [1d]: test if OpenMP is supported (optional but highly recommended)
     OMP_FLAG = '-fopenmp' if not MSVC else '/openmp'
-    OMP_FLAGS= OMP_FLAG + (' -Werror -Wno-unknown-pragmas' if not MSVC else '')
-    OMP_CODE = '#include <omp.h>\n#include <iostream>\nint main(){\nstd::cout << "Number of threads: ";\n'+\
-        '#pragma omp parallel\n{std::cout<<\'*\';}\nstd::cout << "\\n";\n}\n'
+    OMP_FLAGS= OMP_FLAG + (' -Werror -Wno-unknown-pragmas ' if not MSVC else ' ') + ' '.join(
+        COMPILE_FLAGS_LIB + LINK_FLAGS_ALL + LINK_FLAGS_LIB + LINK_FLAGS_LIB_AND_EXE_STATIC)
+    OMP_CODE = ('#include <omp.h>\n#include <iostream>\nint main(){int nthreads=0;\n'
+        '#pragma omp parallel\n{\n#pragma omp atomic\n++nthreads;\n}\n'
+        'std::cout<<"Number of threads: "<<nthreads<<"="<<omp_get_max_threads()<<"\\n";return nthreads;}\n')
     if runCompiler(code=OMP_CODE, flags=OMP_FLAGS):
-        CXXFLAGS += [OMP_FLAG]
+        say('    **** Compiling with OpenMP support ****\n')
+        COMPILE_FLAGS_ALL += [OMP_FLAG]
+        if not MSVC:
+            LINK_FLAGS_LIB += [OMP_FLAG]
     elif MACOS:
         OMP_H_FOUND = False
         OMP_LIB_FOUND = False
@@ -236,7 +258,7 @@ def createMakefile():
             for OMP_INCLUDE_PATH in OMP_INCLUDE_PATHS:
                 if os.path.isfile(OMP_INCLUDE_PATH+'/omp.h') \
                     and runCompiler(code='#include <omp.h>\nint main(){}\n', flags='-I'+OMP_INCLUDE_PATH):
-                    CXXFLAGS += ['-I'+OMP_INCLUDE_PATH]
+                    COMPILE_FLAGS_ALL += ['-I'+OMP_INCLUDE_PATH]
                     OMP_H_FOUND = True
                     break
         # then find the location of OpenMP dynamic library
@@ -254,61 +276,63 @@ def createMakefile():
             if os.path.isdir('/opt/local/lib/libomp'):  # macports
                 OMP_LIB_PATHS += ['-L/opt/local/lib/libomp -lomp']
             for OMP_LIB_PATH in OMP_LIB_PATHS:
-                if runCompiler(code=OMP_CODE, flags=OMP_LIB_PATH + ' -Xpreprocessor '+OMP_FLAGS):
-                    CXXFLAGS   += ['-Xpreprocessor', OMP_FLAG]
-                    LINK_FLAGS += [OMP_LIB_PATH]
-                    EXE_FLAGS  += [OMP_LIB_PATH]
+                EXE_NAME = './agamatest.exe'
+                if runCompiler(code=OMP_CODE, flags=OMP_LIB_PATH + ' -Xpreprocessor ' + OMP_FLAGS, dest=EXE_NAME):
+                    # ensuring that the code compiles and links is not enough, need to check if it can be run!
+                    # (the snag is that the OpenMP library may not be in LD_LIBRARY_PATH so not found at runtime)
+                    result = subprocess.call(EXE_NAME)
+                    if result < 0 and not OMP_LIB_PATH.startswith('-L'):
+                        # failed to run: may need to add a '-rpath' argument to the linker
+                        OMP_LIB_PATH = '-Wl,-rpath,' + OMP_LIB_PATH[:OMP_LIB_PATH.rfind('/')] + ' ' + OMP_LIB_PATH
+                        if runCompiler(code=OMP_CODE, flags=OMP_LIB_PATH + ' -Xpreprocessor ' + OMP_FLAGS, dest=EXE_NAME):
+                            result = subprocess.call(EXE_NAME)
+                else:
+                    result = -1
+                tryRemove(EXE_NAME)
+                if result >= 0:
+                    COMPILE_FLAGS_ALL += ['-Xpreprocessor', OMP_FLAG]
+                    LINK_FLAGS_ALL += OMP_LIB_PATH.split(' ')
                     OMP_LIB_FOUND = True
                     break
-        if not OMP_LIB_FOUND and not ask("Warning, OpenMP is not supported\n"+
+
+        if OMP_LIB_FOUND:
+            say('    **** Compiling with OpenMP support ****\n')
+        elif not ask('Warning, OpenMP is not supported\n'+
             "If you're compiling on MacOS with clang, you'd better install another compiler such as GCC, "
             "or if you're using homebrew, install libomp via 'brew install libomp' and retry running this setup script\n"+
-            "Do you want to continue without OpenMP? [Y/N] "):
+            'Do you want to continue without OpenMP? [Y/N] '):
             exit(1)
 
-    # [1c]: test if C++11 is supported (optional)
+    # [1e]: test if C++11 is supported (optional)
     CXX11_FLAG = '-std=c++11'
     if not MSVC and runCompiler(flags=CXX11_FLAG):
-        CXXFLAGS += [CXX11_FLAG]
+        COMPILE_FLAGS_ALL += [CXX11_FLAG]
     else:
         # check if we can suppress the following pre-C++11 warning
         WARNING_FLAG = '-Wno-invalid-offsetof'
         if runCompiler(flags='-Werror '+WARNING_FLAG):
-            CXXFLAGS += [WARNING_FLAG]
-
-    # [1d]: on MacOS, set the machine architecture explicitly to avoid mismatch between x86_64 and arm64 on the newer M1 platform
-    if MACOS:
-        ARCH_FLAG = '-arch '+uname[4]  # could be x86_64 or arm64
-        if runCompiler(flags=ARCH_FLAG):
-            CXXFLAGS += [ARCH_FLAG]
-
-    # [1e]: test the -march flag (optional, allows architecture-dependent compiler optimizations)
-    ARCH_FLAG = '-march=native'
-    if not MSVC and not MACOS:
-        if runCompiler(flags=ARCH_FLAG):
-            CXXFLAGS += [ARCH_FLAG]
-        else:
-            ARCH_FLAG = '-march=core2'  # try a less ambitious option
-            if runCompiler(flags=ARCH_FLAG):
-                CXXFLAGS += [ARCH_FLAG]
+            COMPILE_FLAGS_ALL += [WARNING_FLAG]
 
     # [1f]: special treatment for Intel compiler to restore determinism in OpenMP-parallelized loops
     INTEL_FLAG = '-qno-opt-dynamic-align'
     if not MSVC and runCompiler(code='#ifndef __INTEL_COMPILER\n#error\n#endif\nint main(){}\n', flags=INTEL_FLAG):
-        CXXFLAGS += [INTEL_FLAG]
+        COMPILE_FLAGS_ALL += [INTEL_FLAG]
 
     # [1g]: remove a couple of low-importance warnings that are unavoidably generated
     # by the Python C API conventions (only if they are supported by the compiler)
     for WARNING_FLAG in ['-Wno-missing-field-initializers', '-Wno-cast-function-type']:
         if not MSVC and runCompiler(flags='-Werror '+WARNING_FLAG):
-            CXXFLAGS += [WARNING_FLAG]
+            COMPILE_FLAGS_ALL += [WARNING_FLAG]
 
     # [2a]: check that NumPy is present (required by the python interface)
     try:
         import numpy
         NUMPY_INC = '-I"%s"' % numpy.get_include()
     except ImportError:
-        raise CompileError("NumPy is not present - python extension cannot be compiled")
+        raise CompileError('NumPy is not present - python extension cannot be compiled.\n'
+            'If you see this error when installing via pip, and are sure that your python environment actually '
+            'has numpy installed, you may need to run pip with a command-line argument --no-build-isolation, '
+            'and make sure that setuptools and wheel packages are also installed.')
 
     # [2b]: find out the paths to Python.h and libpythonXX.{a,so,dylib,...} (this is rather tricky)
     # and all other relevant compilation/linking flags needed to build a shared library that uses Python
@@ -357,23 +381,21 @@ PyInit_agamatest(void) {
     # try compiling a test code with the provided link flags (in particular, the name of Python library):
     # check that a sample C++ program with embedded python compiles, links and runs properly
     def tryPythonCode(PYTHON_SO_FLAGS, PYTHON_EXE_FLAGS=[]):
-        print("    **** Trying the following options for linking against Python library ****")
+        print('    **** Trying the following options for linking against Python library ****')
         # test code for a program that loads this shared library
         PYTEST_EXE_CODE = 'extern void run();int main(){run();}\n'
         PYTEST_LIB_NAME = './agamatest.so'
         PYTEST_EXE_NAME = './agamatest.exe'
         # try compiling the test shared library
-        if not runCompiler(code=PYTEST_LIB_CODE,
-            flags=' '.join([PYTHON_INC, NUMPY_INC, '-shared', '-fPIC'] + PYTHON_SO_FLAGS),
-            dest=PYTEST_LIB_NAME):
+        if not (runCompiler(code=PYTEST_LIB_CODE,
+                flags=' '.join([PYTHON_INC, NUMPY_INC, '-shared', '-fPIC'] + PYTHON_SO_FLAGS +
+                LINK_FLAGS_ALL + LINK_FLAGS_LIB + LINK_FLAGS_LIB_AND_EXE_STATIC),
+                dest=PYTEST_LIB_NAME) and os.path.isfile(PYTEST_LIB_NAME) ):
             return False  # the program couldn't be compiled at all (try the next variant)
-
         # if succeeded, compile the test program that uses this library
-        if not runCompiler(code=PYTEST_EXE_CODE,
-            flags=' '.join([PYTEST_LIB_NAME] + PYTHON_EXE_FLAGS),
-            dest=PYTEST_EXE_NAME) \
-            or not os.path.isfile(PYTEST_LIB_NAME) \
-            or not os.path.isfile(PYTEST_EXE_NAME):
+        if not (runCompiler(code=PYTEST_EXE_CODE,
+                flags=' '.join([PYTEST_LIB_NAME] + PYTHON_EXE_FLAGS + LINK_FLAGS_ALL + LINK_FLAGS_EXE_SHARED),
+                dest=PYTEST_EXE_NAME) and os.path.isfile(PYTEST_EXE_NAME) ):
             return False  # can't find compiled test program
         resultexe = subprocess.Popen(PYTEST_EXE_NAME,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT).communicate()[0].decode().rstrip()
@@ -400,7 +422,7 @@ PyInit_agamatest(void) {
                 "Received: "+resultexe+"\n"+\
                 "From py:  "+resultpy+('' if returnpy==0 else ' (crashed with error '+str(returnpy)+')'))
             return False
-        print("    **** Successfully linked using these options ****")
+        print('    **** Successfully linked using these options ****')
         return True   # this combination of options seems reasonable...
 
     # determine compilation and linking options for the python extension module when using MSVC on Windows
@@ -425,7 +447,7 @@ PyInit_agamatest(void) {
                 "or the library path is reported incorrectly: \n"+\
                 "Expected: "+sysprefix+"\n"+\
                 "Received: "+resultpy+('' if returnpy==0 else ' (crashed with error '+str(returnpy)+')'))
-        raise CompileError("Could not compile test program which uses libpython" +
+        raise CompileError('Could not compile test program which uses libpython' +
             sysconfig.get_config_var('VERSION'))
 
     # explore various possible combinations of file name and path to the python library on Linux/MacOS
@@ -454,26 +476,30 @@ PyInit_agamatest(void) {
                         # the shared library libpython***.so, but this library is not in LD_LIBRARY_PATH and
                         # cannot be found when loading the python extension module outside python itself.
                         # the (inelegant) fix is to hardcode the path to this libpython***.so as -rpath.
-                        print("Trying rpath")
-                        RPATH = ['-Wl,-rpath,'+PYTHON_LIB_PATH]  # extend the linker options and try again
-                        if tryPythonCode(PYTHON_SO_FLAGS + RPATH):
-                            return PYTHON_SO_FLAGS + RPATH, []
+                        RPATH = ['-Wl,-rpath,'+PYTHON_LIB_PATH]
+                        # This rpath can already be in LINK_FLAGS_ALL due to the OpenMP setup, so don't put it twice
+                        if RPATH[0] in LINK_FLAGS_ALL:
+                            RPATH = []
+                        else:  # extend the linker options and try again
+                            print('Trying rpath')
+                            if tryPythonCode(PYTHON_SO_FLAGS + RPATH):
+                                return PYTHON_SO_FLAGS + RPATH, []
                         # another attempt with a hardcoded path
                         MACOS_RPATH = '/Library/Developer/CommandLineTools/Library/Frameworks/'
                         if os.path.isdir(MACOS_RPATH) and tryPythonCode(PYTHON_SO_FLAGS + ['-Wl,-rpath,'+MACOS_RPATH]):
                             return PYTHON_SO_FLAGS + ['-Wl,-rpath,'+MACOS_RPATH], []
-                        if "-undefined dynamic_lookup" in sysconfig.get_config_var('LDSHARED'):
-                            print("Trying the last resort solution")  # relevant for Anaconda installations
+                        if '-undefined dynamic_lookup' in sysconfig.get_config_var('LDSHARED'):
+                            print('Trying the last resort solution')  # relevant for Anaconda installations
                             PYTHON_SO_FLAGS = ['-undefined dynamic_lookup'] + PYTHON_LIB_EXTRA
                             PYTHON_EXE_FLAGS = RPATH + [PYTHON_LIB_FILEPATH]
                             if tryPythonCode(PYTHON_SO_FLAGS, PYTHON_EXE_FLAGS):
                                 return PYTHON_SO_FLAGS, PYTHON_EXE_FLAGS
-                            if tryPythonCode(PYTHON_SO_FLAGS + RPATH, PYTHON_EXE_FLAGS):
+                            if RPATH and tryPythonCode(PYTHON_SO_FLAGS + RPATH, PYTHON_EXE_FLAGS):
                                 return PYTHON_SO_FLAGS + RPATH, PYTHON_EXE_FLAGS
 
         # if the above efforts did not succeed, try the options suggested by python-config
         PYTHON_CONFIG = 'python%s-config --ldflags' % sysconfig.get_config_var('VERSION')
-        print("    **** Trying the options provided by %s ****" % PYTHON_CONFIG)
+        print('    **** Trying the options provided by %s ****' % PYTHON_CONFIG)
         sub = subprocess.Popen(PYTHON_CONFIG, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         PYTHON_SO_FLAGS = sub.communicate()[0].decode().rstrip().split()
         if sub.returncode==0 and tryPythonCode(PYTHON_SO_FLAGS):
@@ -488,14 +514,14 @@ PyInit_agamatest(void) {
                 "compiled for the ARM architecture is incompatible with the Python interpreter. " +
                 "The solution is to install a native ARM Python version (e.g., Anaconda 2022.05 or newer)")
         # if none of the above combinations worked, give up...
-        raise CompileError("Could not compile test program which uses libpython" +
+        raise CompileError('Could not compile test program which uses libpython' +
             sysconfig.get_config_var('VERSION'))
 
     # [2c]: find the python library and other relevant linking flags
     PYTHON_SO_FLAGS, PYTHON_EXE_FLAGS = findPythonLib() if not MSVC else findPythonLibMSVC()
-    COMPILE_FLAGS += ['-DHAVE_PYTHON', PYTHON_INC, NUMPY_INC]
-    LINK_FLAGS    += PYTHON_SO_FLAGS
-    EXE_FLAGS     += PYTHON_EXE_FLAGS
+    COMPILE_FLAGS_LIB     += ['-DHAVE_PYTHON', PYTHON_INC, NUMPY_INC]
+    LINK_FLAGS_LIB        += PYTHON_SO_FLAGS
+    LINK_FLAGS_EXE_SHARED += PYTHON_EXE_FLAGS
 
     # [3]: check that GSL is present, and find out its version (required)
     # try compiling a snippet of code into a shared library (tests if GSL has been compiled with -fPIC),
@@ -513,12 +539,13 @@ PyInit_agamatest(void) {
     except:
         pass
     if not MSVC:   # install GSL on Linux/MacOS
-        if runCompileShared(GSL_TEST_CODE, flags=' '.join(COMPILE_FLAGS + LINK_FLAGS + ['-lgsl', '-lgslcblas'])):
-            # apparently the headers and libraries can be found in some standard location,
-            LINK_FLAGS += ['-lgsl', '-lgslcblas']   # so we only list their names
+        if runCompileShared(GSL_TEST_CODE, flags=' '.join(COMPILE_FLAGS_LIB +
+                LINK_FLAGS_ALL + LINK_FLAGS_LIB + LINK_FLAGS_LIB_AND_EXE_STATIC + ['-lgsl', '-lgslcblas'])):
+            # apparently the headers and libraries can be found in some standard location, so we only list their names
+            LINK_FLAGS_LIB_AND_EXE_STATIC += ['-lgsl', '-lgslcblas']
         else:
-            if not ask("GSL library (required) is not found\n"+
-                "Should we try to download and compile it now? [Y/N] "): exit(1)
+            if not ask('GSL library (required) is not found\n'+
+                'Should we try to download and compile it now? [Y/N] '): exit(1)
             distutils.dir_util.mkpath(EXTRAS_DIR)
             os.chdir(EXTRAS_DIR)
             say("Downloading GSL\n")
@@ -527,31 +554,31 @@ PyInit_agamatest(void) {
             try:
                 urlretrieve('https://ftp.gnu.org/gnu/gsl/gsl-2.8.tar.gz', filename)
                 if os.path.isfile(filename):
-                    say("Unpacking GSL\n")
+                    say('Unpacking GSL\n')
                     subprocess.call(['tar', '-zxf', filename])    # unpack the archive
                     os.remove(filename)  # remove the downloaded archive
-                    if not os.path.isdir(dirname): raise Exception("Error unpacking GSL")
-                else: raise RuntimeError("Cannot find downloaded file")
+                    if not os.path.isdir(dirname): raise Exception('Error unpacking GSL')
+                else: raise RuntimeError('Cannot find downloaded file')
             except Exception as e:
-                raise CompileError(str(e) + "\nError downloading GSL library, aborting...\n"+
-                "You may try to manually compile GSL and install it to "+ROOT_DIR+"/"+EXTRAS_DIR+", so that "+
-                "the header files are in "+EXTRAS_DIR+"/include and library files - in "+EXTRAS_DIR+"/lib")
+                raise CompileError(str(e) + '\nError downloading GSL library, aborting...\n'+
+                'You may try to manually compile GSL and install it to '+ROOT_DIR+'/'+EXTRAS_DIR+', so that '+
+                'the header files are in '+EXTRAS_DIR+'/include and library files - in '+EXTRAS_DIR+'/lib')
             say('Compiling GSL (may take a few minutes)\n')
             result = subprocess.call('(cd '+dirname+'; ./configure --prefix='+os.getcwd()+
                 ' CFLAGS="-fPIC -O2" --enable-shared=no; make; make install) > gsl-install.log', shell=True)
             if result != 0 or not os.path.isfile('lib/libgsl.a'):
-                 raise CompileError("GSL compilation failed (check "+EXTRAS_DIR+"/gsl-install.log)")
+                 raise CompileError('GSL compilation failed (check '+EXTRAS_DIR+'/gsl-install.log)')
             distutils.dir_util.remove_tree(dirname)  # clean up source and build directories
-            COMPILE_FLAGS += ['-I'+EXTRAS_DIR+'/include']
-            LINK_FLAGS    += [EXTRAS_DIR+'/lib/libgsl.a', EXTRAS_DIR+'/lib/libgslcblas.a']
+            COMPILE_FLAGS_LIB  += ['-I'+EXTRAS_DIR+'/include']
+            LINK_FLAGS_LIB_AND_EXE_STATIC += [EXTRAS_DIR+'/lib/libgsl.a', EXTRAS_DIR+'/lib/libgslcblas.a']
             os.chdir(ROOT_DIR)
     else:  # install a GSL port on Windows with MSVC
-        if runCompiler(GSL_TEST_CODE + 'int main() {run();}',
-            ' '.join(COMPILE_FLAGS + ['/link', 'gsl.lib', 'cblas.lib'] + LINK_FLAGS)):
-            LINK_FLAGS += ['gsl.lib', 'cblas.lib']
+        if runCompiler(GSL_TEST_CODE + 'int main() {run();}', ' '.join(
+                COMPILE_FLAGS_LIB + ['/link', 'gsl.lib', 'cblas.lib'] + LINK_FLAGS_ALL + LINK_FLAGS_LIB + LINK_FLAGS_LIB_AND_EXE_STATIC)):
+            LINK_FLAGS_LIB_AND_EXE_STATIC += ['gsl.lib', 'cblas.lib']
         else:
-            if not ask("GSL library (required) is not found\n"+
-                "Should we try to download and compile it now? [Y/N] "): exit(1)
+            if not ask('GSL library (required) is not found\n'+
+                'Should we try to download and compile it now? [Y/N] '): exit(1)
             distutils.dir_util.mkpath(EXTRAS_DIR)
             os.chdir(EXTRAS_DIR)
             say("Downloading GSL\n")
@@ -560,24 +587,24 @@ PyInit_agamatest(void) {
             try:
                 urlretrieve('http://agama.software/files/%s' % filename, filename)
                 if os.path.isfile(filename):
-                    say("Unpacking GSL\n")
+                    say('Unpacking GSL\n')
                     zipf = zipfile.ZipFile(filename, 'r')  # unpack the archive
                     zipf.extractall()
                     zipf.close()
                     os.remove(filename)  # remove the downloaded archive
-                    if not os.path.isdir(dirname): raise Exception("Error unpacking GSL")
-                else: raise RuntimeError("Cannot find downloaded file")
+                    if not os.path.isdir(dirname): raise Exception('Error unpacking GSL')
+                else: raise RuntimeError('Cannot find downloaded file')
             except Exception as e:
-                raise CompileError(str(e) + "\nError downloading GSL library, aborting...\n"+
-                "You may try to manually compile GSL and install it to "+ROOT_DIR+"/"+EXTRAS_DIR+", so that "+
-                "the header files are in "+EXTRAS_DIR+"/include and library files - in "+EXTRAS_DIR+"/lib")
+                raise CompileError(str(e) + '\nError downloading GSL library, aborting...\n'+
+                'You may try to manually compile GSL and install it to '+ROOT_DIR+'/'+EXTRAS_DIR+', so that '+
+                'the header files are in '+EXTRAS_DIR+'/include and library files - in '+EXTRAS_DIR+'/lib')
             say('Compiling GSL (may take a few minutes)\n')
             os.chdir(dirname+'\\build.vc')
             result = subprocess.call('msbuild /v:n gslhdrs  /p:Configuration=Release >>../../gsl-install.log', shell=True)
             result+= subprocess.call('msbuild /v:n cblaslib /p:Configuration=Release >>../../gsl-install.log', shell=True)
             result+= subprocess.call('msbuild /v:n gsllib   /p:Configuration=Release >>../../gsl-install.log', shell=True)
             if result != 0 or not os.path.isfile('lib/x64/Release/gsl.lib'):
-                raise CompileError("GSL compilation failed (check "+EXTRAS_DIR+"/gsl-install.log)")
+                raise CompileError('GSL compilation failed (check '+EXTRAS_DIR+'/gsl-install.log)')
             # copy the static libraries to extras/lib
             distutils.dir_util.mkpath('../../lib')
             distutils.file_util.copy_file('lib/x64/Release/gsl.lib',   '../../lib/')
@@ -586,19 +613,19 @@ PyInit_agamatest(void) {
             os.chdir('../..')
             # delete the compiled directory
             distutils.dir_util.remove_tree(dirname)  # clean up source and build directories
-            COMPILE_FLAGS += ['-I'+EXTRAS_DIR+'/include']
-            LINK_FLAGS += [LINK_DIR_FLAG+EXTRAS_DIR+'/lib', 'gsl.lib', 'cblas.lib']
+            COMPILE_FLAGS_LIB += ['-I'+EXTRAS_DIR+'/include']
+            LINK_FLAGS_LIB_AND_EXE_STATIC += [LINK_DIR_FLAG+EXTRAS_DIR+'/lib', 'gsl.lib', 'cblas.lib']
             os.chdir(ROOT_DIR)
-            if not runCompiler(GSL_TEST_CODE + 'int main() {run();}',
-                ' '.join(COMPILE_FLAGS + ['/link'] + LINK_FLAGS)):
-                    raise CompileError("GSL compilation did not succeed")
+            if not runCompiler(GSL_TEST_CODE + 'int main() {run();}', ' '.join(
+                    COMPILE_FLAGS_LIB + ['/link'] + LINK_FLAGS_ALL + LINK_FLAGS_LIB + LINK_FLAGS_LIB_AND_EXE_STATIC)):
+                raise CompileError('GSL compilation did not succeed')
 
     # [4]: test if Eigen library is present (optional)
-    if runCompiler(code='#include <Eigen/Core>\nint main(){}\n', flags=' '.join(COMPILE_FLAGS)):
-        COMPILE_FLAGS += ['-DHAVE_EIGEN']
+    if runCompiler(code='#include <Eigen/Core>\nint main(){}\n', flags=' '.join(COMPILE_FLAGS_LIB)):
+        COMPILE_FLAGS_LIB += ['-DHAVE_EIGEN']
     else:
-        if ask("Eigen library (recommended) is not found\n"+
-            "Should we try to download it now (no compilation needed)? [Y/N] "):
+        if ask('Eigen library (recommended) is not found\n'+
+                'Should we try to download it now (no compilation needed)? [Y/N] '):
             distutils.dir_util.mkpath(EXTRAS_DIR+'/include/unsupported')
             os.chdir(EXTRAS_DIR)
             say('Downloading Eigen\n')
@@ -607,7 +634,7 @@ PyInit_agamatest(void) {
             try:
                 urlretrieve('https://gitlab.com/libeigen/eigen/-/archive/3.3.9/eigen-3.3.9.zip', filename)
                 if os.path.isfile(filename):
-                    say("Unpacking Eigen\n")
+                    say('Unpacking Eigen\n')
                     zipf = zipfile.ZipFile(filename, 'r')
                     zipf.extractall()
                     zipf.close()
@@ -615,11 +642,11 @@ PyInit_agamatest(void) {
                         distutils.dir_util.copy_tree(dirname+'/Eigen', 'include/Eigen', verbose=False)  # copy the headers
                         distutils.dir_util.copy_tree(dirname+'/unsupported/Eigen', 'include/unsupported/Eigen', verbose=False)
                         distutils.dir_util.remove_tree(dirname)  # and delete the rest
-                        COMPILE_FLAGS += ['-DHAVE_EIGEN', '-I'+EXTRAS_DIR+'/include']
+                        COMPILE_FLAGS_LIB += ['-DHAVE_EIGEN', '-I'+EXTRAS_DIR+'/include']
                     os.remove(filename)                          # remove the downloaded archive
-                else: raise RuntimeError("Cannot find downloaded file")
+                else: raise RuntimeError('Cannot find downloaded file')
             except Exception as e:
-                say("Failed to install Eigen: "+str(e)+"\n")     # didn't succeed with Eigen
+                say('Failed to install Eigen: '+str(e)+'\n')     # didn't succeed with Eigen
             os.chdir(ROOT_DIR)
 
     # [5a]: test if CVXOPT is present (optional); install if needed
@@ -627,8 +654,8 @@ PyInit_agamatest(void) {
     try:
         import cvxopt  # import the python module
     except ImportError:
-        if ask("CVXOPT library (needed only for Schwarzschild modelling) is not found\n"
-            "Should we try to install it now? [Y/N] "):
+        if ask('CVXOPT library (needed only for Schwarzschild modelling) is not found\n'
+                'Should we try to install it now? [Y/N] '):
             try:
                 subprocess.check_call([sys.executable, '-m', 'pip', 'install', 'cvxopt'] +
                     (['--user'] if '--user' in sys.argv else []))
@@ -639,16 +666,16 @@ PyInit_agamatest(void) {
                 if result.returncode != 0:
                     raise RuntimeError(result.stderr.decode().strip())
             except Exception as e:
-                say("Failed to install CVXOPT: "+str(e)+"\n")
+                say('Failed to install CVXOPT: '+str(e)+'\n')
                 skip_cvxopt = True
         else:
             skip_cvxopt = True
 
     # [5b]: if the cvxopt module is available in Python, make sure that we also have C header files
     if not skip_cvxopt:
-        if runCompiler(code='#include <cvxopt.h>\nint main(){import_cvxopt();}\n',
-            flags=' '.join(COMPILE_FLAGS + LINK_FLAGS)):
-            COMPILE_FLAGS += ['-DHAVE_CVXOPT']
+        if runCompiler(code='#include <cvxopt.h>\nint main(){import_cvxopt();}\n', flags=' '.join(
+                COMPILE_FLAGS_LIB + LINK_FLAGS_ALL + LINK_FLAGS_LIB + LINK_FLAGS_LIB_AND_EXE_STATIC)):
+            COMPILE_FLAGS_LIB += ['-DHAVE_CVXOPT']
         else:
             # download the C header file if it does not appear to be present in a default location
             distutils.dir_util.mkpath(EXTRAS_DIR+'/include')
@@ -661,26 +688,26 @@ PyInit_agamatest(void) {
             except: pass  # problems in downloading, skip it
             if  os.path.isfile(EXTRAS_DIR+'/include/cvxopt.h') and \
                 os.path.isfile(EXTRAS_DIR+'/include/blas_redefines.h'):
-                COMPILE_FLAGS += ['-DHAVE_CVXOPT', '-I'+EXTRAS_DIR+'/include']
+                COMPILE_FLAGS_LIB += ['-DHAVE_CVXOPT', '-I'+EXTRAS_DIR+'/include']
             else:
-                say("Failed to download CVXOPT header files, this feature will not be available\n")
+                say('Failed to download CVXOPT header files, this feature will not be available\n')
 
     # [6]: test if GLPK is present (optional - ignored if not found)
-    if not MSVC and runCompileShared('#include <glpk.h>\nvoid run() { glp_create_prob(); }\n',
-        flags=' '.join(COMPILE_FLAGS + LINK_FLAGS + ['-lglpk'])):
-        COMPILE_FLAGS += ['-DHAVE_GLPK']
-        LINK_FLAGS    += ['-lglpk']
+    if not MSVC and runCompileShared('#include <glpk.h>\nvoid run() { glp_create_prob(); }\n', flags=' '.join(
+            COMPILE_FLAGS_LIB + LINK_FLAGS_ALL + LINK_FLAGS_LIB + LINK_FLAGS_LIB_AND_EXE_STATIC + ['-lglpk'])):
+        COMPILE_FLAGS_LIB += ['-DHAVE_GLPK']
+        LINK_FLAGS_LIB_AND_EXE_STATIC += ['-lglpk']
     else:
-        say("GLPK library (optional) is not found, ignored\n")
+        say('GLPK library (optional) is not found, ignored\n')
 
     # [7]: test if UNSIO is present (optional), download and compile if needed
-    if not MSVC and runCompileShared('#include <uns.h>\nvoid run() { uns::CunsOut("temp", "nemo"); }\n',
-        flags=' '.join(COMPILE_FLAGS + LINK_FLAGS + ['-lunsio', '-lnemo'])):
-        COMPILE_FLAGS += ['-DHAVE_UNSIO']
-        LINK_FLAGS    += ['-lunsio', '-lnemo']
+    if not MSVC and runCompileShared('#include <uns.h>\nvoid run() { uns::CunsOut("temp", "nemo"); }\n', flags=' '.join(
+            COMPILE_FLAGS_LIB + LINK_FLAGS_ALL + LINK_FLAGS_LIB + LINK_FLAGS_LIB_AND_EXE_STATIC + ['-lunsio', '-lnemo'])):
+        COMPILE_FLAGS_LIB += ['-DHAVE_UNSIO']
+        LINK_FLAGS_LIB_AND_EXE_STATIC += ['-lunsio', '-lnemo']
     elif not MSVC:
-        if ask("UNSIO library (optional; used for input/output of N-body snapshots) is not found\n"+
-            "Should we try to download and compile it now? [Y/N] "):
+        if ask('UNSIO library (optional; used for input/output of N-body snapshots) is not found\n'+
+                'Should we try to download and compile it now? [Y/N] '):
             distutils.dir_util.mkpath(EXTRAS_DIR)
             distutils.dir_util.mkpath(EXTRAS_DIR+'/include')
             distutils.dir_util.mkpath(EXTRAS_DIR+'/lib')
@@ -692,7 +719,7 @@ PyInit_agamatest(void) {
                 if os.path.isfile(filename):
                     subprocess.call('(cd '+EXTRAS_DIR+'; unzip ../'+filename+') >/dev/null', shell=True)  # unpack
                     os.remove(filename)  # remove the downloaded archive
-                    say("Compiling UNSIO\n")
+                    say('Compiling UNSIO\n')
                     result = subprocess.call('(cd '+dirname+'; make) > '+EXTRAS_DIR+'/unsio-install.log', shell=True)
                     if result == 0 and os.path.isfile(dirname+'/libnemo.a') and os.path.isfile(dirname+'/libunsio.a'):
                         # successfully compiled: copy the header files to extras/include
@@ -706,28 +733,55 @@ PyInit_agamatest(void) {
                         UNSIO_COMPILE_FLAGS = ['-I'+EXTRAS_DIR+'/include']
                         UNSIO_LINK_FLAGS = [EXTRAS_DIR+'/lib/libunsio.a', EXTRAS_DIR+'/lib/libnemo.a']
                         if runCompiler(code='#include <uns.h>\nint main(){}\n', flags=' '.join(UNSIO_COMPILE_FLAGS+UNSIO_LINK_FLAGS)):
-                            COMPILE_FLAGS += ['-DHAVE_UNSIO'] + UNSIO_COMPILE_FLAGS
-                            LINK_FLAGS    += UNSIO_LINK_FLAGS
+                            COMPILE_FLAGS_LIB += ['-DHAVE_UNSIO'] + UNSIO_COMPILE_FLAGS
+                            LINK_FLAGS_LIB_AND_EXE_STATIC += UNSIO_LINK_FLAGS
                         else:
                             raise CompileError('Failed to link against the just compiled UNSIO library')
-                    else: raise CompileError(
-                        "Failed compiling UNSIO (check "+EXTRAS_DIR+"/unsio-install.log)")
+                    else:
+                        raise CompileError('Failed compiling UNSIO (check '+EXTRAS_DIR+'/unsio-install.log)')
             except Exception as e:  # didn't succeed with UNSIO
                 say(str(e)+'\n')
 
+    # [8]: some OS-dependent wizardry needed to ensure that the executables are linked to
+    # the shared library using a relative path, so that it will be looked for in the same
+    # folder as the executables (a symlink is created as exe/agama.so -> agama.so).
+    # This allows the executables to be copied/moved to and run from any other folder
+    # without the need to put agama.so into a system-wide folder such as /usr/local/lib,
+    # or add it to LD_LIBRARY_PATH, provided that a copy of the shared library or a symlink
+    # to it resides in the same folder as the executable program.
+    if MACOS:
+        # on MacOS we need to modify the header of the shared library, which is then
+        # automatically used to embed the correct relative path into each executable
+        LINK_FLAGS_LIB += ['-Wl,-install_name,@executable_path/agama.so']
+    elif not MSVC:
+        # on Linux we need to pass this flag to every compiled executable in the exe/ subfolder
+        LINK_FLAGS_EXE_SHARED += ["-Wl,-rpath,'$$ORIGIN'"]
+
+    # [9]: when a non-C++ executable is linked to the static library agama.a,
+    # it should additionally link to the C++ standard library, whose name depends on the compiler
+    CLANG = not MSVC and 'clang' in subprocess.Popen(CC + ' -v', shell=True,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT).communicate()[0].decode().rstrip()
+    LINK_FLAG_EXE_STATIC_NONCPP = ('-lc++' if CLANG else '-lstdc++') + (' -fopenmp' if '-fopenmp' in LINK_FLAGS_LIB else '')
+
     # [99]: put everything together and create Makefile.local
     with open('Makefile.local','w') as f: f.write(
-        ("# set the default compiler if no value is found in the environment variables or among command-line arguments\n" +
-        "ifeq ($(origin CXX),default)\nCXX = " + CC + "\nendif\n" +
-        "ifeq ($(origin FC), default)\nFC  = gfortran\nendif\nLINK = $(CXX)\n" if not MSVC else "") +
-        "# compilation/linking flags for both the shared library and any programs that use it\n" +
-        "CXXFLAGS      = " + " ".join(compressList(CXXFLAGS)) + "\n" +
-        "# compilation flags for the shared library only (files in src/)\n" +
-        "COMPILE_FLAGS = " + " ".join(compressList(COMPILE_FLAGS)) + "\n" +
-        "# linking flags for the shared library only\n" +
-        "LINK_FLAGS    = " + " ".join(compressList(LINK_FLAGS)) + "\n" +
-        ("# linking flags for the example/test programs\n" +
-        "EXE_FLAGS     = " + " ".join(compressList(EXE_FLAGS)) + "\n" if EXE_FLAGS else "") )
+        ('# set the default compiler if no value is found in the environment variables or among command-line arguments\n' +
+        'ifeq ($(origin CXX),default)\nCXX = ' + CC + '\nendif\n' +
+        'ifeq ($(origin FC), default)\nFC  = gfortran\nendif\nLINK = $(CXX)\n' if not MSVC else '') +
+        '# compilation flags for both the shared library and any programs that use it\n' +
+        'COMPILE_FLAGS_ALL = ' + ' '.join(compressList(COMPILE_FLAGS_ALL)) + '\n' +
+        '# additional compilation flags for the library files only (src/*.cpp)\n' +
+        'COMPILE_FLAGS_LIB = ' + ' '.join(compressList(COMPILE_FLAGS_LIB)) + '\n' +
+        '# linking flags for both the shared library (agama.so) and any executable programs, regardless of how they are linked\n' +
+        'LINK_FLAGS_ALL = ' + ' '.join(compressList(LINK_FLAGS_ALL)) + '\n' +
+        '# additional linking flags for the shared library only (agama.so)\n' +
+        'LINK_FLAGS_LIB = ' + ' '.join(compressList(LINK_FLAGS_LIB)) + '\n' +
+        '# additional linking flags for the shared library (agama.so) and executables that use the static library (agama.a)\n' +
+        'LINK_FLAGS_LIB_AND_EXE_STATIC = ' + ' '.join(compressList(LINK_FLAGS_LIB_AND_EXE_STATIC)) + '\n' +
+        '# additional linking flags for executables which use the shared library (agama.so)\n' +
+        'LINK_FLAGS_EXE_SHARED = ' + ' '.join(compressList(LINK_FLAGS_EXE_SHARED)) + '\n' +
+        '# additional linking flags for non-C++ executables (e.g. fortran programs) that use the static library (agama.a)\n' +
+        'LINK_FLAGS_EXE_STATIC_NONCPP = ' + LINK_FLAG_EXE_STATIC_NONCPP + '\n')
 
 
 # Custom build step that manually creates the makefile and then calls 'make' to create the shared library
@@ -740,17 +794,20 @@ class MyBuildExt(CmdBuildExt):
         # run custom build step (make)
         say('\n    ==== Compiling the C++ library ====\n\n')
         if MSVC:
-            make   = 'nmake -f Makefile.msvc'
-            soname = 'agama.pyd'
+            make = 'nmake -f Makefile.msvc'
+            sharedname = 'agama.pyd'
+            staticname = 'agama.lib'
         else:  # standard unix (including macos)
-            make   = 'make'
-            soname = 'agama.so'
-        if subprocess.call(make) != 0 or not os.path.isfile(soname):
+            make = 'make'
+            sharedname = 'agama.so'
+            staticname = 'agama.a'
+        if subprocess.call(make) != 0 or not os.path.isfile(sharedname):
             raise CompileError("Compilation failed")
         if not os.path.isdir(self.build_lib): return  # this occurs when running setup.py build_ext
         # copy the shared library and executables to the folder where the package is being built
         distutils.file_util.copy_file('Makefile.local', os.path.join(self.build_lib, 'agama'))
-        distutils.file_util.copy_file(soname, os.path.join(self.build_lib, 'agama'))
+        distutils.file_util.copy_file(sharedname, os.path.join(self.build_lib, 'agama'))
+        distutils.file_util.copy_file(staticname, os.path.join(self.build_lib, 'agama'))
         distutils.dir_util.copy_tree('exe', os.path.join(self.build_lib, 'agama', 'exe'))
         if os.path.isdir(EXTRAS_DIR):  # this contains third-party libraries built in the process
             distutils.dir_util.copy_tree(EXTRAS_DIR, os.path.join(self.build_lib, 'agama', EXTRAS_DIR), verbose=False)
@@ -786,7 +843,7 @@ distutils.core.setup(
     url              = 'https://github.com/GalacticDynamics-Oxford/Agama',
     download_url     = 'https://github.com/GalacticDynamics-Oxford/Agama/archive/master.zip',
     long_description = open('README').read(),
-    requires         = ['numpy'],
+    requires         = ['setuptools','wheel','numpy'],
     packages         = ['agama'],
     package_dir      = {'agama': '.'},
     package_data     = {'agama': allFiles('data','doc','py','src','tests') +

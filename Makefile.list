@@ -8,8 +8,7 @@ TESTSDIR  = tests
 TORUSDIR  = src/torus
 
 # sources of the main library
-SOURCES   = \
-            interface_c.cpp \
+SOURCES   = interface_c.cpp \
             interface_fortran.cpp \
             interface_nemo.cpp \
             interface_python.cpp \

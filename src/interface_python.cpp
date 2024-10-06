@@ -50,6 +50,7 @@
 #include "math_core.h"
 #include "math_gausshermite.h"
 #include "math_optimization.h"
+#include "math_random.h"
 #include "math_sample.h"
 #include "math_spline.h"
 #include "particles_io.h"
@@ -1476,6 +1477,15 @@ typedef struct {
     PyObject_HEAD
     potential::PtrDensity dens;
 } DensityObject;
+
+/// Python type corresponding to Potential class, which is inherited from Density
+typedef struct {
+    PyObject_HEAD
+    // note that the memory layout of both Density and Potential python classes are the same,
+    // but the sole member variable (a smart pointer) has different (but compatible) base types,
+    // allowing it to be used in class methods shared by both classes
+    potential::PtrPotential pot;
+} PotentialObject;
 /// \endcond
 
 /// Helper class for providing a BaseDensity interface
@@ -2116,6 +2126,78 @@ Py_hash_t Density_hash(PyObject *self)
     return _Py_HashPointer(const_cast<void*>(static_cast<const void*>(((DensityObject*)self)->dens.get())));
 }
 
+/// syntactic sugar: construct a composite density object by adding two density objects
+PyObject* Density_add(PyObject* arg1, PyObject* arg2)
+{
+    potential::PtrPotential pot1, pot2;
+    potential::PtrDensity dens1, dens2;
+    if(PyObject_TypeCheck(arg1, PotentialTypePtr))
+        pot1 = ((PotentialObject*)arg1)->pot;
+    if(PyObject_TypeCheck(arg2, PotentialTypePtr))
+        pot2 = ((PotentialObject*)arg2)->pot;
+    if(PyObject_TypeCheck(arg1, DensityTypePtr))  // also true if arg1 is a Potential object
+        dens1 = ((DensityObject*)arg1)->dens;
+    if(PyObject_TypeCheck(arg2, DensityTypePtr))
+        dens2 = ((DensityObject*)arg2)->dens;
+    // several possibilities: adding two potentials, potential+density, density+density,
+    // or something else (unsupported)
+    if(dens1 && dens2) {  // true in the first three cases
+        bool allpot = pot1 && pot2;  // true in the first case only; the result type is Potential
+        std::vector<potential::PtrPotential> componentsPot; // used in the first case only
+        std::vector<potential::PtrDensity> componentsDens;  // used in the second and third cases
+        // if either operand is a composite density or potential, "unpack" it into components,
+        // (to facilitate chained summation operations), otherwise add to the final list directly.
+        // the pointers below are initialized to NULL if the dynamic cast fails
+        const potential::CompositeDensity
+            *cdens1 = dynamic_cast<const potential::CompositeDensity* >(dens1.get()),
+            *cdens2 = dynamic_cast<const potential::CompositeDensity* >(dens2.get());
+        const potential::Composite
+            *cpot1 = dynamic_cast<const potential::Composite* >(dens1.get()),
+            *cpot2 = dynamic_cast<const potential::Composite* >(dens2.get());
+        if(cpot1) {
+            for(unsigned int index=0, size=cpot1->size(); index<size; index++) {
+                if(allpot)
+                    componentsPot.push_back(cpot1->component(index));
+                else
+                    componentsDens.push_back(cpot1->component(index));
+            }
+        } else if(cdens1) {  // allpot==false in this case
+            for(unsigned int index=0, size=cdens1->size(); index<size; index++)
+                componentsDens.push_back(cdens1->component(index));
+        } else if(allpot) {
+            componentsPot.push_back(pot1);
+        } else {
+            componentsDens.push_back(dens1);
+        }
+        if(cpot2) {
+            for(unsigned int index=0, size=cpot2->size(); index<size; index++) {
+                if(allpot)
+                    componentsPot.push_back(cpot2->component(index));
+                else
+                    componentsDens.push_back(cpot2->component(index));
+            }
+        } else if(cdens2) {  // allpot==false in this case
+            for(unsigned int index=0, size=cdens2->size(); index<size; index++)
+                componentsDens.push_back(cdens2->component(index));
+        } else if(allpot) {
+            componentsPot.push_back(pot2);
+        } else {
+            componentsDens.push_back(dens2);
+        }
+        return allpot ? 
+            createPotentialObject(potential::PtrPotential(new potential::Composite(componentsPot))) :
+            createDensityObject(potential::PtrDensity(new potential::CompositeDensity(componentsDens)));
+    } else {  // trying to add something other than Density or Potential is not supported
+        Py_INCREF(Py_NotImplemented);
+        return Py_NotImplemented;
+    }
+}
+
+// arithmetic operations - only addition of two density objects, or density and potential
+static PyNumberMethods Density_number_methods = {
+    Density_add,
+};
+
 // indexing scheme is shared by both Density and Potential python classes
 static PySequenceMethods Density_sequence_methods = {
     Density_len, 0, 0, Density_elem,
@@ -2198,10 +2280,13 @@ static PyMethodDef Density_methods[] = {
 static PyTypeObject DensityType = {
     PyVarObject_HEAD_INIT(NULL, 0)
     "agama.Density",
-    sizeof(DensityObject), 0, (destructor)Density_dealloc,
-    0, 0, 0, 0, Density_name, 0, &Density_sequence_methods, 0, Density_hash, 0, 0, 0, 0, 0,
-    Py_TPFLAGS_DEFAULT, docstringDensity,
-    0, 0, Density_compare, 0, 0, 0, Density_methods, 0, 0, 0, 0, 0, 0, 0,
+    sizeof(DensityObject), 0, (destructor)Density_dealloc, 0, 0, 0, 0, Density_name,
+    &Density_number_methods, &Density_sequence_methods, 0, Density_hash, 0, 0, 0, 0, 0,
+#if PY_MAJOR_VERSION==2
+    Py_TPFLAGS_CHECKTYPES | /* allow arithmetic operations on different types (i.e. Density+Potential) */
+#endif
+    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE /*allow it to be subclassed*/,
+    docstringDensity, 0, 0, Density_compare, 0, 0, 0, Density_methods, 0, 0, 0, 0, 0, 0, 0,
     (initproc)Density_init
 };
 
@@ -2309,17 +2394,6 @@ static const char* docstringPotential =
     "of potentials in this approach. "
     "Alternatively, one may provide no units at all, and use the `N-body` convention G=1 "
     "(this is the default regime and is restored by calling `setUnits()` without arguments).\n";
-
-/// \cond INTERNAL_DOCS
-/// Python type corresponding to Potential class, which is inherited from Density
-typedef struct {
-    PyObject_HEAD
-    // note that the memory layout of both Density and Potential python classes are the same,
-    // but the sole member variable (a smart pointer) has different (but compatible) base types,
-    // allowing it to be used in class methods shared by both classes
-    potential::PtrPotential pot;
-} PotentialObject;
-/// \endcond
 
 /// Helper class for providing a BasePotential interface
 /// to a Python function that returns the value of a potential at one or several point
@@ -3065,8 +3139,8 @@ static PyMethodDef Potential_methods[] = {
 static PyTypeObject PotentialType = {
     PyVarObject_HEAD_INIT(NULL, 0)
     "agama.Potential",
-    sizeof(PotentialObject), 0, (destructor)Potential_dealloc,
-    0, 0, 0, 0, /*sic!*/ Density_name, 0, /*sic!*/ &Density_sequence_methods, 0, 0, 0, 0, 0, 0, 0,
+    sizeof(PotentialObject), 0, (destructor)Potential_dealloc, 0, 0, 0, 0, /*sic!*/ Density_name,
+    /*sic!*/ &Density_number_methods, /*sic!*/ &Density_sequence_methods, 0, 0, 0, 0, 0, 0, 0,
     Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE /*allow it to be subclassed*/, docstringPotential,
     0, 0, 0, 0, 0, 0, Potential_methods, 0, 0, /*parent class*/ &DensityType, 0, 0, 0, 0,
     (initproc)Potential_init
@@ -8209,6 +8283,29 @@ PyObject* sampleNdim(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
     }
 }
 
+/// description of random seed function
+static const char* docstringRandomSeed =
+    "Set the seed for the internal random number generator.\n"
+    "This generator is used in various sampling methods, e.g., Density.sample(), GalaxyModel.sample(), "
+    "and sampleNdim(). At the start of execution, the seed always has the same initial value; "
+    "if one needs to produce different random realizations every time the script is run, "
+    "one can set randomSeed(0), taking the value from the current time.";
+ 
+PyObject* randomSeed(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
+{
+    int seed = -1;
+    if(args != NULL && PyTuple_Check(args) && PyTuple_Size(args) == 1 &&
+        ((seed = PyInt_AsLong(PyTuple_GET_ITEM(args, 0))) >= 0) )
+    {
+        math::randomize(seed);
+        Py_INCREF(Py_None);
+        return Py_None;
+    } else {
+        PyErr_SetString(PyExc_TypeError, "randomSeed() accepts only one integer argument >= 0");
+        return NULL;
+    }
+}
+
 ///@}
 
 
@@ -8241,6 +8338,8 @@ static PyMethodDef module_methods[] = {
       METH_VARARGS | METH_KEYWORDS, docstringIntegrateNdim },
     { "sampleNdim",             (PyCFunction)sampleNdim,
       METH_VARARGS | METH_KEYWORDS, docstringSampleNdim },
+    { "randomSeed",             (PyCFunction)randomSeed,
+      METH_VARARGS,                 docstringRandomSeed },
     { NULL }
 };
 

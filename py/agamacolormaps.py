@@ -1,15 +1,21 @@
-### ------------------------------------------- ###
-### add a couple of new colormaps to matplotlib ###
+### ------------------------------------------ ###
+### add a bunch of new colormaps to matplotlib ###
+import matplotlib, matplotlib.colors
+
+try:  # matplotlib version >= 3.6
+    register_cmap = matplotlib.colormaps.register
+except AttributeError:
+    import matplotlib.cm
+    register_cmap = matplotlib.cm.register_cmap
 
 # "sauron" by Michele Cappellari & Eric Emsellem, which is based on "jet" (both thoroughly not recommended)
-import matplotlib.colors, matplotlib.cm
 f=[0.0, 0.17, 0.336, 0.414, 0.463, 0.502, 0.541, 0.590, 0.668, 0.834, 1.0]
 r=[0.01, 0.0, 0.4, 0.5, 0.3, 0.0, 0.7, 1.0, 1.0, 1.0, 0.9]
 g=[0.01, 0.0, 0.85,1.0, 1.0, 0.9, 1.0, 1.0, 0.85,0.0, 0.9]
 b=[0.01, 1.0, 1.0, 1.0, 0.7, 0.0, 0.0, 0.0, 0.0, 0.0, 0.9]
-matplotlib.cm.register_cmap(cmap=matplotlib.colors.LinearSegmentedColormap('sauron',
+register_cmap(cmap=matplotlib.colors.LinearSegmentedColormap('sauron',
     { 'red': zip(f,r,r), 'green': zip(f,g,g), 'blue': zip(f,b,b) } ))
-matplotlib.cm.register_cmap(cmap=matplotlib.colors.LinearSegmentedColormap('sauron_r',
+register_cmap(cmap=matplotlib.colors.LinearSegmentedColormap('sauron_r',
     { 'red': zip(f,r[::-1],r[::-1]), 'green': zip(f,g[::-1],g[::-1]), 'blue': zip(f,b[::-1],b[::-1]) } ))
 
 # "circle" is a constant-brightness, perceptually uniform cyclic rainbow map
@@ -79,8 +85,8 @@ circle = [
 [0.8660, 0.2401, 0.7264], [0.8619, 0.2438, 0.7363], [0.8577, 0.2474, 0.7461], [0.8534, 0.2511, 0.7559],
 [0.8492, 0.2546, 0.7656], [0.8449, 0.2581, 0.7753], [0.8406, 0.2614, 0.7849], [0.8363, 0.2646, 0.7945],
 [0.8320, 0.2677, 0.8042], [0.8278, 0.2706, 0.8138], [0.8235, 0.2733, 0.8235], [0.8194, 0.2757, 0.8333]]
-matplotlib.cm.register_cmap('circle',   matplotlib.colors.ListedColormap(circle))
-matplotlib.cm.register_cmap('circle_r', matplotlib.colors.ListedColormap(circle[::-1]))
+register_cmap(cmap=matplotlib.colors.ListedColormap(circle,       name='circle'))
+register_cmap(cmap=matplotlib.colors.ListedColormap(circle[::-1], name='circle_r'))
 
 # "bluered" is a diverging colormap going from dark magenta/blue/cyan to yellow/red/dark purple,
 # analogously to "RdBu_r" but with higher contrast and more uniform gradient. It is suitable for
@@ -152,8 +158,8 @@ bluered=[
 [0.2753, 0.0594, 0.1879], [0.2635, 0.0548, 0.1850], [0.2516, 0.0500, 0.1819], [0.2398, 0.0450, 0.1786],
 [0.2280, 0.0397, 0.1751], [0.2162, 0.0344, 0.1714], [0.2045, 0.0293, 0.1676], [0.1928, 0.0243, 0.1635],
 [0.1811, 0.0195, 0.1594], [0.1695, 0.0149, 0.1551], [0.1579, 0.0105, 0.1506], [0.1463, 0.0064, 0.1461]]
-matplotlib.cm.register_cmap('bluered',   matplotlib.colors.ListedColormap(bluered))
-matplotlib.cm.register_cmap('bluered_r', matplotlib.colors.ListedColormap(bluered[::-1]))
+register_cmap(cmap=matplotlib.colors.ListedColormap(bluered,       name='bluered'))
+register_cmap(cmap=matplotlib.colors.ListedColormap(bluered[::-1], name='bluered_r'))
 
 # "breeze" is a better-balanced version of "jet", with diverging luminosity profile,
 # going from dark blue to bright green in the center and then back to dark red.
@@ -223,8 +229,8 @@ breeze = [
 [0.3016, 0.0441, 0.0653], [0.2895, 0.0398, 0.0618], [0.2774, 0.0356, 0.0581], [0.2653, 0.0316, 0.0543],
 [0.2531, 0.0279, 0.0503], [0.2409, 0.0243, 0.0463], [0.2286, 0.0209, 0.0421], [0.2162, 0.0176, 0.0377],
 [0.2038, 0.0146, 0.0335], [0.1913, 0.0118, 0.0294], [0.1788, 0.0091, 0.0256], [0.1661, 0.0067, 0.0219]]
-matplotlib.cm.register_cmap('breeze',   matplotlib.colors.ListedColormap(breeze))
-matplotlib.cm.register_cmap('breeze_r', matplotlib.colors.ListedColormap(breeze[::-1]))
+register_cmap(cmap=matplotlib.colors.ListedColormap(breeze,       name='breeze'))
+register_cmap(cmap=matplotlib.colors.ListedColormap(breeze[::-1], name='breeze_r'))
 
 # "mist" is another replacement for "jet" or "rainbow" maps, which differs from "breeze" by
 # having smaller dynamical range in brightness. The red and blue endpoints are darker than
@@ -294,8 +300,8 @@ mist=[
 [0.5573, 0.0606, 0.1718], [0.5513, 0.0553, 0.1740], [0.5452, 0.0500, 0.1761], [0.5391, 0.0446, 0.1781],
 [0.5330, 0.0389, 0.1801], [0.5269, 0.0333, 0.1821], [0.5208, 0.0278, 0.1840], [0.5146, 0.0226, 0.1858],
 [0.5085, 0.0174, 0.1876], [0.5024, 0.0124, 0.1893], [0.4962, 0.0075, 0.1910], [0.4901, 0.0026, 0.1927]]
-matplotlib.cm.register_cmap('mist',   matplotlib.colors.ListedColormap(mist))
-matplotlib.cm.register_cmap('mist_r', matplotlib.colors.ListedColormap(mist[::-1]))
+register_cmap(cmap=matplotlib.colors.ListedColormap(mist,       name='mist'))
+register_cmap(cmap=matplotlib.colors.ListedColormap(mist[::-1], name='mist_r'))
 
 # "earth" is a rainbow-like colormap with increasing luminosity, going from black through
 # dark blue, medium green in the middle and light red/orange to white.
@@ -367,8 +373,8 @@ earth = [
 [0.982, 0.889, 0.850], [0.982, 0.898, 0.862], [0.982, 0.908, 0.875], [0.981, 0.918, 0.887],
 [0.981, 0.927, 0.900], [0.982, 0.937, 0.913], [0.982, 0.947, 0.925], [0.983, 0.957, 0.938],
 [0.984, 0.966, 0.951], [0.987, 0.976, 0.963], [0.990, 0.985, 0.974], [0.994, 0.994, 0.985]]
-matplotlib.cm.register_cmap('earth',   matplotlib.colors.ListedColormap(earth))
-matplotlib.cm.register_cmap('earth_r', matplotlib.colors.ListedColormap(earth[::-1]))
+register_cmap(cmap=matplotlib.colors.ListedColormap(earth,       name='earth'))
+register_cmap(cmap=matplotlib.colors.ListedColormap(earth[::-1], name='earth_r'))
 
 # "hell" is a slightly tuned version of "inferno", with the main difference that it goes to
 # pure white at the bright end (starts from black, then dark blue/purple, red in the middle,
@@ -438,5 +444,5 @@ hell = [
 [0.941, 0.947, 0.879], [0.946, 0.952, 0.891], [0.951, 0.956, 0.903], [0.955, 0.961, 0.915],
 [0.960, 0.966, 0.927], [0.965, 0.970, 0.938], [0.971, 0.975, 0.950], [0.976, 0.980, 0.961],
 [0.981, 0.984, 0.971], [0.987, 0.989, 0.981], [0.993, 0.994, 0.991], [0.998, 0.999, 0.999]]
-matplotlib.cm.register_cmap('hell',   matplotlib.colors.ListedColormap(hell))
-matplotlib.cm.register_cmap('hell_r', matplotlib.colors.ListedColormap(hell[::-1]))
+register_cmap(cmap=matplotlib.colors.ListedColormap(hell,       name='hell'))
+register_cmap(cmap=matplotlib.colors.ListedColormap(hell[::-1], name='hell_r'))

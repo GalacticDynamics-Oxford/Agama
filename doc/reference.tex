@@ -944,6 +944,8 @@ As usual, writing \texttt{help(agama.Whatever)} brings up a complete description
 using the parameters listed in Section~\ref{sec:PotentialFactory}; argument names are case-insensitive, as are the names of density models. Note that the list of parameters relevant for a specific model depends on the \texttt{type} argument, but no error will be issued if other parameters are provided (they will simply be ignored).
 Alternatively, to combine several density objects \texttt{d1}, \texttt{d2}, etc., one may list them as the unnamed arguments of the constructor (these could be proper Density objects, dictionaries with density parameters, or user-defined functions providing the Density interface, see below):\\
 \texttt{comp = agama.Density(d1, dict(type="Plummer", mass=42), d2)}\\[2mm]
+More idiomatically, one can ``add'' two or more \ttt{Density} or \ttt{Potential} instances to create a composite object:\\
+\texttt{comp2 = comp + d3 + d4}\textit{\color{Sepia} \ \ \ \# will end up having 5 components}\\[2mm]
 Elements of such composite density objects can be accessed by index or iterated over:\\
 \texttt{for i in range(len(comp)): print(comp[i])}\\
 \texttt{for d in comp: print(d)}\\[2mm]
@@ -1217,7 +1219,8 @@ At the moment there is no way to explicitly attach the units to the dimensional 
 \ttt{solveOpt} routine for solving linear or quadratic optimization problems (used in the context of Schwarzschild modelling);\\
 \ttt{nonuniformGrid} and \ttt{symmetricGrid} routines for constructing one- and two-sided semi-exponentially-spaced arrays;\\
 \ttt{bsplineInterp}, \ttt{bsplineMatrix}, \ttt{bsplineIntegrals} routines for dealing with B-splines (the first one can be more efficiently replaced by the \ttt{Spline} class);\\
-\ttt{ghInterp}, \ttt{ghMoments} routines for dealing with Gauss--Hermite moments (see Section~\ref{sec:SchwarzschildDetails} for \hyperref[sec:SchwarzschildExample]{examples of usage} on the last two groups).
+\ttt{ghInterp}, \ttt{ghMoments} routines for dealing with Gauss--Hermite moments (see Section~\ref{sec:SchwarzschildDetails} for \hyperref[sec:SchwarzschildExample]{examples of usage} on the last two groups);\\
+\ttt{randomSeed} routine for setting the seed of the internal random number generator used, e.g., in various sampling methods.
 
 \paragraph{Colormaps} augment the rich collection of color schemes included in \texttt{matplotlib} with several custom-designed maps, which are better-balanced analogues of \texttt{hsv}, \texttt{RdBu}, \texttt{jet}, \texttt{rainbow}, \texttt{gist_earth} and \texttt{inferno} maps (Figure~\ref{fig:colormaps}). They can be accessed from any \texttt{matplotlib} function under the names \ppp{circle}, \ppp{bluered}, \ppp{breeze}, \ppp{mist}, \ppp{earth} and \ppp{hell}, respectively.
 
