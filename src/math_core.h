@@ -102,10 +102,10 @@ public:
         \f$  D = (1/N) \sum_{i=1}^N  ( x_i - < x > )^2  \f$.  */
     double disp() const { return num>1 ? ssq / (num-1) : 0; }
     /** Return the number of elements */
-    unsigned int count() const { return num; }
+    size_t count() const { return num; }
 private:
     double avg, ssq;
-    unsigned int num;
+    size_t num;
 };
 
 ///@}

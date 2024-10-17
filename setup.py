@@ -199,6 +199,7 @@ def createMakefile():
         ARCH_FLAG = '-arch '+uname[4]  # could be x86_64 or arm64
         if runCompiler(flags=ARCH_FLAG):
             COMPILE_FLAGS_ALL += [ARCH_FLAG]
+            LINK_FLAGS_LIB += [ARCH_FLAG]
 
     # [1c]: test the -march flag (optional, allows architecture-dependent compiler optimizations)
     if not MSVC and not MACOS:

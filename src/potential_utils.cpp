@@ -78,6 +78,8 @@ public:
     // vectorized version of the integrand
     virtual void evalmany(const size_t npoints, const double vars[], double values[]) const
     {
+        if(npoints==0)
+            return;
         coord::PosCar* points = static_cast<coord::PosCar*>(alloca(npoints * sizeof(coord::PosCar)));
         double* dZds = static_cast<double*>(alloca(npoints * sizeof(double)));
         for(size_t i=0; i<npoints; i++) {

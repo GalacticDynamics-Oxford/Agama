@@ -64,8 +64,8 @@
 #include "units.h"
 #include "utils.h"
 #include "utils_config.h"
-// text string embedded into the python module as the __version__ attribute
-#define AGAMA_VERSION "1.0 compiled on " __DATE__
+// text string embedded into the python module as the __version__ attribute (including Github commit number)
+#define AGAMA_VERSION "1.0.145 compiled on " __DATE__
 
 // older versions of numpy have different macro names
 // (will need to expand this list if other similar macros are used in the code)
@@ -1988,10 +1988,10 @@ PyObject* Density_export(PyObject* self, PyObject* args)
 PyObject* Density_sample(PyObject* self, PyObject* args, PyObject* namedArgs)
 {
     static const char* keywords[] = {"n", "potential", "beta", "kappa", NULL};
-    int numPoints=0;
+    Py_ssize_t numPoints=0;
     PyObject* pot_obj=NULL;
     double beta=NAN, kappa=NAN;  // undefined by default, if no argument is provided
-    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "i|Odd", const_cast<char**>(keywords),
+    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "n|Odd", const_cast<char**>(keywords),
         &numPoints, &pot_obj, &beta, &kappa))
         return NULL;
     if(numPoints<=0) {
@@ -2025,11 +2025,11 @@ PyObject* Density_sample(PyObject* self, PyObject* args, PyObject* namedArgs)
         }
 
         // convert output to NumPy array
-        numPoints = points.size();
+        assert(numPoints == (Py_ssize_t)points.size());
         npy_intp dims[] = {numPoints, pot? 6 : 3};  // either position or position+velocity
         PyArrayObject* point_arr = (PyArrayObject*)PyArray_SimpleNew(2, dims, NPY_DOUBLE);
         PyArrayObject* mass_arr  = (PyArrayObject*)PyArray_SimpleNew(1, dims, NPY_DOUBLE);
-        for(int i=0; i<numPoints; i++) {
+        for(Py_ssize_t i=0; i<numPoints; i++) {
             if(pot)
                 unconvertPosVel(pointsvel.point(i), &pyArrayElem<double>(point_arr, i, 0));
             else
@@ -4488,8 +4488,8 @@ PyObject* GalaxyModel_sample_posvel(GalaxyModelObject* self, PyObject* args)
 {
     if(!GalaxyModel_isCorrect(self))
         return NULL;
-    int numPoints=0;
-    if(!PyArg_ParseTuple(args, "i", &numPoints) || numPoints<=0)
+    Py_ssize_t numPoints=0;
+    if(!PyArg_ParseTuple(args, "n", &numPoints) || numPoints<=0)
     {
         PyErr_SetString(PyExc_TypeError, "sample() takes one integer argument - the number of points");
         return NULL;
@@ -4511,11 +4511,11 @@ PyObject* GalaxyModel_sample_posvel(GalaxyModelObject* self, PyObject* args)
 
         // remaining operations use Python C API and thus should be performed under GIL.
         // convert output to NumPy array
-        numPoints = points.size();
+        assert(numPoints == (Py_ssize_t)points.size());
         npy_intp dims[] = {numPoints, 6};
         PyObject* posvel_arr = PyArray_SimpleNew(2, dims, NPY_DOUBLE);
         PyObject* mass_arr   = PyArray_SimpleNew(1, dims, NPY_DOUBLE);
-        for(int i=0; i<numPoints; i++) {
+        for(Py_ssize_t i=0; i<numPoints; i++) {
             unconvertPosVel(points.point(i), &pyArrayElem<double>(posvel_arr, i, 0));
             pyArrayElem<double>(mass_arr, i) = points.mass(i) / conv->massUnit;
         }
@@ -7187,8 +7187,7 @@ bool createOrbit(int dtype, const orbit::Trajectory &traj,
         {   // access to Python C API for one thread at a time
             PyAcquireGIL lock;
             if(outputTime)
-                time_obj = PyArray_SimpleNew(1, dims,
-                    dtype==NPY_FLOAT || dtype==NPY_CFLOAT ? NPY_FLOAT : NPY_DOUBLE);
+                time_obj = PyArray_SimpleNew(1, dims, NPY_DOUBLE);
             traj_obj = PyArray_SimpleNew(2, dims, dtype);
             if((outputTime && !time_obj) || !traj_obj) {
                 Py_XDECREF(time_obj);
@@ -7200,11 +7199,7 @@ bool createOrbit(int dtype, const orbit::Trajectory &traj,
         for(npy_intp index=0; index<size; index++) {
             if(outputTime) {
                 // convert the time array
-                if(dtype == NPY_FLOAT || dtype == NPY_CFLOAT)
-                    pyArrayElem<float>(time_obj, index) =
-                        static_cast<float>(traj[index].second / conv->timeUnit);
-                else
-                    pyArrayElem<double>(time_obj, index) = traj[index].second / conv->timeUnit;
+                pyArrayElem<double>(time_obj, index) = traj[index].second / conv->timeUnit;
             }
             // convert the units and numerical type of the trajectory array
             double point[6];
@@ -7301,7 +7296,7 @@ static const char* docstringOrbit =
     "'float32' (default) means 6 32-bit floats;\n"
     "'complex' or 'complex128' or 'c16' means 3 128-bit complex values (pairs of 64-bit floats), "
     "with velocity in the imaginary part; and 'complex64' or 'c8' means 3 64-bit complex values.\n"
-    "The time array is also 32-bit or 64-bit, in agreement with the trajectory. "
+    "The time array is always 64-bit float. "
     "The choice of dtype only affects trajectories; arrays returned by each target always "
     "contain 32-bit floats.\n"
     "In the second case (dtype=object), the output is a 1d array of length N containing instances "
@@ -8249,9 +8244,9 @@ static const char* docstringSampleNdim =
 PyObject* sampleNdim(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
 {
     static const char* keywords[] = {"fnc", "nsamples", "lower", "upper", NULL};
-    int numSamples=-1;
+    Py_ssize_t numSamples=-1;
     PyObject *callback=NULL, *lower_obj=NULL, *upper_obj=NULL;
-    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "Oi|OO", const_cast<char**>(keywords),
+    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "On|OO", const_cast<char**>(keywords),
         &callback, &numSamples, &lower_obj, &upper_obj))
         return NULL;
     if(!PyCallable_Check(callback)) {
@@ -8274,7 +8269,7 @@ PyObject* sampleNdim(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
             math::sampleNdim(FncWrapper(xlow.size(), callback),
                 &xlow[0], &xupp[0], numSamples, samples, &numEval, &result, &error);
         }
-        return Py_BuildValue("Nddi", toPyArray(samples), result, error, numEval);
+        return Py_BuildValue("Nddn", toPyArray(samples), result, error, (Py_ssize_t)numEval);
     }
     catch(std::exception& ex) {
         if(!PyErr_Occurred())    // set our own error string if it hadn't been set by Python
@@ -8284,14 +8279,14 @@ PyObject* sampleNdim(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
 }
 
 /// description of random seed function
-static const char* docstringRandomSeed =
+static const char* docstringSetRandomSeed =
     "Set the seed for the internal random number generator.\n"
     "This generator is used in various sampling methods, e.g., Density.sample(), GalaxyModel.sample(), "
     "and sampleNdim(). At the start of execution, the seed always has the same initial value; "
     "if one needs to produce different random realizations every time the script is run, "
-    "one can set randomSeed(0), taking the value from the current time.";
+    "setRandomSeed(0) takes the value from the current time.";
  
-PyObject* randomSeed(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
+PyObject* setRandomSeed(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
 {
     int seed = -1;
     if(args != NULL && PyTuple_Check(args) && PyTuple_Size(args) == 1 &&
@@ -8301,7 +8296,7 @@ PyObject* randomSeed(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
         Py_INCREF(Py_None);
         return Py_None;
     } else {
-        PyErr_SetString(PyExc_TypeError, "randomSeed() accepts only one integer argument >= 0");
+        PyErr_SetString(PyExc_TypeError, "setRandomSeed() accepts only one integer argument >= 0");
         return NULL;
     }
 }
@@ -8338,8 +8333,8 @@ static PyMethodDef module_methods[] = {
       METH_VARARGS | METH_KEYWORDS, docstringIntegrateNdim },
     { "sampleNdim",             (PyCFunction)sampleNdim,
       METH_VARARGS | METH_KEYWORDS, docstringSampleNdim },
-    { "randomSeed",             (PyCFunction)randomSeed,
-      METH_VARARGS,                 docstringRandomSeed },
+    { "setRandomSeed",          (PyCFunction)setRandomSeed,
+      METH_VARARGS,                 docstringSetRandomSeed },
     { NULL }
 };
 
@@ -8379,12 +8374,18 @@ PyInit_agama(void)
     };
     import_array1(NULL);  // needed for NumPy to work properly
 
-#if (PY_MAJOR_VERSION*0x100 + PY_MINOR_VERSION) < 0x307
+#if PY_VERSION_HEX < 0x03070000
     PyEval_InitThreads();  // this is not needed starting from Python 3.7
 #endif
     thismodule = PyModule_Create(&moduledef);
     if(!thismodule)
         return NULL;
+
+#ifdef Py_GIL_DISABLED
+    // declare compatibility with free-threading Python >= 3.13
+    PyUnstable_Module_SetGIL(thismodule, Py_MOD_GIL_NOT_USED);
+#endif
+
     PyModule_AddStringConstant(thismodule, "__version__", AGAMA_VERSION);
     PyModule_AddObject(thismodule, "G", PyFloat_FromDouble(1.0));
     conv.reset(new units::ExternalUnits());

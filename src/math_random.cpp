@@ -212,7 +212,7 @@ void getRandomRotationMatrix(double mat[9], PRNGState* state)
 
 void getRandomPermutation(size_t count, size_t output[], PRNGState* state)
 {
-    // Fisher-Yates algo
+    // Fisher-Yates-Durstenfeld algo
     for(size_t i=0; i<count; i++) {
         size_t j = std::min(static_cast<size_t>(random(state) * (i+1)), i);
         output[i] = output[j];
