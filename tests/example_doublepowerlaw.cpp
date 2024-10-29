@@ -193,7 +193,7 @@ int main(int argc, char* argv[])
 
     // check if a separate potential was also provided
     if(inputpotential.empty()) {
-        pot = potential::Multipole::create(*dens, 0, 0, /*gridsize*/ 40);
+        pot = potential::Multipole::create(*dens, coord::ST_SPHERICAL, 0, 0, /*gridsize*/ 40);
     } else if(utils::fileExists(inputpotential)) {
         // create a (possibly composite) potential from the parameters provided in an INI file
         pot = potential::readPotential(inputpotential);
@@ -255,7 +255,7 @@ int main(int argc, char* argv[])
     }
     potential::PtrPotential pot_appr = potential::Multipole::create(
         potential::DensitySphericalHarmonic(rad, std::vector< std::vector<double> >(1, rho)),
-        0, 0, 40, 0.5e-3, 2e3);
+        coord::ST_SPHERICAL, 0, 0, 40, 0.5e-3, 2e3);
     std::cout << "#R      rho_orig  rho_appr  vcirc_o   vcirc_a   sigma_o   sig_R     sig_t\n";
     for(int i=0; i<s; i++) {
         double Phi=pot->value(coord::PosCyl(rad[i],0,0));

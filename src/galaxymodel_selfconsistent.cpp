@@ -38,7 +38,7 @@ void ComponentWithSpheroidalDF::update(
 {
     density = potential::DensitySphericalHarmonic::create(
         DensityFromDF(GalaxyModel(totalPotential, actionFinder, *distrFunc), relError, maxNumEval),
-        lmax, mmax, gridSizeR, rmin, rmax, /*fixOrder*/true);
+        coord::ST_UNKNOWN, lmax, mmax, gridSizeR, rmin, rmax, /*fixOrder*/true);
 }
 
 ComponentWithDisklikeDF::ComponentWithDisklikeDF(
@@ -60,7 +60,7 @@ void ComponentWithDisklikeDF::update(
 {
     density = potential::DensityAzimuthalHarmonic::create(
         DensityFromDF(GalaxyModel(totalPotential, actionFinder, *distrFunc), relError, maxNumEval),
-        mmax, gridSizeR, Rmin, Rmax, gridSizez, zmin, zmax, /*fixOrder*/true);
+        coord::ST_UNKNOWN, mmax, gridSizeR, Rmin, Rmax, gridSizez, zmin, zmax, /*fixOrder*/true);
 }
 
 
@@ -139,7 +139,7 @@ void updateTotalPotential(SelfConsistentModel& model)
     // and add it as one of potential components (possibly the only one)
     if(totalDensitySph != NULL)
         compPot.push_back(potential::Multipole::create(*totalDensitySph,
-            model.lmaxAngularSph, model.mmaxAngularSph,
+            coord::ST_UNKNOWN, model.lmaxAngularSph, model.mmaxAngularSph,
             model.sizeRadialSph, model.rminSph, model.rmaxSph));
 
     // now the same for the total density to be used in CylSpline for the flattened components
@@ -151,7 +151,7 @@ void updateTotalPotential(SelfConsistentModel& model)
 
     if(totalDensityDisk != NULL)
         compPot.push_back(potential::CylSpline::create(*totalDensityDisk,
-            model.mmaxAngularCyl,
+            coord::ST_UNKNOWN, model.mmaxAngularCyl,
             model.sizeRadialCyl,   model.RminCyl, model.RmaxCyl,
             model.sizeVerticalCyl, model.zminCyl, model.zmaxCyl));
 

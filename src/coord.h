@@ -99,6 +99,11 @@ inline bool isZRotSymmetric(const SymmetryType sym) {
     return (sym & ST_ZROTATION) == ST_ZROTATION;
 }
 
+/** test for rotational symmetry about any axis (implies spherical symmetry) */
+inline bool isRotSymmetric(const SymmetryType sym) {
+    return (sym & ST_ROTATION) == ST_ROTATION;
+}
+
 /** test for symmetry under xy-reflection */
 inline bool isBisymmetric(const SymmetryType sym) {
     return (sym & ST_BISYMMETRIC) == ST_BISYMMETRIC;

@@ -113,18 +113,28 @@ inline math::SphHarmIndices getIndicesFromCoefs(
 // \tparam  K  is the number of arrays (one for density, two for potential and its radial derivative);
 // \param[in]  lmax  is the maximum order of angular expansion in cos(theta);
 // \param[in]  mmax  is the maximum order of expansion in phi (may be less than lmax);
+// \param[in]  sym   is the required symmetry of the expansion (may be more symmetric than input coefs);
 // \param[in,out]  coefs  are K 2d arrays of coefficients for each harmonic term (1st index)
 // at each radius (2nd index), which may be sequestered if necessary.
 template<int K>
-void restrictSphHarmCoefs(int lmax, int mmax, std::vector<std::vector<double> > coefs[K])
+void restrictSphHarmCoefs(int lmax, int mmax, coord::SymmetryType sym,
+    std::vector<std::vector<double> > coefs[K])
 {
+    // retain only the terms that are allowed under the required symmetry setting
+    math::SphHarmIndices ind(lmax, mmax, sym);
+    std::vector<bool> nonzeroTerms(ind.size(), false);
+    for(int m=ind.mmin(); m<=mmax; m++)
+        for(int l=ind.lmin(m); l<=lmax; l+=ind.step)
+            nonzeroTerms[ind.index(l, m)] = true;
+
     // keep track of the maximum order "l" that has any non-zero "m" harmonics
     // in the input arrays of coefs, after eliminating the ones with |m|>mmax and l>lmax
     int lmax_actual = 0;
+
     for(unsigned int c=0; c<coefs[0].size(); c++) {
         int l = math::SphHarmIndices::index_l(c), m = math::SphHarmIndices::index_m(c);
         bool isZero = true;
-        if(l>lmax || abs(m)>mmax) {
+        if(l>lmax || abs(m)>mmax || !nonzeroTerms[c]) {
             for(int k=0; k<K; k++)
                 coefs[k][c].assign(coefs[k][c].size(), 0.);
         } else {
@@ -316,6 +326,23 @@ void chooseGridRadii(const BaseDensity& src, const unsigned int gridSizeR,
             "User-defined grid in r=["+utils::toString(rmin)+":"+utils::toString(rmax)+"]");
         return;
     }
+    // if the input is an instance of Multipole or DensitySphericalHarmonic,
+    // adopt its values for rmin/max unless given explicitly
+    const DensitySphericalHarmonic* dsh = dynamic_cast<const DensitySphericalHarmonic*>(&src);
+    const Multipole* mul = dynamic_cast<const Multipole*>(&src);
+    if(dsh) {
+        if(rmin==0)
+            rmin = dsh->getRadii().front();
+        if(rmax==0)
+            rmax = dsh->getRadii().back();
+    } else if(mul) {
+        if(rmin==0)
+            rmin = mul->getRadii().front();
+        if(rmax==0)
+            rmax = mul->getRadii().back();
+    }
+    if(rmin!=0 && rmax!=0)
+        return;
     const double
     LOGSTEP = log(1 + sqrt(20./gridSizeR)), // log-spacing between consecutive grid nodes (rule of thumb)
     LOGRMAX = 100.,                         // do not consider |log r| larger than this number
@@ -832,7 +859,6 @@ void computeDensityCoefsFromParticles(
         return;
 
     // obtain the list of nontrivial l>0 harmonics
-    // (TODO: this should be made part of math::SphHarmIndices interface!)
     std::vector<unsigned int> nonzeroCoefs;
     for(unsigned int c=1; c<ind.size(); c++)
         if(!harmonics[c].empty())
@@ -1005,31 +1031,45 @@ void computePotentialCoefsFromSource(const BaseDensity& dens,
 
 // static factory methods
 shared_ptr<const DensitySphericalHarmonic> DensitySphericalHarmonic::create(const BaseDensity& src,
-    int lmax, int mmax, unsigned int gridSizeR, double rmin, double rmax, bool fixOrder)
+    coord::SymmetryType symExp, int lmax, int mmax,
+    unsigned int gridSizeR, double rmin, double rmax, bool fixOrder)
 {
     if(gridSizeR < MULTIPOLE_MIN_GRID_SIZE || !(rmin>=0) || !(rmax==0 || rmax>rmin))
         throw std::invalid_argument("DensitySphericalHarmonic: invalid choice of min/max grid radii");
     if(lmax<0 || mmax<0 || mmax>lmax)
         throw std::invalid_argument("DensitySphericalHarmonic: invalid choice of expansion order");
-    if(isUnknown(src.symmetry()))
+
+    // symSrc is the symmetry of the input profile; symExp is the desired symmetry of the expansion
+    coord::SymmetryType symSrc = src.symmetry();
+    if(isUnknown(symSrc))
         throw std::invalid_argument(
             "DensitySphericalHarmonic: symmetry of the input density model is not specified");
+    if(isUnknown(symExp))
+        symExp = symSrc;
+    else
+        symExp = static_cast<coord::SymmetryType>(symSrc | symExp);  // inherit any symmetry from input
     chooseGridRadii(src, gridSizeR, rmin, rmax);
     std::vector<double> gridRadii = math::createExpGrid(gridSizeR, rmin, rmax);
+
     // to improve accuracy of SH coefficient computation, we may increase the order of expansion
     // that determines the number of integration points in angles
     // (unless fixOrder==true, in which case we strictly adhere to the prescribed lmax and mmax)
-    int lmax_tmp = fixOrder ? lmax : std::max<int>(lmax+LADD_SPHHARM, LMIN_SPHHARM);
-    int mmax_tmp = fixOrder ? mmax : std::max<int>(mmax+LADD_SPHHARM, LMIN_SPHHARM);
+    int lmaxSrc = fixOrder ? lmax : std::max<int>(lmax+LADD_SPHHARM, LMIN_SPHHARM);
+    int mmaxSrc = fixOrder ? mmax : std::max<int>(mmax+LADD_SPHHARM, LMIN_SPHHARM);
     // don't do extra work if the input density satisfies certain symmetries
-    if(isSpherical(src))     lmax = lmax_tmp = 0;
-    if(isZRotSymmetric(src)) mmax = mmax_tmp = 0;
+    if(isSpherical(symSrc))     lmaxSrc = 0;
+    if(isZRotSymmetric(symSrc)) mmaxSrc = 0;
+    // likewise limit the order of the expansion if needed to satisfy prescribed symmetry
+    if(isSpherical(symExp))     lmax = 0;
+    if(isZRotSymmetric(symExp)) mmax = 0;
+
+    // compute the expansion coefficients of the source model (possibly more than needed)
     std::vector<std::vector<double> > coefs;
     computeSphHarmCoefs<BaseDensity>(src,
-        math::SphHarmIndices(lmax_tmp, mmax_tmp, src.symmetry()), gridRadii,
+        math::SphHarmIndices(lmaxSrc, mmaxSrc, symSrc), gridRadii,
         /*output*/ &coefs);
     // resize the coefficients back to the requested order and symmetry
-    restrictSphHarmCoefs<1>(lmax, mmax, /*in/out*/ &coefs);
+    restrictSphHarmCoefs<1>(lmax, mmax, symExp, /*in/out*/ &coefs);
     return shared_ptr<const DensitySphericalHarmonic>(new DensitySphericalHarmonic(gridRadii, coefs));
 }
 
@@ -1223,45 +1263,61 @@ private:
 
 template<class BaseDensityOrPotential>
 shared_ptr<const Multipole> createMultipole(const BaseDensityOrPotential& src,
-    int lmax, int mmax, unsigned int gridSizeR, double rmin, double rmax, bool fixOrder)
+    coord::SymmetryType symExp, int lmax, int mmax,
+    unsigned int gridSizeR, double rmin, double rmax, bool fixOrder)
 {
     if(gridSizeR < MULTIPOLE_MIN_GRID_SIZE || !(rmin>=0) || !(rmax==0 || rmax>rmin))
         throw std::invalid_argument("Multipole: invalid grid parameters");
     if(lmax<0 || mmax<0 || mmax>lmax)
         throw std::invalid_argument("Multipole: invalid choice of expansion order");
-    if(isUnknown(src.symmetry()))
+
+    // symSrc is the symmetry of the input profile; symExp is the desired symmetry of the expansion
+    coord::SymmetryType symSrc = src.symmetry();
+    if(isUnknown(symSrc))
         throw std::invalid_argument("Multipole: symmetry of the input model is not specified");
+    if(isUnknown(symExp))
+        symExp = symSrc;
+    else
+        symExp = static_cast<coord::SymmetryType>(symSrc | symExp);  // inherit any symmetry from input
     chooseGridRadii(src, gridSizeR, rmin, rmax);
     std::vector<double> gridRadii = math::createExpGrid(gridSizeR, rmin, rmax);
+
     // to improve accuracy of SH coefficient computation, we may increase the order of expansion
     // that determines the number of integration points in angles
     // (unless fixOrder==true, in which case we strictly adhere to the prescribed lmax and mmax)
-    int lmax_tmp = fixOrder ? lmax : std::max<int>(lmax+LADD_SPHHARM, LMIN_SPHHARM);
-    int mmax_tmp = fixOrder ? mmax : std::max<int>(mmax+LADD_SPHHARM, LMIN_SPHHARM);
-    // don't do extra work if the input density satisfies certain symmetries
-    if(isSpherical(src))     lmax = lmax_tmp = 0;
-    if(isZRotSymmetric(src)) mmax = mmax_tmp = 0;
+    int lmaxSrc = fixOrder ? lmax : std::max<int>(lmax+LADD_SPHHARM, LMIN_SPHHARM);
+    int mmaxSrc = fixOrder ? mmax : std::max<int>(mmax+LADD_SPHHARM, LMIN_SPHHARM);
+    // don't do extra work if the input model satisfies certain symmetries
+    if(isSpherical(symSrc))     lmaxSrc = 0;
+    if(isZRotSymmetric(symSrc)) mmaxSrc = 0;
+    // likewise limit the order of the expansion if needed to satisfy prescribed symmetry
+    if(isSpherical(symExp))     lmax = 0;
+    if(isZRotSymmetric(symExp)) mmax = 0;
+
+    // compute the expansion coefficients of the source model (possibly more than needed)
     std::vector<std::vector<double> > coefs[2];  // Phi, dPhi
     computePotentialCoefsFromSource(src,
-        math::SphHarmIndices(lmax_tmp, mmax_tmp, src.symmetry()),
+        math::SphHarmIndices(lmaxSrc, mmaxSrc, symSrc),
         gridRadii, coefs);
     // resize the coefficients back to the requested order and symmetry
-    restrictSphHarmCoefs<2>(lmax, mmax, coefs);
+    restrictSphHarmCoefs<2>(lmax, mmax, symExp, coefs);
     return shared_ptr<const Multipole>(new Multipole(gridRadii, coefs[0], coefs[1]));
 }
 
 //------ the driver class for multipole potential ------//
 
 shared_ptr<const Multipole> Multipole::create(const BaseDensity& src,
-    int lmax, int mmax, unsigned int gridSizeR, double rmin, double rmax, bool fixOrder)
+    coord::SymmetryType sym, int lmax, int mmax,
+    unsigned int gridSizeR, double rmin, double rmax, bool fixOrder)
 {
-    return createMultipole(src, lmax, mmax, gridSizeR, rmin, rmax, fixOrder);
+    return createMultipole(src, sym, lmax, mmax, gridSizeR, rmin, rmax, fixOrder);
 }
 
 shared_ptr<const Multipole> Multipole::create(const BasePotential& src,
-    int lmax, int mmax, unsigned int gridSizeR, double rmin, double rmax, bool fixOrder)
+    coord::SymmetryType sym, int lmax, int mmax,
+    unsigned int gridSizeR, double rmin, double rmax, bool fixOrder)
 {
-    return createMultipole(src, lmax, mmax, gridSizeR, rmin, rmax, fixOrder);
+    return createMultipole(src, sym, lmax, mmax, gridSizeR, rmin, rmax, fixOrder);
 }
 
 shared_ptr<const Multipole> Multipole::create(
@@ -1275,13 +1331,6 @@ shared_ptr<const Multipole> Multipole::create(
         throw std::invalid_argument("Multipole: invalid choice of expansion order");
     if(isUnknown(sym))
         throw std::invalid_argument("Multipole: symmetry is not specified");
-    // we first reduce the grid size by two, and then add two extra nodes at ends:
-    // this is necessary for an accurate extrapolation that requires a robust estimate
-    // of 2nd derivative of potential, using 0th and 1st radial node at each end.
-    // The constructed density approximation has a power-law asymptotic behaviour
-    // beyond its grid domain, and by creating additional grid point for the potential,
-    // we robustly capture this power-law slope.
-    gridSizeR = std::max<unsigned int>(gridSizeR-2, MULTIPOLE_MIN_GRID_SIZE);
     chooseGridRadii(particles, gridSizeR, rmin, rmax);
     std::vector<double> gridRadii = math::createExpGrid(gridSizeR, rmin, rmax);
     if(isSpherical(sym))
@@ -1293,9 +1342,7 @@ shared_ptr<const Multipole> Multipole::create(
     // create an intermediate density approximation
     computeDensityCoefsFromParticles(particles, ind, gridRadii, coefDens, smoothing);
     DensitySphericalHarmonic dens(gridRadii, coefDens);
-    // add two extra points to the radial grid for the potential, for the reason explained above
-    gridRadii.insert(gridRadii.begin(), pow_2(gridRadii[0])/gridRadii[1]);
-    gridRadii.push_back(pow_2(gridRadii.back())/gridRadii[gridRadii.size()-2]);
+    // construct the potential from it
     computePotentialCoefsFromSource(dens, ind, gridRadii, coefsPot);
     return shared_ptr<const Multipole>(new Multipole(gridRadii, coefsPot[0], coefsPot[1]));
 }
@@ -2065,14 +2112,20 @@ void computePotentialCoefsBSE(
 } // end internal namespace
 
 shared_ptr<const BasisSet> BasisSet::create(const BaseDensity& src,
-    int lmax, int mmax, unsigned int nmax, double eta, double r0, bool fixOrder)
+    coord::SymmetryType symExp, int lmax, int mmax,
+    unsigned int nmax, double eta, double r0, bool fixOrder)
 {
     if(lmax<0 || mmax<0 || mmax>lmax || nmax>256 /*a really high upper limit!*/)
         throw std::invalid_argument("BasisSet: invalid choice of expansion order");
     if(!(eta>=0.5))
         throw std::invalid_argument("BasisSet: shape parameter eta should be >=0.5");
-    if(isUnknown(src.symmetry()))
+    coord::SymmetryType symSrc = src.symmetry();
+    if(isUnknown(symSrc))
         throw std::invalid_argument("BasisSet: symmetry of the input density model is not specified");
+    if(isUnknown(symExp))
+        symExp = symSrc;
+    else
+        symExp = static_cast<coord::SymmetryType>(symSrc | symExp);  // inherit any symmetry from input
     // if r0 is not provided, assign a plausible value automatically (half-mass radius)
     if(!(r0>0)) {
         double totalMass = src.totalMass();
@@ -2083,17 +2136,21 @@ shared_ptr<const BasisSet> BasisSet::create(const BaseDensity& src,
     // to improve accuracy of SH coefficient computation, we may increase the order of expansion
     // that determines the number of integration points in angles
     // (unless fixOrder==true, in which case we strictly adhere to the prescribed lmax and mmax)
-    int lmax_tmp = fixOrder ? lmax : std::max<int>(lmax+LADD_SPHHARM, LMIN_SPHHARM);
-    int mmax_tmp = fixOrder ? mmax : std::max<int>(mmax+LADD_SPHHARM, LMIN_SPHHARM);
+    int lmaxSrc = fixOrder ? lmax : std::max<int>(lmax+LADD_SPHHARM, LMIN_SPHHARM);
+    int mmaxSrc = fixOrder ? mmax : std::max<int>(mmax+LADD_SPHHARM, LMIN_SPHHARM);
     // don't do extra work if the input density satisfies certain symmetries
-    if(isSpherical(src))     lmax = lmax_tmp = 0;
-    if(isZRotSymmetric(src)) mmax = mmax_tmp = 0;
+    if(isSpherical(symSrc))     lmaxSrc = 0;
+    if(isZRotSymmetric(symSrc)) mmaxSrc = 0;
+    // likewise limit the order of the expansion if needed to satisfy prescribed symmetry
+    if(isSpherical(symExp))     lmax = 0;
+    if(isZRotSymmetric(symExp)) mmax = 0;
+    // compute the expansion coefficients of the source model (possibly more than needed)
     std::vector<std::vector<double> > coefs;
     computePotentialCoefsBSE(src,
-        math::SphHarmIndices(lmax_tmp, mmax_tmp, src.symmetry()),
+        math::SphHarmIndices(lmaxSrc, mmaxSrc, symSrc),
         nmax, eta, r0, /*output*/coefs);
     // resize the coefficients back to the requested order and symmetry
-    restrictSphHarmCoefs<1>(lmax, mmax, &coefs);
+    restrictSphHarmCoefs<1>(lmax, mmax, symExp, &coefs);
     return shared_ptr<const BasisSet>(new BasisSet(eta, r0, coefs));
 }
 

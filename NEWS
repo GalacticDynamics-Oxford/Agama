@@ -140,6 +140,17 @@ Some of this functionality is not yet ported to Agama.
 -----------
 API Changes
 
+October 2024:
+[C++] redesigned the treatment of symmetry in potential expansions: now it can be specified
+in the constructors independently from the symmetry of the input density/potential model.
+[Python] composite Density or Potential objects can be created by adding instances of these
+classes (syntactic sugar; equivalent by calling their constructors with several arguments).
+Removed the possibility of providing a tuple of objects to the density/potential constructor,
+now need to unpack it into elements.
+Creation of a composite Density or Potential from objects that are themselves composites
+"flattens" the result (i.e. unpacks the sub-components and combines them into one top-level
+composite object).
+
 June 2024:
 [C++,Python] replaced projectedForce by a more general routine/method projectedEval, which
 computes any combination of projected potential, acceleration and its derivatives.

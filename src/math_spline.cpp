@@ -4072,7 +4072,7 @@ double SplineLogDensityFitter<N>::logG(
         if(!infinite[p])
             continue;
         double Bspl[N+1], Bder[N+1];
-        int ind;  // TODO remove grid search
+        int ind;
         if(N==1) {
             ind = bsplineDerivs<1,0>(endpoint[p], &grid[0], numNodes, Bspl);
             bsplineDerivs<1,1>(endpoint[p], &grid[0], numNodes, Bder);

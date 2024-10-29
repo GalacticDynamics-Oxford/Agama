@@ -186,7 +186,8 @@ potential::PtrPotential createSphericalPotential(
         potmul->getCoefs(rad, Phi, dPhi);
     } else {
         // otherwise construct a temporary instance of Multipole and take the coefs from it
-        potential::Multipole::create(potential, /*lmax*/0, /*mmax*/0, /*gridSizeR*/50)->getCoefs(rad, Phi, dPhi);
+        potential::Multipole::create(potential,
+            coord::ST_SPHERICAL, /*lmax*/0, /*mmax*/0, /*gridSizeR*/50)->getCoefs(rad, Phi, dPhi);
     }
 
     // safety check: ensure that the potential is finite at origin

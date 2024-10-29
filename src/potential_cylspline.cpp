@@ -52,24 +52,67 @@ static const double EPS_COEF = 1e-10;
 // resize the array(s) of Fourier coefficients to the requested order and eliminate all-zero terms.
 // \tparam  K  is the number of arrays (one for density, three for potential and its derivatives);
 // \param[in]  mmax  is the maximum order of expansion in phi;
-// \param[in,out]  coefs  are K arrays of coefficients for each harmonic term
+// \param[in]  sym   is the required symmetry of the expansion (may be more symmetric than input coefs);
+// \param[in,out]  coefs  are K arrays of coefficients for each harmonic term.
+// \param[in,out]  gridz  is the grid in vertical dimension:
+// if the required symmetry includes Z-reflection, but gridz covers both positive and negative z,
+// then replace it with only half of the grid and average the computed coefficients in +-z.
 template<int K>
-void restrictFourierCoefs(int mmax, std::vector< math::Matrix<double> > coefs[K])
+void restrictFourierCoefs(int mmax, coord::SymmetryType sym,
+    std::vector< math::Matrix<double> > coefs[K], std::vector<double>& gridz)
 {
-    int mmax_input = coefs[0].size() / 2, mmax_actual = 0;
-    // check if mmax needs to be reduced even further if some harmonics with |m|<mmax are zero
-    for(int m=1; m<=std::min<int>(mmax, mmax_input); m++) {
-        bool isZero = true;
-        for(int k=0; k<K; k++)
-            isZero &= allZeros(coefs[k][mmax_input+m]) && allZeros(coefs[k][mmax_input-m]);
-        if(!isZero)
-            mmax_actual = m;
+    int mmaxSrc = coefs[0].size() / 2;  // input array(s) contain terms from -mmaxSrc to mmaxSrc
+    int mmaxExp = 0;  // largest |m| that is present in the input and allowed by symmetry
+    std::vector<int> indices = math::getIndicesAzimuthal(mmaxSrc, sym);
+    for(int m=-mmaxSrc; m<=mmaxSrc; m++) {
+        if(m==0)  // always present
+            continue;
+        bool allowed = false;
+        for(unsigned int i=0; i<indices.size(); i++)
+            allowed |= indices[i] == m;
+        allowed &= abs(m) <= mmax;
+        if(!allowed) {  // this m-harmonic should be zeroed out
+            for(int k=0; k<K; k++)
+                coefs[k][mmaxSrc+m] = math::Matrix<double>();
+        } else {  // check if this m-harmonic is identically zero in the input arrays
+            allowed = false;
+            for(int k=0; k<K; k++)
+                allowed |= !allZeros(coefs[k][mmaxSrc+m]);
+        }
+        if(allowed)  // keep track of the largest |m| that is allowed and non-empty
+            mmaxExp = std::max(abs(m), mmaxExp);
     }
-    if(mmax_input > mmax_actual) {
-        // remove extra coefs: (mmax_input-mmax_actual) from both heads and tails of arrays
+
+    // mmaxExp is the smallest of mmaxSrc and mmax(required), but can be even smaller
+    // if the input arrays were identically zero for all |m|>mmaxExp
+    if(mmaxSrc > mmaxExp) {
+        // remove extra coefs: (mmaxSrc-mmaxExp) from both heads and tails of arrays
         for(int k=0; k<K; k++) {
-            coefs[k].erase(coefs[k].begin() + mmax_input+mmax_actual+1, coefs[k].end());
-            coefs[k].erase(coefs[k].begin(), coefs[k].begin() + mmax_input-mmax_actual);
+            coefs[k].erase(coefs[k].begin() + mmaxSrc+mmaxExp+1, coefs[k].end());
+            coefs[k].erase(coefs[k].begin(), coefs[k].begin() + mmaxSrc-mmaxExp);
+        }
+    }
+
+    // if needed, enforce z-reflection symmetry
+    if(gridz[0] != 0 && isZReflSymmetric(sym)) {
+        size_t sizeR = coefs[0][mmaxExp].rows(), sizez2 = gridz.size() / 2;
+        bool gridzsym = gridz.size() == sizez2*2+1 && gridz[sizez2] == 0;
+        for(size_t i=0; i<sizez2; i++)
+            gridzsym &= gridz[i] == -gridz[2*sizez2-i];
+        if(!gridzsym)
+            throw std::runtime_error("restrictFourierCoefs: non-symmetric gridz is not allowed");
+        gridz.erase(gridz.begin(), gridz.begin()+sizez2);
+        for(int k=0; k<K; k++) {
+            double sign = k<2 ? 1 : -1;  // k==2 is dPhi/dz, need to anti-symmetrize it
+            for(int m=0; m<=2*mmaxExp; m++) {
+                if(coefs[k][m].size() == 0)
+                    continue;
+                math::Matrix<double> mat(sizeR, sizez2+1);
+                for(size_t i=0; i<sizeR; i++)
+                    for(size_t j=0; j<=sizez2; j++)
+                        mat(i, j) = 0.5 * (coefs[k][m](i, sizez2+j) + sign * coefs[k][m](i, sizez2-j));
+                coefs[k][m] = mat;
+            }
         }
     }
 }
@@ -603,6 +646,24 @@ void chooseGridRadii(const BaseDensity& src,
     unsigned int gridSizeR, double &Rmin, double &Rmax,
     unsigned int gridSizez, double &zmin, double &zmax)
 {
+    // if the input is an instance of CylSpline or DensityAzimuthalHarmonic,
+    // adopt its values for rmin/max unless given explicitly
+    const DensityAzimuthalHarmonic* dah = dynamic_cast<const DensityAzimuthalHarmonic*>(&src);
+    const CylSpline* cyl = dynamic_cast<const CylSpline*>(&src);
+    double Rmin1=Rmin, Rmax1=Rmax, zmin1=zmin, zmax1=zmax;
+    if(dah)
+        dah->getGridExtent(Rmin1, Rmax1, zmin1, zmax1);
+    else if(cyl)
+        cyl->getGridExtent(Rmin1, Rmax1, zmin1, zmax1);
+    if(Rmin==0)
+        Rmin = Rmin1;
+    if(Rmax==0)
+        Rmax = Rmax1;
+    if(zmin==0)
+        zmin = zmin1;
+    if(zmax==0)
+        zmax = zmax1;
+
     // if the grid min/max radii is not provided, try to determine automatically
     if(Rmax==0 || Rmin==0) {
         double mass  = src.totalMass();
@@ -680,14 +741,19 @@ void chooseGridRadii(const particles::ParticleArray<coord::PosCyl>& particles,
 // -------- public classes: DensityAzimuthalHarmonic --------- //
 
 shared_ptr<const DensityAzimuthalHarmonic> DensityAzimuthalHarmonic::create(
-    const BaseDensity& src, int mmax,
+    const BaseDensity& src, coord::SymmetryType symExp, int mmax,
     unsigned int gridSizeR, double Rmin, double Rmax,
     unsigned int gridSizez, double zmin, double zmax,
     bool fixOrder)
 {
-    if(isUnknown(src.symmetry()))
+    coord::SymmetryType symSrc = src.symmetry();
+    if(isUnknown(symSrc))
         throw std::invalid_argument(
             "DensityAzimuthalHarmonic: symmetry of the input density model is not specified");
+    if(isUnknown(symExp))
+        symExp = symSrc;
+    else
+        symExp = static_cast<coord::SymmetryType>(symSrc | symExp);  // inherit any symmetry from input
     // ensure the grid radii are set to some reasonable values
     chooseGridRadii(src, gridSizeR, Rmin, Rmax, gridSizez, zmin, zmax);
     if( gridSizeR<CYLSPLINE_MIN_GRID_SIZE || Rmin<=0 || Rmax<=Rmin ||
@@ -695,28 +761,26 @@ shared_ptr<const DensityAzimuthalHarmonic> DensityAzimuthalHarmonic::create(
         throw std::invalid_argument("DensityAzimuthalHarmonic: invalid grid parameters");
     std::vector<double> gridR = math::createNonuniformGrid(gridSizeR, Rmin, Rmax, true);
     std::vector<double> gridz = math::createNonuniformGrid(gridSizez, zmin, zmax, true);
-    if(!isZReflSymmetric(src))
+    if(!isZReflSymmetric(symSrc))
         gridz = math::mirrorGrid(gridz);
-    if(isZRotSymmetric(src))
-        mmax = 0;
     // when fixOrder==false, to improve accuracy of Fourier coefficient computation, we may increase
     // the order of expansion that determines the number of integration points in phi angle:
     // the number of output harmonics remains the same, but the accuracy of approximation increases
-    int mmaxFourier = isZRotSymmetric(src) ? 0 :
+    int mmaxSrc = isZRotSymmetric(symSrc) ? 0 :
         (fixOrder ? mmax : std::max<int>(mmax+MADD_FOURIER, MMIN_FOURIER));
     std::vector< math::Matrix<double> > coefs;
-    computeFourierCoefs<BaseDensity>(src, mmaxFourier, gridR, gridz, &coefs);
+    computeFourierCoefs<BaseDensity>(src, mmaxSrc, gridR, gridz, &coefs);
     // the value at R=0,z=0 might be undefined, in which case we take it from nearby points
     for(unsigned int iz=0; iz<gridz.size(); iz++)
-        if(gridz[iz] == 0 && !isFinite(coefs[mmaxFourier](0, iz))) {
-            double d1 = coefs[mmaxFourier](0, iz+1);  // value at R=0,z>0
-            double d2 = coefs[mmaxFourier](1, iz);    // value at R>0,z=0
+        if(gridz[iz] == 0 && !isFinite(coefs[mmaxSrc](0, iz))) {
+            double d1 = coefs[mmaxSrc](0, iz+1);  // value at R=0,z>0
+            double d2 = coefs[mmaxSrc](1, iz);    // value at R>0,z=0
             for(unsigned int mm=0; mm<coefs.size(); mm++)
                 if(coefs[mm].cols()>0)  // loop over all non-empty harmonics
-                    coefs[mm](0, iz) = (int)mm==mmaxFourier ? (d1+d2)/2 : 0;  // only m=0 survives
+                    coefs[mm](0, iz) = (int)mm==mmaxSrc ? (d1+d2)/2 : 0;  // only m=0 survives
         }
-    // resize the coefficients back to the requested order
-    restrictFourierCoefs<1>(mmax, &coefs);
+    // resize the coefficients back to the requested order and symmetry
+    restrictFourierCoefs<1>(mmax, symExp, &coefs, gridz);
     return shared_ptr<const DensityAzimuthalHarmonic>(new DensityAzimuthalHarmonic(gridR, gridz, coefs));
 }
 
@@ -736,7 +800,7 @@ DensityAzimuthalHarmonic::DensityAzimuthalHarmonic(
         sizez = 2*sizez_orig-1;
     } else {  // if the original grid covered both z>0 and z<0, we assume that the symmetry is broken
         gridz = gridz_orig;
-        mysym &= ~coord::ST_ZREFLECTION;
+        mysym &= ~(coord::ST_ZREFLECTION | coord::ST_REFLECTION);
     }
     Rscale = gridR_orig[sizeR/2];  // take some reasonable value for scale radius for coord transformation
     for(unsigned int iR=0; iR<sizeR; iR++)
@@ -812,6 +876,18 @@ double DensityAzimuthalHarmonic::densityCyl(const coord::PosCyl &pos, double /*t
     return result;
 }
 
+void DensityAzimuthalHarmonic::getGridExtent(double &Rmin, double &Rmax, double &zmin, double &zmax) const
+{
+    unsigned int mmax = (spl.size()-1)/2;
+    assert(spl.size() == mmax*2+1 && !spl[mmax]->empty());
+    const std::vector<double>& scaledR = spl[mmax]->xvalues();
+    const std::vector<double>& scaledz = spl[mmax]->yvalues();
+    Rmin = Rscale * sinh(scaledR[1]);
+    Rmax = Rscale * sinh(scaledR.back());
+    zmin = Rscale * sinh(scaledz[scaledz.size()/2+1]);  // first node above zero
+    zmax = Rscale * sinh(scaledz.back());
+}
+
 void DensityAzimuthalHarmonic::getCoefs(
     std::vector<double> &gridR, std::vector<double> &gridz,
     std::vector< math::Matrix<double> > &coefs) const
@@ -846,13 +922,18 @@ void DensityAzimuthalHarmonic::getCoefs(
 // -------- public classes: CylSpline --------- //
 
 shared_ptr<const CylSpline> CylSpline::create(
-    const BaseDensity& src, int mmax,
+    const BaseDensity& src, coord::SymmetryType symExp, int mmax,
     unsigned int gridSizeR, double Rmin, double Rmax,
     unsigned int gridSizez, double zmin, double zmax,
     bool fixOrder, bool useDerivs)
 {
-    if(isUnknown(src.symmetry()))
+    coord::SymmetryType symSrc = src.symmetry();
+    if(isUnknown(symSrc))
         throw std::invalid_argument("CylSpline: symmetry of the input density model is not specified");
+    if(isUnknown(symExp))
+        symExp = symSrc;
+    else
+        symExp = static_cast<coord::SymmetryType>(symSrc | symExp);  // inherit any symmetry from input
     // ensure the grid radii are set to some reasonable values
     chooseGridRadii(src, gridSizeR, Rmin, Rmax, gridSizez, zmin, zmax);
     if( gridSizeR<CYLSPLINE_MIN_GRID_SIZE || Rmin<=0 || Rmax<=Rmin ||
@@ -860,10 +941,8 @@ shared_ptr<const CylSpline> CylSpline::create(
         throw std::invalid_argument("CylSpline: invalid grid parameters");
     std::vector<double> gridR = math::createNonuniformGrid(gridSizeR, Rmin, Rmax, true);
     std::vector<double> gridz = math::createNonuniformGrid(gridSizez, zmin, zmax, true);
-    if(!isZReflSymmetric(src))
+    if(!isZReflSymmetric(symSrc))
         gridz = math::mirrorGrid(gridz);
-    if(isZRotSymmetric(src))
-        mmax = 0;
 
     PtrDensity densInterp;  // pointer to an internally created interpolating object if it is needed
     const BaseDensity* dens = &src;  // pointer to either the original density or the interpolated one
@@ -871,7 +950,7 @@ shared_ptr<const CylSpline> CylSpline::create(
     // as the Fourier expansion of density trivially has only one harmonic;
     // also, if the input density is already a Fourier expansion, use it directly.
     // Otherwise, we need to create a temporary DensityAzimuthalHarmonic interpolating object.
-    if(!isZRotSymmetric(src) && !dynamic_cast<const DensityAzimuthalHarmonic*>(&src)) {
+    if(!isZRotSymmetric(symSrc) && !dynamic_cast<const DensityAzimuthalHarmonic*>(&src)) {
         double Rmax = gridR.back() * 2;
         double Rmin = gridR[1] * 0.01;
         double zmax = gridz.back() * 2;
@@ -879,7 +958,7 @@ shared_ptr<const CylSpline> CylSpline::create(
             gridz[gridz.size()/2]==0 ? gridz[gridz.size()/2+1] * 0.01 : Rmin;
         double delta=0.1;  // relative difference between grid nodes = log(x[n+1]/x[n])
         // create a density interpolator; it will be automatically deleted upon return
-        densInterp = DensityAzimuthalHarmonic::create(src, mmax,
+        densInterp = DensityAzimuthalHarmonic::create(src, symExp, mmax,
             static_cast<unsigned int>(log(Rmax/Rmin)/delta), Rmin, Rmax,
             static_cast<unsigned int>(log(zmax/zmin)/delta), zmin, zmax, fixOrder);
         // and use it for computing the potential
@@ -888,36 +967,42 @@ shared_ptr<const CylSpline> CylSpline::create(
 
     std::vector< math::Matrix<double> > coefs[3]; // Phi, dPhidR, dPhidz
     computePotentialCoefsFromDensity(*dens, mmax, gridR, gridz, useDerivs, /*output*/coefs);
+    restrictFourierCoefs<3>(mmax, symExp, coefs, gridz);  // enforce z-reflection symmetry if needed
     return shared_ptr<const CylSpline>(new CylSpline(gridR, gridz, coefs[0], coefs[1], coefs[2]));
 }
 
 shared_ptr<const CylSpline> CylSpline::create(
-    const BasePotential& src, int mmax,
+    const BasePotential& src, coord::SymmetryType symExp, int mmax,
     unsigned int gridSizeR, double Rmin, double Rmax,
     unsigned int gridSizez, double zmin, double zmax,
     bool fixOrder)
 {
-    if(isUnknown(src.symmetry()))
+    coord::SymmetryType symSrc = src.symmetry();
+    if(isUnknown(symSrc))
         throw std::invalid_argument("CylSpline: symmetry of the input potential model is not specified");
+    if(isUnknown(symExp))
+        symExp = symSrc;
+    else
+        symExp = static_cast<coord::SymmetryType>(symSrc | symExp);  // inherit any symmetry from input
     chooseGridRadii(src, gridSizeR, Rmin, Rmax, gridSizez, zmin, zmax);
     if( gridSizeR<CYLSPLINE_MIN_GRID_SIZE || Rmin<=0 || Rmax<=Rmin ||
         gridSizez<CYLSPLINE_MIN_GRID_SIZE || zmin<=0 || zmax<=zmin)
         throw std::invalid_argument("CylSpline: invalid grid parameters");
     std::vector<double> gridR = math::createNonuniformGrid(gridSizeR, Rmin, Rmax, true);
     std::vector<double> gridz = math::createNonuniformGrid(gridSizez, zmin, zmax, true);
-    if(!isZReflSymmetric(src))
+    if(!isZReflSymmetric(symSrc))
         gridz = math::mirrorGrid(gridz);
     // when fixOrder==false, to improve accuracy of Fourier coefficient computation, we may increase
     // the order of expansion that determines the number of integration points in phi angle:
     // the number of output harmonics remains the same, but the accuracy of approximation increases
-    int mmaxFourier = isZRotSymmetric(src) ? 0 :
+    int mmaxSrc = isZRotSymmetric(src) ? 0 :
         (fixOrder ? mmax : std::max<int>(mmax+MADD_FOURIER, MMIN_FOURIER));
     std::vector< math::Matrix<double> > coefs[3],
     /*aliases*/ &Phi=coefs[0], &dPhidR=coefs[1], &dPhidz=coefs[2];
-    computeFourierCoefs<BasePotential>(src, mmaxFourier, gridR, gridz, coefs);
+    computeFourierCoefs<BasePotential>(src, mmaxSrc, gridR, gridz, coefs);
     // assign potential derivatives at R=0 or z=0 to zero, depending on the symmetry
     for(unsigned int iz=0; iz<gridz.size(); iz++) {
-        if(gridz[iz] == 0 && isZReflSymmetric(src)) {
+        if(gridz[iz] == 0 && isZReflSymmetric(symSrc)) {
             for(unsigned int iR=0; iR<gridR.size(); iR++)
                 for(unsigned int mm=0; mm<dPhidz.size(); mm++)
                     if(dPhidz[mm].cols()>0)  // loop over all non-empty harmonics
@@ -927,8 +1012,8 @@ shared_ptr<const CylSpline> CylSpline::create(
             if(dPhidR[mm].cols()>0)  // loop over all non-empty harmonics
                 dPhidR[mm](0, iz) = 0;  // R-derivative at R=0 should always be zero
     }
-    // resize the coefficients back to the requested order
-    restrictFourierCoefs<3>(mmax, coefs);
+    // resize the coefficients back to the requested order and symmetry
+    restrictFourierCoefs<3>(mmax, symExp, coefs, gridz);
     return shared_ptr<const CylSpline>(new CylSpline(gridR, gridz, Phi, dPhidR, dPhidz));
 }
 
@@ -988,7 +1073,7 @@ CylSpline::CylSpline(
         Phi0  = Phi[mmax](0, 0);
     } else {  // if the original grid covered both z>0 and z<0, we assume that the symmetry is broken
         gridz = gridz_orig;
-        mysym&= ~coord::ST_ZREFLECTION;
+        mysym&= ~(coord::ST_ZREFLECTION | coord::ST_REFLECTION);
         zsym  = false;
         Phi0  = Phi[mmax](0, (sizez+1)/2);
     }
@@ -1090,11 +1175,9 @@ CylSpline::CylSpline(
             if(m!=0)  // no z-rotation symmetry because m!=0 coefs are non-zero
                 mysym &= ~coord::ST_ZROTATION;
             if(m<0)
-                mysym &= ~coord::ST_YREFLECTION;
+                mysym &= ~(coord::ST_YREFLECTION | coord::ST_REFLECTION);
             if((m<0) ^ (m%2 != 0))
-                mysym &= ~coord::ST_XREFLECTION;
-            if(m%2 != 0)
-                mysym &= ~coord::ST_REFLECTION;
+                mysym &= ~(coord::ST_XREFLECTION | coord::ST_REFLECTION);
         }
     }
     sym = static_cast<coord::SymmetryType>(mysym);
@@ -1250,6 +1333,18 @@ void CylSpline::evalCyl(const coord::PosCyl &pos,
             der2->dphi2  = hess.dphi2;
         }
     }
+}
+
+void CylSpline::getGridExtent(double &Rmin, double &Rmax, double &zmin, double &zmax) const
+{
+    unsigned int mmax = (spl.size()-1)/2;
+    assert(spl.size() == mmax*2+1 && !spl[mmax]->empty());
+    const std::vector<double>& scaledR = spl[mmax]->xvalues();
+    const std::vector<double>& scaledz = spl[mmax]->yvalues();
+    Rmin = Rscale * sinh(scaledR[1]);
+    Rmax = Rscale * sinh(scaledR.back());
+    zmin = Rscale * sinh(scaledz[scaledz.size()/2+1]);  // first node above zero
+    zmax = Rscale * sinh(scaledz.back());
 }
 
 void CylSpline::getCoefs(

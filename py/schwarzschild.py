@@ -100,13 +100,16 @@ def createModel(iniFileName):
             density = agama.Density(*listdens)
         else: raise ValueError("No density components in "+name)
         print("Creating density target for "+name)
-        targets.append(agama.Target(**value))
+        # pick up only the parameters corresponding to a Density*** target
+        targetDensityParams = dict([param for param in value.items() if param[0].lower() in
+            ('type', 'gridr', 'gridz', 'lmax', 'mmax', 'stripsperpane', 'axisratioy', 'axisratioz')])
+        targets.append(agama.Target(**targetDensityParams))
         if 'kinemgrid' in value:
-            options = { "type": 'KinemShell',
+            targetKinemParams = { "type": 'KinemShell',
                 "gridr":  value['kinemgrid'],
                 "degree": int(value['kinemdegree']) }
             print("Creating kinematic target for "+name)
-            targets.append(agama.Target(**options))
+            targets.append(agama.Target(**targetKinemParams))
         if 'numorbits' in value:
             icoptions = { 'n': int(value['numorbits']), 'potential': model.potential }
             if 'icbeta'  in value:  icoptions['beta' ] = float(value['icbeta'])
@@ -169,7 +172,7 @@ def runComponent(comp, pot):
     # check for any outstanding constraints
     for t in range(len(matrix)):
         delta = matrix[t].dot(weights) - rhs[t]
-        norm  = 1e-4 * abs(rhs[t]) + 1e-8
+        norm  = numpy.where(rhs[t]==0, 1e-6, 1e-3 * abs(rhs[t]))
         for c, d in enumerate(delta):
             if abs(d) > norm[c]:
                 print("Constraint %i:%i not satisfied: %s, val=%.4g, dif=%.4g" %

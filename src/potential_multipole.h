@@ -1,7 +1,7 @@
 /** \file    potential_multipole.h
     \brief   density and potential approximations based on spherical-harmonic expansion
     \author  Eugene Vasiliev
-    \date    2010-2023
+    \date    2010-2024
 
     This module provides tools for representing arbitrary density and potential profiles
     in terms of spherical-harmonic (or multipole) expansion, with coefficients being
@@ -60,6 +60,8 @@ public:
         This is not a constructor, but a static method returning a shared pointer to
         the newly created density object.
         \param[in]  src        is the input density model;
+        \param[in]  sym        is the required symmetry of the density expansion
+        (if set to ST_UNKNOWN, will be taken from the input density model);
         \param[in]  lmax       is the order of sph.-harm. expansion in polar angle (theta);
         \param[in]  mmax       is the order of expansion in azimuth (phi);
         \param[in]  gridSizeR  is the size of logarithmic grid in R;
@@ -70,7 +72,7 @@ public:
     */
     static shared_ptr<const DensitySphericalHarmonic> create(
         const BaseDensity& src,
-        int lmax, int mmax,
+        coord::SymmetryType sym, int lmax, int mmax,
         unsigned int gridSizeR, double rmin = 0, double rmax = 0,
         bool fixOrder = false);
 
@@ -108,6 +110,9 @@ public:
     virtual coord::SymmetryType symmetry() const { return ind.symmetry(); }
     virtual std::string name() const { return myName(); }
     static std::string myName() { return "DensitySphericalHarmonic"; }
+
+    /** return the radii of spline nodes */
+    const std::vector<double>& getRadii() const { return gridRadii; }
 
     /** return the radii of spline nodes and the array of density expansion coefficients */
     void getCoefs(std::vector<double> &radii, std::vector< std::vector<double> > &coefsArray) const;
@@ -188,6 +193,8 @@ public:
         and solves Poisson equation to find the potential sph.-harm. coefficients;
         the second one takes a potential model and computes these coefs directly.
         \param[in]  src        is the input density or potential model;
+        \param[in]  sym        is the required symmetry of the potential
+        (if set to ST_UNKNOWN, will be taken from the input density model);
         \param[in]  lmax       is the order of sph.-harm. expansion in polar angle (theta);
         \param[in]  mmax       is the order of expansion in azimuth (phi);
         \param[in]  gridSizeR  is the size of logarithmic grid in R;
@@ -198,14 +205,14 @@ public:
     */
     static shared_ptr<const Multipole> create(
         const BaseDensity& src,
-        int lmax, int mmax,
+        coord::SymmetryType sym, int lmax, int mmax,
         unsigned int gridSizeR, double rmin = 0, double rmax = 0,
         bool fixOrder = false);
 
     /** same as above, but takes a potential model as an input */
     static shared_ptr<const Multipole> create(
         const BasePotential& src,
-        int lmax, int mmax,
+        coord::SymmetryType sym, int lmax, int mmax,
         unsigned int gridSizeR, double rmin = 0, double rmax = 0,
         bool fixOrder = false);
 
@@ -239,6 +246,9 @@ public:
     Multipole(const std::vector<double> &radii,
         const std::vector<std::vector<double> > &Phi,
         const std::vector<std::vector<double> > &dPhi);
+
+    /** return the radii of spline nodes */
+    const std::vector<double>& getRadii() const { return gridRadii; }
 
     /** return the array of spherical-harmonic expansion coefficients.
         \param[out] radii will contain the radii of grid nodes;
@@ -293,7 +303,7 @@ public:
     */
     static shared_ptr<const BasisSet> create(
         const BaseDensity& src,
-        int lmax, int mmax,
+        coord::SymmetryType sym, int lmax, int mmax,
         unsigned int nmax, double eta=1.0, double r0=0.0,
         bool fixOrder=false);
 

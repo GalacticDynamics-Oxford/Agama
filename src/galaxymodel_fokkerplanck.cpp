@@ -174,7 +174,7 @@ potential::PtrPotential computePotential(
         // compute the potential from the density, i.e. solve the Poisson equation
         shared_ptr<const potential::Multipole> modelPotential =
         potential::Multipole::create(potential::FunctionToDensityWrapper(*modelDensity),
-            /*lmax*/ 0, /*mmax*/ 0, /*gridsize*/ 100, rmin, rmax);
+            coord::ST_SPHERICAL, /*lmax*/ 0, /*mmax*/ 0, /*gridsize*/ 100, rmin, rmax);
 
         // diagnostic output: stellar potential at origin
         Phi0 = modelPotential->value(coord::PosCyl(0,0,0));

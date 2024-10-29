@@ -427,9 +427,10 @@ AllParam parseParam(const utils::KeyValueMap& kvmap, const units::ExternalUnits&
         param.potentialType & (PT_DENS_SPHHARM | PT_DENS_CYLGRID |
         PT_BASISSET | PT_MULTIPOLE | PT_CYLSPLINE)));
     param.symmetryType = getSymmetryTypeByName(popString(kvmap, keys, "symmetry", "",
-        (param.potentialType & (PT_BASISSET | PT_MULTIPOLE | PT_CYLSPLINE)) &&
+        (param.potentialType & (PT_DENS_SPHHARM | PT_DENS_CYLGRID |
+        PT_BASISSET | PT_MULTIPOLE | PT_CYLSPLINE)) &&
         (param.densityType == PT_UNKNOWN /* no density model is provided */),
-        "Parameter 'symmetry' is only allowed for potential expansions constructed from "
+        "Parameter 'symmetry' is only allowed for density or potential expansions constructed from "
         "an N-body snapshot or from a user-defined density or potential model"));
 
     // this parameter is allowed only for the Evolving potential, and will be parsed later
@@ -933,6 +934,7 @@ void writeDensitySphericalHarmonic(std::ostream& strm, const DensitySphericalHar
         math::blas_dmul(1/converter.massUnit*pow_3(converter.lengthUnit), coefs[i]);
     strm << "gridSizeR=" << gridr.size() << "\n";
     strm << "lmax=" << static_cast<int>(sqrt(coefs.size()*1.0)-1) << "\n";
+    strm << "symmetry=" << getSymmetryNameByType(density.symmetry()) << "\n";
     strm << "Coefficients\n#rho\n";
     writeSphericalHarmonics(strm, gridr, coefs);
 }
@@ -951,6 +953,7 @@ void writeDensityAzimuthalHarmonic(std::ostream& strm, const DensityAzimuthalHar
     strm << "gridSizeR=" << gridR.size() << "\n";
     strm << "gridSizez=" << gridz.size() << "\n";
     strm << "mmax=" << (coefs.size()/2) << "\n";
+    strm << "symmetry=" << getSymmetryNameByType(density.symmetry()) << "\n";
     strm << "Coefficients\n#rho\n";
     writeAzimuthalHarmonics(strm, gridR, gridz, coefs);
 }
@@ -1335,13 +1338,13 @@ PtrPotential createPotentialExpansionFromSource(
 {
     switch(param.potentialType) {
     case PT_BASISSET:
-        return BasisSet::create(*source, param.lmax, param.mmax,
+        return BasisSet::create(*source, param.symmetryType, param.lmax, param.mmax,
             param.nmax, param.eta, param.r0, param.fixOrder);
     case PT_MULTIPOLE:
-        return Multipole::create(*source, param.lmax, param.mmax,
+        return Multipole::create(*source, param.symmetryType, param.lmax, param.mmax,
             param.gridSizeR, param.rmin, param.rmax, param.fixOrder);
     case PT_CYLSPLINE:
-        return CylSpline::create(*source, param.mmax,
+        return CylSpline::create(*source, param.symmetryType, param.mmax,
             param.gridSizeR, param.rmin, param.rmax,
             param.gridSizez, param.zmin, param.zmax, param.fixOrder);
     default: throw std::invalid_argument("Unknown potential expansion type");
@@ -1641,11 +1644,13 @@ PtrDensity createDensity(
     AllParam param = parseParam(kvmap, converter);
     PtrDensity result;
     if(param.potentialType == PT_DENS_SPHHARM) {
-        result = DensitySphericalHarmonic::create(*dens, param.lmax, param.mmax,
+        result = DensitySphericalHarmonic::create(*dens,
+            param.symmetryType, param.lmax, param.mmax,
             param.gridSizeR, param.rmin, param.rmax,
             param.fixOrder);
     } else if(param.potentialType == PT_DENS_CYLGRID) {
-        result = DensityAzimuthalHarmonic::create(*dens, param.mmax,
+        result = DensityAzimuthalHarmonic::create(*dens,
+            param.symmetryType, param.mmax,
             param.gridSizeR, param.rmin, param.rmax,
             param.gridSizez, param.zmin, param.zmax,
             param.fixOrder);
@@ -1768,7 +1773,7 @@ PtrPotential createPotential(
                 totalDens = bunch->componentsDens[0];
             else
                 totalDens.reset(new CompositeDensity(bunch->componentsDens));
-            bunch->componentsPot.push_back(Multipole::create(*totalDens,
+            bunch->componentsPot.push_back(Multipole::create(*totalDens, coord::ST_UNKNOWN,
                 bunch->galpot_lmax>=0 ? bunch->galpot_lmax : (isSpherical   (*totalDens) ? 0 : GALPOT_LMAX),
                 bunch->galpot_mmax>=0 ? bunch->galpot_mmax : (isAxisymmetric(*totalDens) ? 0 : GALPOT_MMAX),
                 GALPOT_NRAD));

@@ -119,7 +119,7 @@ endif
 
 # auto-dependency tracker (works with GCC-compatible compilers?)
 DEPENDS = $(patsubst %.cpp,$(OBJDIR)/%.d,$(SOURCES))
-COMPILE_FLAGS += -MMD -MP
+COMPILE_FLAGS_LIB += -MMD -MP
 -include $(DEPENDS)
 
 .PHONY: clean test lib doxy nemo amuse

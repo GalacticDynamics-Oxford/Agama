@@ -31,7 +31,7 @@ def makeDisk(**params):
         return (surfaceDensity / (4*scaleHeight) *
             numpy.exp( - (R/scaleRadius)**sersicIndex - innerCutoffRadius/(R+1e-100)) /
             numpy.cosh( (abs(xyz[:,2]) / scaleHeight)**verticalSersicIndex ) )
-    return density
+    return agama.Density(density, symmetry='a')
 
 # Modification of equation 9 of Coleman et al. 2020 (https://arxiv.org/abs/1911.04714)
 def makeXBar(**params):
@@ -83,7 +83,7 @@ def makeCMC(mass, scaleRadius, scaleHeight, axisRatioY):
     def density(xyz):
         return norm * numpy.exp(-(xyz[:,0]**2 + (xyz[:,1]/axisRatioY)**2)**0.5 / scaleRadius
             - abs(xyz[:,2]) / scaleHeight)
-    return density
+    return agama.Density(density, symmetry='a')
 
 # create the bar density profile with 3 component
 def makeBarDensity():
@@ -163,7 +163,7 @@ def makePotentialModel():
         verticalSersicIndex=params_disk[5])
 
     pot_bary = agama.Potential(type='CylSpline',
-        density=(makeBarDensity(), densityDisk, makeCMC(0.2e10, 0.25, 0.05, 0.5)), symmetry='t',
+        density=agama.Density(makeBarDensity(), densityDisk, makeCMC(0.2e10, 0.25, 0.05, 0.5)),
         mmax=mmax, gridsizeR=25, gridsizez=25, Rmin=0.1, Rmax=40, zmin=0.05, zmax=20)
     # flattened axisymmetric dark halo with the Einasto profile
     pot_dark = agama.Potential(type='Multipole',

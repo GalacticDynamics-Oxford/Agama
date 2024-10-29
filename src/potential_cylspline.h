@@ -1,7 +1,7 @@
 /** \file    potential_cylspline.h
     \brief   density and potential approximations based on 2d spline in cylindrical coordinates
     \author  Eugene Vasiliev
-    \date    2014-2021
+    \date    2014-2024
 
     The classes and routines in this file deal with a generic way of representing
     an arbitrary density or potential profile as a 1d expansion + 2d interpolation:
@@ -48,7 +48,8 @@ public:
         The order of this internal Fourier expansion mmaxFourier will be fixed to mmax
         if fixOrder==true, otherwise will be higher than mmax to improve accuracy.
     */
-    static shared_ptr<const DensityAzimuthalHarmonic> create(const BaseDensity& src, int mmax,
+    static shared_ptr<const DensityAzimuthalHarmonic> create(const BaseDensity& src,
+        coord::SymmetryType sym, int mmax,
         unsigned int gridSizeR, double Rmin, double Rmax,
         unsigned int gridSizez, double zmin, double zmax,
         bool fixOrder=false);
@@ -61,6 +62,9 @@ public:
     virtual coord::SymmetryType symmetry() const { return sym; }
     virtual std::string name() const { return myName(); }
     static std::string myName() { return "DensityAzimuthalHarmonic"; }
+
+    /** return the grid parameters */
+    void getGridExtent(double &Rmin, double &Rmax, double &zmin, double &zmax) const;
 
     /** retrieve the values of density expansion coefficients 
         and the nodes of 2d grid used for interpolation */
@@ -116,6 +120,8 @@ public:
         automatically from the requirement to enclose almost all of the model mass and have
         a sufficient resolution at origin.
         \param[in]  src        is the input density or potential model;
+        \param[in]  sym        is the required symmetry of the potential
+        (if set to ST_UNKNOWN, will be taken from the input density model);
         \param[in]  mmax       is the order of expansion in azimuth (phi);
         \param[in]  gridSizeR  is the number of grid nodes in cylindrical radius (semi-logarithmic);
         \param[in]  Rmin, Rmax give the radial grid extent (first non-zero node and
@@ -134,13 +140,15 @@ public:
         (the latter is the input density when it is axisymmetric, otherwise an internally created
         instance of DensityAzimuthalHarmonic).
     */
-    static shared_ptr<const CylSpline> create(const BaseDensity& src, int mmax,
+    static shared_ptr<const CylSpline> create(const BaseDensity& src,
+        coord::SymmetryType sym, int mmax,
         unsigned int gridSizeR, double Rmin, double Rmax,
         unsigned int gridSizez, double zmin, double zmax,
         bool fixOrder=false, bool useDerivs=true);
 
     /** Same as above, but taking a potential model as an input. */
-    static shared_ptr<const CylSpline> create(const BasePotential& src, int mmax,
+    static shared_ptr<const CylSpline> create(const BasePotential& src,
+        coord::SymmetryType sym, int mmax,
         unsigned int gridSizeR, double Rmin, double Rmax,
         unsigned int gridSizez, double zmin, double zmax,
         bool fixOrder=false);
@@ -209,6 +217,9 @@ public:
     static std::string myName() { return "CylSpline"; }
     virtual coord::SymmetryType symmetry() const { return sym; };
     virtual double enclosedMass(const double radius) const;
+
+    /** return the grid parameters */
+    void getGridExtent(double &Rmin, double &Rmax, double &zmin, double &zmax) const;
 
     /** retrieve coefficients of potential approximation.
         \param[out] gridR will be filled with the array of R-values of grid nodes;

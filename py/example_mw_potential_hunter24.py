@@ -10,7 +10,7 @@ to the region outside the central 5 kpc.
 The left panel shows the circular-velocity curve (in the axisymmetrized potential),
 and the right panel shows examples of a few orbits in this potential.
 
-References: Sormani et al. 2022 (MNRAS Letters/514/L5); Hunter et al. 2024 (submitted)
+References: Sormani et al. 2022 (MNRAS Letters/514/L5); Hunter et al. 2024 (arXiv:2403.18000)
 
 Authors: Mattia Sormani, Glen Hunter, Eugene Vasiliev
 """
@@ -55,7 +55,7 @@ def makePotentialModel():
         rotating clockwise with the angular speed Omega_spiral = -22.5 km/s/kpc.
     """
 
-    # Analytic Plummer potential for SagA*
+    # Analytic Plummer potential for SgrA*
     # (NB: scale radius is arbitrarily set to 1 pc, much larger than the Schwarzschild radius!)
     params_BH = dict(type='Plummer', mass=4.1e6, scaleRadius=1e-3)
 
@@ -92,14 +92,15 @@ def makePotentialModel():
 
     # all spheroidal components put into a single axisymmetric Multipole potential
     pot_mul = agama.Potential(type='Multipole',
-        density=[params_dark, params_BH, params_NSC] + params_NSD,
+        density=agama.Density(params_dark, params_BH, params_NSC, *params_NSD),
         lmax=12, gridSizeR=36, rmin=1e-4, rmax=1000)
 
     # all remaining components (except spirals) are represented by a CylSpline potential
     # in two variants: axisymmetric (suitable for plotting the circular velocity profile)
     # and triaxial (for all other purposes)
-    params_cylspline = dict(type='CylSpline', density=[dens_bar] + params_disk + params_gas,
-        gridSizeR=30, gridSizez=25, Rmin=0.1, Rmax=50, zmin=0.05, zmax=20)
+    params_cylspline = dict(type='CylSpline',
+        density=agama.Density(dens_bar, *(params_disk + params_gas)),
+        gridSizeR=30, gridSizez=32, Rmin=0.1, Rmax=200, zmin=0.05, zmax=200)
     pot_cyl_axi  = agama.Potential(mmax=0, **params_cylspline)
     pot_cyl_full = agama.Potential(mmax=8, **params_cylspline)
 
@@ -168,7 +169,7 @@ ax=plt.subplots(1, 2, figsize=(12,6), dpi=100)[1]
 ax[0].plot(r, (-r*pot_axi[0].force(xyz)[:,0])**0.5, 'y', label='spheroidal components (BH, NSC, NSD and halo)')
 ax[0].plot(r, (-r*pot_axi[1].force(xyz)[:,0])**0.5, 'c', label='disky components (bar, stellar and gas disks)')
 ax[0].plot(r, (-r*pot_axi   .force(xyz)[:,0])**0.5, 'r', label='total')
-ax[0].legend(loc='lower right', frameon=False)
+ax[0].legend(loc='lower right', frameon=False, fontsize=12)
 ax[0].set_xlabel('radius [kpc]')
 ax[0].set_ylabel('circular velocity [km/s]')
 ax[0].set_xlim(0,10)

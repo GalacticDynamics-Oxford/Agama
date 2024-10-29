@@ -163,14 +163,14 @@ bool testDensSH()
     std::vector<std::vector<double> > coefs1, coefs2;
     shared_ptr<const potential::DensitySphericalHarmonic>
     dens1 = potential::DensitySphericalHarmonic::create(dens,
-        /*lmax*/ 8, /*mmax*/ 6, /*gridSizeR*/ 51, /*rmin*/ 0.01, /*rmax*/ 100),
+        coord::ST_UNKNOWN, /*lmax*/ 8, /*mmax*/ 6, /*gridSizeR*/ 51, /*rmin*/ 0.01, /*rmax*/ 100),
     // creating a sph-harm expansion from another s-h expansion:
     // should produce identical results if the location of radial grid points
     // (partly) coincides with the first one, and the requested order of expansions lmax,mmax
     // are at least as large as the original ones (the extra coefs will be zero and thus eliminated).
     // Here we use a twice denser grid: every other node coincides with that of the first grid
     dens2 = potential::DensitySphericalHarmonic::create(*dens1,
-        /*lmax*/10, /*mmax*/ 8, /*gridSizeR*/101, /*rmin*/ 0.01, /*rmax*/ 100);
+        coord::ST_UNKNOWN, /*lmax*/10, /*mmax*/ 8, /*gridSizeR*/101, /*rmin*/ 0.01, /*rmax*/ 100);
     dens1->getCoefs(radii1, coefs1);
     dens2->getCoefs(radii2, coefs2);
     // check that the two sets of coefs are identical at equal radii
@@ -303,8 +303,8 @@ bool testAngularAverage(const potential::BasePotential& pot)
     } else {
         // check that sphericalAverage is exact for band-limited SH potentials up to lmax=14:
         // create such a potential (BasisSet) and then create its sphericalized version
-        potential::PtrPotential psh = potential::BasisSet::create(pot, 14, 0, 10, 1, 1);
-        potential::PtrPotential psh0= potential::BasisSet::create(*psh, 0, 0, 10, 1, 1);
+        potential::PtrPotential psh = potential::BasisSet::create(pot, coord::ST_UNKNOWN, 14, 0, 10, 1, 1);
+        potential::PtrPotential psh0= potential::BasisSet::create(*psh, coord::ST_UNKNOWN, 0, 0, 10, 1, 1);
         ok &= checkEqual(potential::Sphericalized<potential::BasePotential>(*psh), *psh0, pos, 1e-13);
     }
     if(!ok)
@@ -426,40 +426,40 @@ int main() {
     // 3b. test the approximating density profiles
     std::cout << "--- Testing accuracy of density profile interpolators: "
         "print density-weighted rms error in density ---\n";
-    ok &= testAverageError(
-        *potential::DensitySphericalHarmonic::create(test2_Dehnen0Tri, 10, 10, 30, 1e-2, 1e3),
+    ok &= testAverageError(*potential::DensitySphericalHarmonic::create(
+        test2_Dehnen0Tri, coord::ST_UNKNOWN, 10, 10, 30, 1e-2, 1e3),
         test2_Dehnen0Tri, 0.005);
-    ok &= testAverageError(
-        *potential::DensitySphericalHarmonic::create(test2_Dehnen0Trin, 10, 10, 30, 1e-2, 1e3),
+    ok &= testAverageError(*potential::DensitySphericalHarmonic::create(
+        test2_Dehnen0Trin, coord::ST_UNKNOWN, 10, 10, 30, 1e-2, 1e3),
         test2_Dehnen0Trin, 0.005);
-    ok &= testAverageError(
-        *potential::DensityAzimuthalHarmonic::create(test2_Dehnen0Tri, 10, 30, 1e-2, 1e3, 30, 1e-2, 1e3),
+    ok &= testAverageError(*potential::DensityAzimuthalHarmonic::create(
+        test2_Dehnen0Tri, coord::ST_UNKNOWN, 10, 30, 1e-2, 1e3, 30, 1e-2, 1e3),
         test2_Dehnen0Tri, 0.005);
-    ok &= testAverageError(
-        *potential::DensitySphericalHarmonic::create(test3_Dehnen15Tri, 10, 10, 30, 1e-3, 1e3),
+    ok &= testAverageError(*potential::DensitySphericalHarmonic::create(
+        test3_Dehnen15Tri, coord::ST_UNKNOWN, 10, 10, 30, 1e-3, 1e3),
         test3_Dehnen15Tri, 0.005);
-    ok &= testAverageError(
-        *potential::DensityAzimuthalHarmonic::create(test3_Dehnen15Tri, 10, 40, 1e-3, 1e3, 40, 1e-3, 1e3),
+    ok &= testAverageError(*potential::DensityAzimuthalHarmonic::create(
+        test3_Dehnen15Tri, coord::ST_UNKNOWN, 10, 40, 1e-3, 1e3, 40, 1e-3, 1e3),
         test3_Dehnen15Tri, 0.5);
-    ok &= testAverageError(
-        *potential::DensitySphericalHarmonic::create(test4_MNAxi, 40, 0, 40, 1e-2, 1e2),
+    ok &= testAverageError(*potential::DensitySphericalHarmonic::create(
+        test4_MNAxi, coord::ST_UNKNOWN, 40, 0, 40, 1e-2, 1e2),
         test4_MNAxi, 0.5);
-    ok &= testAverageError(
-        *potential::DensityAzimuthalHarmonic::create(test4_MNAxi, 0, 20, 1e-2, 1e2, 20, 1e-2, 1e2),
+    ok &= testAverageError(*potential::DensityAzimuthalHarmonic::create(
+        test4_MNAxi, coord::ST_UNKNOWN, 0, 20, 1e-2, 1e2, 20, 1e-2, 1e2),
         test4_MNAxi, 0.05);
-    ok &= testAverageError(
-        *potential::DensityAzimuthalHarmonic::create(test4_MNAxi, 0, 40, 1e-2, 2e3, 40, 1e-2, 2e2),
+    ok &= testAverageError(*potential::DensityAzimuthalHarmonic::create(
+        test4_MNAxi, coord::ST_UNKNOWN, 0, 40, 1e-2, 2e3, 40, 1e-2, 2e2),
         test4_MNAxi, 0.005);
-    ok &= testAverageError(
-        *potential::DensityAzimuthalHarmonic::create(test5_ExpdiskAxi, 0, 20, 1e-2, 50, 20, 1e-2, 20),
+    ok &= testAverageError(*potential::DensityAzimuthalHarmonic::create(
+        test5_ExpdiskAxi, coord::ST_UNKNOWN, 0, 20, 1e-2, 50, 20, 1e-2, 20),
         test5_ExpdiskAxi, 0.05);
-    ok &= testAverageError(
-        *potential::DensityAzimuthalHarmonic::create(test5_ExpdiskAxi, 0, 30, 1e-2, 100, 30, 1e-2, 100),
+    ok &= testAverageError(*potential::DensityAzimuthalHarmonic::create(
+        test5_ExpdiskAxi, coord::ST_UNKNOWN, 0, 30, 1e-2, 100, 30, 1e-2, 100),
         test5_ExpdiskAxi, 0.005);
     ok &= testAverageError(*test5_Galpot,
         test5_ExpdiskAxi, 0.05);
-    ok &= testAverageError(
-        *potential::CylSpline::create(test5_ExpdiskAxi, 0, 30, 1e-2, 100, 30, 1e-2, 50),
+    ok &= testAverageError(*potential::CylSpline::create(
+        test5_ExpdiskAxi, coord::ST_UNKNOWN, 0, 30, 1e-2, 100, 30, 1e-2, 50),
         test5_ExpdiskAxi, 0.05);
 
     // 3c. test the approximating potential profiles
@@ -468,38 +468,47 @@ int main() {
 
     // spherical, cuspy and infinite
     std::cout << "--- Spherical NFW ---\n";
-    PtrPotential test1nb = potential::BasisSet::create(test1_NFWSph, 0, 0, 32, 4.0, 2.0);
+    PtrPotential test1nb = potential::BasisSet::create(test1_NFWSph,
+        coord::ST_UNKNOWN, 0, 0, 32, 4.0, 2.0);
     ok &= testAverageError(*test1nb, test1_NFWSph, 0.1);
-    PtrPotential test1nm = potential::Multipole::create(test1_NFWSph, 0, 0, 20, 1e-3, 1e3);
+    PtrPotential test1nm = potential::Multipole::create(test1_NFWSph,
+        coord::ST_UNKNOWN, 0, 0, 20, 1e-3, 1e3);
     ok &= testAverageError(*test1nm, test1_NFWSph, 0.001);
 
     // spherical, cored
     std::cout << "--- Spherical Dehnen gamma=0 ---\n";
     PtrPotential test1c = potential::CylSpline::create(
         // this forces potential to be computed via integration of density over volume
-        static_cast<const potential::BaseDensity&>(test1_Dehnen0Sph), 0, 20, 0., 0., 20, 0., 0.);
+        static_cast<const potential::BaseDensity&>(test1_Dehnen0Sph),
+        coord::ST_UNKNOWN, 0, 20, 0., 0., 20, 0., 0.);
     PtrPotential test1m = potential::Multipole::create(
-        static_cast<const potential::BaseDensity&>(test1_Dehnen0Sph), 0, 0, 20);
-    PtrPotential test1b = potential::BasisSet::create(test1_Dehnen0Sph, 0, 0, 16, 1.0);
+        static_cast<const potential::BaseDensity&>(test1_Dehnen0Sph),
+        coord::ST_UNKNOWN, 0, 0, 20);
+    PtrPotential test1b = potential::BasisSet::create(test1_Dehnen0Sph,
+    coord::ST_UNKNOWN, 0, 0, 16, 1.0);
     ok &= testAverageError(*test1b, test1_Dehnen0Sph, 0.002);
     ok &= testAverageError(*test1m, test1_Dehnen0Sph, 0.002);
     ok &= testAverageError(*test1c, test1_Dehnen0Sph, 0.02);
 
     // mildly triaxial, cored
     std::cout << "--- Triaxial Dehnen gamma=0 ---\n";
-    PtrPotential test2b = potential::BasisSet::create(test2_Dehnen0Tri, 8, 6, 20, 1.0);
+    PtrPotential test2b = potential::BasisSet::create(test2_Dehnen0Tri,
+        coord::ST_UNKNOWN, 8, 6, 20, 1.0);
     PtrPotential test2m = potential::Multipole::create(
-        static_cast<const potential::BaseDensity&>(test2_Dehnen0Tri), 8, 6, 20);
+        static_cast<const potential::BaseDensity&>(test2_Dehnen0Tri),
+        coord::ST_UNKNOWN, 8, 6, 20);
     PtrPotential test2mn = potential::Multipole::create( // same but for negative mass (prevent log-scaling)
-        static_cast<const potential::BaseDensity&>(test2_Dehnen0Trin), 8, 6, 20);
+        static_cast<const potential::BaseDensity&>(test2_Dehnen0Trin),
+        coord::ST_UNKNOWN, 8, 6, 20);
     clock_t clock = std::clock();
     PtrPotential test2c = potential::CylSpline::create(  // from density via integration
-        static_cast<const potential::BaseDensity&>(test2_Dehnen0Tri), 6, 20, 0., 0., 20, 0., 0.);
+        static_cast<const potential::BaseDensity&>(test2_Dehnen0Tri),
+        coord::ST_UNKNOWN, 6, 20, 0., 0., 20, 0., 0.);
     std::cout << (std::clock()-clock)*1.0/CLOCKS_PER_SEC << " seconds to create CylSpline\n";
     PtrPotential test2d = potential::CylSpline::create(  // directly from potential
-        test2_Dehnen0Tri, 6, 20, 0., 0., 20, 0., 0.);
+        test2_Dehnen0Tri, coord::ST_UNKNOWN, 6, 20, 0., 0., 20, 0., 0.);
     PtrPotential test2dn = potential::CylSpline::create( // same but for negative mass (exclude log-scaling)
-        test2_Dehnen0Trin, 6, 20, 0., 0., 20, 0., 0.);
+        test2_Dehnen0Trin, coord::ST_UNKNOWN, 6, 20, 0., 0., 20, 0., 0.);
     PtrPotential test2b_clone = writeRead(*test2b);
     PtrPotential test2c_clone = writeRead(*test2c);
     ok &= testAverageError(*test2b, test2_Dehnen0Tri, 0.02);
@@ -513,10 +522,12 @@ int main() {
 
     // mildly triaxial, cuspy
     std::cout << "--- Triaxial Dehnen gamma=1.5 ---\n";
-    PtrPotential test3b = potential::BasisSet::create(test3_Dehnen15Tri, 6, 6, 20, 2.0, 0.5);
+    PtrPotential test3b = potential::BasisSet::create(test3_Dehnen15Tri,
+        coord::ST_UNKNOWN, 6, 6, 20, 2.0, 0.5);
     ok &= testAverageError(*test3b, test3_Dehnen15Tri, 0.2);
     PtrPotential test3m = potential::Multipole::create(
-        static_cast<const potential::BaseDensity&>(test3_Dehnen15Tri), 6, 6, 20);
+        static_cast<const potential::BaseDensity&>(test3_Dehnen15Tri),
+        coord::ST_UNKNOWN, 6, 6, 20);
     PtrPotential test3m_clone = writeRead(*test3m);
     //ok &= testAverageError(*test3b, test3_Dehnen15Tri, 0.02);
     ok &= testAverageError(*test3m, test3_Dehnen15Tri, 0.02);
@@ -526,30 +537,30 @@ int main() {
     // so we compare two approximations: GalPot and CylSpline
     std::cout << "--- Axisymmetric ExpDisk ---\n";
     PtrPotential test5c = potential::CylSpline::create(
-        test5_ExpdiskAxi, 0, 20, 5e-2, 50., 20, 1e-2, 10.);
+        test5_ExpdiskAxi, coord::ST_UNKNOWN, 0, 20, 5e-2, 50., 20, 1e-2, 10.);
     ok &= testAverageError(*test5c, *test5_Galpot, 0.05);
 
     // mildly triaxial, created from N-body samples
     std::cout << "--- Triaxial Dehnen gamma=0.5 from N-body samples ---\n";
     PtrPotential test6b = potential::BasisSet ::create(test6_points, coord::ST_TRIAXIAL, 6, 6, 20);
     PtrPotential test6m = potential::Multipole::create(test6_points, coord::ST_TRIAXIAL, 6, 6, 20);
-    PtrPotential test6c = potential::CylSpline::create(test6_points,
-        coord::ST_TRIAXIAL, 6, 20, 0., 0., 20, 0., 0.);
+    PtrPotential test6c = potential::CylSpline::create(test6_points, coord::ST_TRIAXIAL,
+        6, 20, 0., 0., 20, 0., 0.);
     ok &= testAverageError(*test6b, test6_Dehnen05Tri, 1.0);
     ok &= testAverageError(*test6m, test6_Dehnen05Tri, 0.5);
     ok &= testAverageError(*test6c, test6_Dehnen05Tri, 1.0);
 
     std::cout << "--- Testing the accuracy of representation of an off-centered constant-density sphere ---"
         "\n--- Ideally all mass should be contained within the sphere radius, <r>=3/4, <r^2>=3/5 ---\n";
-    ok &= testBlob(*potential::BasisSet ::create(test7d, 8, 8, 20, 0.5,  1.0), test7d);
-    ok &= testBlob(*potential::Multipole::create(test7x, 8, 8, 40, 0.05, 2.0), test7x);
-    ok &= testBlob(*potential::Multipole::create(test7y, 8, 8, 40, 0.05, 2.0), test7y);
-    ok &= testBlob(*potential::Multipole::create(test7z, 8, 8, 40, 0.05, 2.0), test7z);
-    ok &= testBlob(*potential::Multipole::create(test7d, 8, 8, 40, 0.05, 2.0), test7d);
-    ok &= testBlob(*potential::CylSpline::create(test7x, 6, 20, 0.1, 2.0, 10, 0.1, 1.0), test7x);
-    ok &= testBlob(*potential::CylSpline::create(test7y, 6, 20, 0.1, 2.0, 10, 0.1, 1.0), test7y);
-    ok &= testBlob(*potential::CylSpline::create(test7z, 6, 10, 0.1, 1.0, 20, 0.1, 2.0), test7z);
-    ok &= testBlob(*potential::CylSpline::create(test7d, 6, 15, 0.1, 1.5, 15, 0.1, 1.5), test7d);
+    ok &= testBlob(*potential::BasisSet ::create(test7d, coord::ST_UNKNOWN, 8, 8, 20, 0.5,  1.0), test7d);
+    ok &= testBlob(*potential::Multipole::create(test7x, coord::ST_UNKNOWN, 8, 8, 40, 0.05, 2.0), test7x);
+    ok &= testBlob(*potential::Multipole::create(test7y, coord::ST_UNKNOWN, 8, 8, 40, 0.05, 2.0), test7y);
+    ok &= testBlob(*potential::Multipole::create(test7z, coord::ST_UNKNOWN, 8, 8, 40, 0.05, 2.0), test7z);
+    ok &= testBlob(*potential::Multipole::create(test7d, coord::ST_UNKNOWN, 8, 8, 40, 0.05, 2.0), test7d);
+    ok &= testBlob(*potential::CylSpline::create(test7x, coord::ST_UNKNOWN, 6, 20, 0.1, 2.0, 10, 0.1, 1.0), test7x);
+    ok &= testBlob(*potential::CylSpline::create(test7y, coord::ST_UNKNOWN, 6, 20, 0.1, 2.0, 10, 0.1, 1.0), test7y);
+    ok &= testBlob(*potential::CylSpline::create(test7z, coord::ST_UNKNOWN, 6, 10, 0.1, 1.0, 20, 0.1, 2.0), test7z);
+    ok &= testBlob(*potential::CylSpline::create(test7d, coord::ST_UNKNOWN, 6, 15, 0.1, 1.5, 15, 0.1, 1.5), test7d);
 
     if(ok)
         std::cout << "\033[1;32mALL TESTS PASSED\033[0m\n";

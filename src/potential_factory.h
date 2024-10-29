@@ -1,7 +1,7 @@
 /** \file    potential_factory.h
     \brief   Creation and input/output of Potential instances
     \author  Eugene Vasiliev
-    \date    2010-2022
+    \date    2010-2024
 
     This file provides several utility function to manage instances of BaseDensity and BasePotential:
     creating a density or potential model from parameters provided in `utils::KeyValueMap` objects,
