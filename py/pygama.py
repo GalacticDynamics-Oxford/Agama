@@ -843,39 +843,39 @@ class GalpyPotential(_agama.Potential):
 
     def _R2deriv(self,R,z,phi=0.,t=0.):
         '''evaluate the second radial derivative for this potential: d2Phi / dR^2'''
-        coord,cphi,sphi=self._cyl2car(R,z,phi,True)
-        deriv=self.forceDeriv(coord,t=t)[1]
-        return -(deriv[0]*cphi**2 + deriv[1]*sphi**2 + 2*deriv[3]*cphi*sphi)
+        coord,cphi,sphi = self._cyl2car(R,z,phi,True)
+        der = self.eval(coord,der=True,t=t)
+        return -(der[0]*cphi**2 + der[1]*sphi**2 + 2*der[3]*cphi*sphi)
 
     def _z2deriv(self,R,z,phi=0.,t=0.):
         '''evaluate the second vertical derivative for this potential: d2Phi / dz^2'''
-        return -_numpy.array(self.forceDeriv(self._cyl2car(R,z,phi),t=t)[1]).T[2]
+        return -_numpy.array(self.eval(self._cyl2car(R,z,phi),der=True,t=t)).T[2]
 
     def _phi2deriv(self,R,z,phi=0.,t=0.):
         '''evaluate the second azimuthal derivative for this potential: d2Phi / dphi^2'''
-        coord=self._cyl2car(R,z,phi)
-        force,deriv=self.forceDeriv(coord,t=t)
-        return -(deriv[0]*coord[1]**2 + deriv[1]*coord[0]**2 -
-               2*deriv[3]*coord[0]*coord[1] - force[0]*coord[0] - force[1]*coord[1])
+        coord = self._cyl2car(R,z,phi)
+        acc,der = self.eval(coord,acc=True,der=True,t=t)
+        return -(der[0]*coord[1]**2 + der[1]*coord[0]**2 -
+               2*der[3]*coord[0]*coord[1] - acc[0]*coord[0] - acc[1]*coord[1])
 
     def _Rzderiv(self,R,z,phi=0.,t=0.):
         '''evaluate the mixed R,z derivative for this potential: d2Phi / dR dz'''
-        coord,cphi,sphi=self._cyl2car(R,z,phi,True)
-        deriv=self.forceDeriv(coord,t=t)[1]
-        return -(deriv[5]*cphi + deriv[4]*sphi)
+        coord,cphi,sphi = self._cyl2car(R,z,phi,True)
+        der = self.eval(coord,der=True,t=t)
+        return -(der[5]*cphi + der[4]*sphi)
 
     def _Rphideriv(self,R,z,phi=0.,t=0.):
         '''evaluate the mixed R,phi derivative for this potential: d2Phi / dR dphi'''
-        coord,cphi,sphi=self._cyl2car(R,z,phi,True)
-        force,deriv=self.forceDeriv(coord,t=t)
-        return -((deriv[1]-deriv[0])*coord[1]*cphi + deriv[3]*(coord[0]*cphi-coord[1]*sphi)
-            - force[0]*sphi + force[1]*cphi)
+        coord,cphi,sphi = self._cyl2car(R,z,phi,True)
+        acc,der = self.eval(coord,acc=True,der=True,t=t)
+        return -((der[1]-der[0])*coord[1]*cphi + der[3]*(coord[0]*cphi-coord[1]*sphi)
+            - acc[0]*sphi + acc[1]*cphi)
 
     def _zphideriv(self,R,z,phi=0.,t=0.):
         '''evaluate the mixed z,phi derivative for this potential: d2Phi / dz dphi'''
-        coord=self._cyl2car(R,z,phi)
-        force,deriv=self.forceDeriv(coord,t=t)
-        return -(deriv[4]*coord[0] - deriv[5]*coord[1])
+        coord = self._cyl2car(R,z,phi)
+        der = self.eval(coord,der=True,t=t)
+        return -(der[4]*coord[0] - der[5]*coord[1])
 
 
 ### ------------------
@@ -941,7 +941,7 @@ class GalaPotential(_agama.Potential):
             self._energy  = lambda q,t=0.: self.potential(q, t=t)
             self._density = lambda q,t=0.: _agama.Potential.density(self, q, t=t)
             self._gradient= lambda q,t=0.: -self.force(q, t=t)
-            self._hessian = lambda q,t=0.: -self.forceDeriv(q, t=t)[1][:,(0,3,5,3,1,4,5,4,2)].reshape(-1,3,3)
+            self._hessian = lambda q,t=0.: -self.eval(q, der=True, t=t)[:,(0,3,5,3,1,4,5,4,2)].reshape(-1,3,3)
             self.__name__ = 'GalaPotential wrapper for ' + _agama.Potential.__repr__(self)
 
     agamadensity = _agama.Potential.density

@@ -61,16 +61,17 @@ class ProjectedDensityIntegrand: public math::IFunctionNoDeriv, public math::IFu
     const BaseDensity& dens;  ///< the density model
     const double X, Y, R;     ///< coordinates in the image plane
     const coord::Orientation& orientation; ///< converion between intrinsic and observed coords
+    double time;              ///< time at which the density is evaluated
 public:
     ProjectedDensityIntegrand(const BaseDensity& _dens, const coord::PosProj& pos,
-        const coord::Orientation& _orientation)
+        const coord::Orientation& _orientation, double _time)
     :
-        dens(_dens), X(pos.X), Y(pos.Y), R(sqrt(X*X+Y*Y)), orientation(_orientation) {}
+        dens(_dens), X(pos.X), Y(pos.Y), R(sqrt(X*X+Y*Y)), orientation(_orientation), time(_time) {}
     virtual double value(double s) const
     {
         // unscale the input scaled coordinate, which lies in the range (0..1);
         double dZds, Z = unscale(math::ScalingDoubleInf(R), s, &dZds);
-        return nan2num(dens.density(orientation.fromRotated(coord::PosCar(X, Y, Z))) * dZds);
+        return nan2num(dens.density(orientation.fromRotated(coord::PosCar(X, Y, Z)), time) * dZds);
     }
     virtual void eval(const double vars[], double values[]) const {
         values[0] = value(vars[0]);
@@ -86,7 +87,7 @@ public:
             double Z = unscale(math::ScalingDoubleInf(R), vars[i], &dZds[i]);
             points[i] = orientation.fromRotated(coord::PosCar(X, Y, Z));
         }
-        dens.evalmanyDensityCar(npoints, points, values);
+        dens.evalmanyDensityCar(npoints, points, values, time);
         for(size_t i=0; i<npoints; i++)
             values[i] = nan2num(values[i] * dZds[i]);
     }
@@ -100,12 +101,14 @@ class ProjectedEvalIntegrand: public math::IFunctionNdim {
     const double X, Y, R;     ///< coordinates in the image plane
     const coord::Orientation& orientation;  ///< converion between intrinsic and observed coords
     const bool needPhi, needGrad, needHess; ///< which quantities are needed
+    double time;              ///< time at which the density is evaluated
 public:
     ProjectedEvalIntegrand(const BasePotential& _pot, const coord::PosProj& pos,
-        const coord::Orientation& _orientation, bool _needPhi, bool _needGrad, bool _needHess)
+        const coord::Orientation& _orientation,
+        bool _needPhi, bool _needGrad, bool _needHess, double _time)
     :
         pot(_pot), X(pos.X), Y(pos.Y), R(sqrt(X*X+Y*Y)), orientation(_orientation),
-        needPhi(_needPhi), needGrad(_needGrad), needHess(_needHess)
+        needPhi(_needPhi), needGrad(_needGrad), needHess(_needHess), time(_time)
     {
         if(needPhi && !isFinite(pot.value(coord::PosCar(0, 0, 0))) )
             throw std::runtime_error("Potential must be finite at origin");
@@ -121,10 +124,10 @@ public:
         coord::GradCar grad_int, grad_obs;  // gradient in the intrinsic and observed systems
         coord::HessCar hess_int, hess_obs;  // same for hessian
         pot.eval(orientation.fromRotated(coord::PosCar(X, Y, Z)),
-            needPhi? &Phi : NULL, needGrad? &grad_int : NULL, needHess? &hess_int : NULL);
+            needPhi? &Phi : NULL, needGrad? &grad_int : NULL, needHess? &hess_int : NULL, time);
         int numOutputs = 0;
         if(needPhi) {
-            pot.eval(coord::PosCar(0, 0, Z), &Phi0);
+            pot.eval(coord::PosCar(0, 0, Z), &Phi0, NULL, NULL, time);
             values[numOutputs++] = nan2num((Phi-Phi0) * dZds);
         }
         if(needGrad) {
@@ -474,7 +477,7 @@ public:
 
 
 double projectedDensity(const BaseDensity& dens, const coord::PosProj& pos,
-    const coord::Orientation& orientation)
+    const coord::Orientation& orientation, double time)
 {
 #ifndef PROJ_DENSITY_VECTORIZED
     return math::integrateAdaptive(ProjectedDensityIntegrand(dens, X, Y, orientation),
@@ -482,7 +485,7 @@ double projectedDensity(const BaseDensity& dens, const coord::PosProj& pos,
 #else
     // use integrateNdim as the adaptive integration engine with vectorization
     double xlower[1] = {0}, xupper[1] = {1}, result;
-    math::integrateNdim(ProjectedDensityIntegrand(dens, pos, orientation),
+    math::integrateNdim(ProjectedDensityIntegrand(dens, pos, orientation, time),
         xlower, xupper, EPSREL_DENSITY_INT, /*maxNumEval*/ MAX_NUM_EVAL_INT, &result);
     return result;
 #endif
@@ -490,11 +493,11 @@ double projectedDensity(const BaseDensity& dens, const coord::PosProj& pos,
 
 void projectedEval(
     const BasePotential& pot, const coord::PosProj& pos, const coord::Orientation& orientation,
-    double *value, coord::GradCar* grad, coord::HessCar* hess)
+    double *value, coord::GradCar* grad, coord::HessCar* hess, double time)
 {
     double xlower[1] = {0}, xupper[1] = {1}, result[6], error[6]; int neval;
     math::integrateNdim(
-        ProjectedEvalIntegrand(pot, pos, orientation, value!=NULL, grad!=NULL, hess!=NULL),
+        ProjectedEvalIntegrand(pot, pos, orientation, value!=NULL, grad!=NULL, hess!=NULL, time),
         xlower, xupper, EPSREL_DENSITY_INT, /*maxNumEval*/ MAX_NUM_EVAL_INT, result, error, &neval);
     int numOutputs = 0;
     if(value) {

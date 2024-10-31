@@ -15,8 +15,7 @@ namespace df {
 /** A trivial collection of several distribution functions */
 class CompositeDF: public BaseDistributionFunction{
 public:
-    CompositeDF(const std::vector<PtrDistributionFunction> &comps) :
-        components(comps) {};
+    CompositeDF(const std::vector<PtrDistributionFunction> &components);
 
     /// the number of components in this composite DF
     virtual unsigned int numValues() const { return components.size(); }

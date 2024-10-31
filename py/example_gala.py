@@ -54,8 +54,8 @@ def test(gpot, Gpot, Apot, test_hessian=False):
     print("A acceleration vs force:  %.3g" % numpy.max(abs(Apot.acceleration(points.T).T / Apot.force(points)/fu - 1)))
     print("G gradient vs A gradient: %.3g" % numpy.max(abs(Gpot.gradient(points.T) / Apot.gradient(points.T) - 1)))
     #3. test the hessian
-    print("G forceDeriv vs A forceDeriv: %.3g" % numpy.max(abs(Gpot.forceDeriv(points)[1] / Apot.forceDeriv(points)[1] - 1)))
-    print("G hessian vs A hessian:       %.3g" % numpy.max(abs(Gpot.hessian(points.T) / Apot.hessian(points.T) - 1)))
+    print("G acc.deriv vs A acc.deriv:  %.3g" % numpy.max(abs(Gpot.eval(points,der=1) / Apot.eval(points,der=1) - 1)))
+    print("G hessian vs A hessian:      %.3g" % numpy.max(abs(Gpot.hessian(points.T) / Apot.hessian(points.T) - 1)))
     #4. test density - again no exact match since it is computed by finite differences in Gpot
     print("G density [gala] vs [agama]: %.3g" % numpy.max(abs(Gpot.density(points.T) / Gpot.agamadensity(points)/du - 1)))
     print("A density [gala] vs [agama]: %.3g" % numpy.max(abs(Apot.density(points.T) / Apot.agamadensity(points)/du - 1)))

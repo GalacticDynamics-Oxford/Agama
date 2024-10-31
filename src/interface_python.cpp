@@ -65,7 +65,7 @@
 #include "utils.h"
 #include "utils_config.h"
 // text string embedded into the python module as the __version__ attribute (including Github commit number)
-#define AGAMA_VERSION "1.0.146 compiled on " __DATE__
+#define AGAMA_VERSION "1.0.147 compiled on " __DATE__
 
 // older versions of numpy have different macro names
 // (will need to expand this list if other similar macros are used in the code)
@@ -549,17 +549,6 @@ std::vector<PyObject*> toPyObjectArray(PyObject* obj)
     return result;
 }
 
-/// convert a Python dictionary to its C++ analog
-utils::KeyValueMap convertPyDictToKeyValueMap(PyObject* dict)
-{
-    PyObject *key, *value;
-    Py_ssize_t pos = 0;
-    utils::KeyValueMap params;
-    while (PyDict_Next(dict, &pos, &key, &value))
-        params.set(toString(key), toString(value));
-    return params;
-}
-
 /// check that the list of arguments provided to a Python function
 /// contains only named args and no positional args
 inline bool onlyNamedArgs(PyObject* args, PyObject* namedArgs)
@@ -584,167 +573,130 @@ inline bool noNamedArgs(PyObject* namedArgs)
     return true;
 }
 
-/// check that the list of optional named arguments matches the function signature;
-/// return true on success (without actually parsing the arguments),
-/// otherwise set a Python exception and return false
-bool checkNamedArgs(PyObject* namedArgs, const char** keywords)
-{
-    if(!namedArgs)
-        return true;  // nothing to check
-    if(!PyDict_Check(namedArgs))
-        return false;  // shouldn't happen
-    PyObject *key_obj = NULL;
-    Py_ssize_t pos = 0;
-    while(PyDict_Next(namedArgs, &pos, &key_obj, NULL)) {
-        const char* key = PyString_AsString(key_obj);
-        if(!key)
-            return false;
-        bool found = false;
-        for(const char** keyword=keywords; !found && *keyword!=NULL; keyword++)
-            found |= strcmp(key, *keyword)==0;
-        if(!found) {
-            PyErr_SetString(PyExc_TypeError,
-                ("got an unexpected keyword argument " + std::string(key)).c_str());
-            return false;
-        }
-    }
-    return true;
-}
-
-/// parse an optional argument that may be a single number or an array of the given length;
-/// if the argument is not provided, return an array with a single default value,
-/// whereas if the argument does not follow the expected format or has a wrong name
-/// (in case of a single named argument), set a Python exception and return an empty array.
-std::vector<double> getOptionalArrayArg(PyObject* namedArgs, const char* name, npy_intp numPoints,
-    bool singleArg=true, double defaultValue=0)
-{
-    std::vector<double> result;
-    if(namedArgs && PyDict_Check(namedArgs)) {
-        if(singleArg && PyDict_Size(namedArgs)!=1) {
-            PyErr_SetString(PyExc_TypeError,
-                ("Only one optional keyword argument " + std::string(name) +
-                "=(number or array of the same length as points) is allowed").c_str());
-            return result;
-        }
-        PyObject* arg = PyDict_GetItemString(namedArgs, name);
-        if(arg) {
-            // it may be an array or something that could be converted to an array
-            if(PySequence_Check(arg) && !PyString_Check(arg)) {
-                PyObject *arr = PyArray_FROM_OTF(arg, NPY_DOUBLE, 0/*no special requirements*/);
-                if(arr && PyArray_NDIM((PyArrayObject*)arr) == 1) {
-                    npy_intp size = PyArray_DIM((PyArrayObject*)arr, 0);
-                    if(size==1 || size==numPoints) {
-                        result.resize(size);
-                        for(npy_intp i=0; i<size; i++)
-                            result[i] = pyArrayElem<double>(arr, i);
-                    }
+/** Helper class for parsing named arguments in a case-insensitive way.
+    It is created from a Python dictionary, and converts its keys into C++ strings,
+    while keeping values as PyObject* pointers (borrowed references), creating a list of arguments.
+    One can retrieve ("get") its elements with specific keys (a non-existent argument does not
+    raise an error), or "pop" elements, removing them from the list of arguments.
+    Once all known named arguments have been retrieved, one can convert the remaining ones
+    into KeyValueMap (i.e. convert all values into strings), which clears this list (it remains
+    the job of downstream code to verify that this KeyValueMap contains only known keys).
+    When the object is destroyed while retaining any argument that have not been parsed,
+    this raises a Python exception with the list of unknown named arguments.
+*/
+class NamedArgs {
+    std::vector<std::pair<std::string, PyObject*> > args;
+public:
+    /// Create the list of elements, checking for duplicate keys
+    NamedArgs(PyObject* namedArgs)
+    {
+        if(!namedArgs)
+            return;
+        assert(PyDict_Check(namedArgs));
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        while(PyDict_Next(namedArgs, &pos, &key, &value)) {
+            std::string keystr = toString(key);
+            // check that the key is not duplicated (using case-insensitive comparison)
+            for(size_t i=0; i<args.size(); i++) 
+                if(utils::stringsEqual(args[i].first, keystr)) {
+                    PyErr_SetString(PyExc_TypeError,
+                        ("Duplicate parameter " + args[i].first + " and " + keystr).c_str());
+                    return;
                 }
-                Py_XDECREF(arr);
-            } else if(PyNumber_Check(arg)) {
-                // it may be a single number
-                double value = PyFloat_AsDouble(arg);
-                if(!PyErr_Occurred())
-                    result.push_back(value);
-            }
-            if(result.empty()) {
-                PyErr_SetString(PyExc_ValueError,
-                    ("Argument '" + std::string(name) + "', if provided, "
-                    "must be a single number or an array of the same length as points").c_str());
-            }
-            return result;
+            args.push_back(std::pair<std::string, PyObject*>(keystr, value));
         }
     }
-    // otherwise the argument with the given name is not provided - return a single default value
-    result.push_back(defaultValue);
-    return result;
-}
 
-/// find an item in the Python dictionary using case-sensitive or case-insensitive key comparison
-PyObject* getItemFromPyDict(PyObject* dict, const char* itemkey, bool caseSensitive=false)
-{
-    if(dict == NULL)
+    /// If the object is destroyed while retaining any elements in the list,
+    /// this raises a Python TypeError exception, unless there is another exception already raised.
+    ~NamedArgs()
+    {
+        if(PyErr_Occurred())  // preserve any other exception that might have occurred earlier
+            return;
+        size_t size = args.size();
+        if(size==0)
+            return;
+        std::string msg = size>1 ? "Unknown parameters " : "Unknown parameter ";
+        for(size_t i=0; i<size; i++) {
+            if(i>0)
+                msg += ',';
+            msg += args[i].first;
+        }
+        PyErr_SetString(PyExc_TypeError, msg.c_str());
+    }
+
+    bool empty() const { return args.empty(); }
+
+    /// Convert the object into a KeyValueMap and clear all remaining elements from the list
+    operator utils::KeyValueMap()
+    {
+        utils::KeyValueMap params;
+        for(size_t i=0; i<args.size(); i++)
+            params.set(args[i].first, toString(args[i].second));
+        args.clear();
+        return params;
+    }
+
+    /// Retrieve an argument without removing it from the list
+    PyObject* get(const char* key) const
+    {
+        for(size_t i=0; i<args.size(); i++)
+            if(utils::stringsEqual(args[i].first, key))
+                return args[i].second;
         return NULL;
-    PyObject *key, *value;
-    Py_ssize_t pos = 0;
-    while(PyDict_Next(dict, &pos, &key, &value)) {
-        std::string keystr = toString(key);
-        bool equal = caseSensitive ?
-            strcmp(keystr.c_str(), itemkey)==0 :
-            utils::stringsEqual(keystr, itemkey);
-        if(equal)
-            return value;
     }
-    return NULL;
-}
 
-/// find and delete an item from Python dictionary using case-insensitive key comparison
-bool delItemFromPyDict(PyObject* dict, const char* itemkey)
-{
-    PyObject *key, *value;
-    Py_ssize_t pos = 0;
-    while(PyDict_Next(dict, &pos, &key, &value))
-        if(utils::stringsEqual(toString(key), itemkey))
-            return PyDict_DelItem(dict, key) == 0;
-    return false;
-}
+    /// Retrieve an argument and remove it from the list
+    PyObject* pop(const char* key)
+    {
+        for(size_t i=0; i<args.size(); i++)
+            if(utils::stringsEqual(args[i].first, key)) {
+                PyObject* value = args[i].second;
+                args.erase(args.begin()+i);
+                return value;
+            }
+        return NULL;
+    }
 
-/// find an item in the Python dictionary using case-insensitive key comparison;
-/// if found, convert it to a C++ type using the provided converter function
-/// and remove from the dict;  if not found, return the default value.
-template<typename T>
-T popItemFromPyDict(PyObject* dict, const char* itemkey,
-    T(*converter)(PyObject*), const T& defaultValue=T())
-{
-    if(dict == NULL)
-        return defaultValue;
-    PyObject *key, *value;
-    Py_ssize_t pos = 0;
-    while(PyDict_Next(dict, &pos, &key, &value)) {
-        if(utils::stringsEqual(toString(key), itemkey)) {
-            T result = converter(value);
-            PyDict_DelItem(dict, key);
+    /// Parse an optional argument that may be a single number or an array of the given length.
+    /// If the argument is not found in the list, return an array with a single default value,
+    /// whereas if the argument does not follow the expected format, set a Python exception
+    /// and return an empty array. The argument is removed from the list if found.
+    std::vector<double> popArray(const char* key, npy_intp numPoints, double defaultValue=0)
+    {
+        PyObject* obj = pop(key);
+        std::vector<double> result;
+        if(!obj) {
+            result.push_back(defaultValue);
             return result;
         }
-    }
-    return defaultValue;
-}
-
-/// same as above, but for the case when the converter function has a second argument (default value)
-template<typename T>
-T popItemFromPyDict(PyObject* dict, const char* itemkey,
-    T(*converter)(PyObject*, T), const T& defaultValue=T())
-{
-    if(dict == NULL)
-        return defaultValue;
-    PyObject *key, *value;
-    Py_ssize_t pos = 0;
-    while(PyDict_Next(dict, &pos, &key, &value)) {
-        if(utils::stringsEqual(toString(key), itemkey)) {
-            T result = converter(value, defaultValue);
-            PyDict_DelItem(dict, key);
-            return result;
+        // it may be an array or something that could be converted to an array
+        if(PySequence_Check(obj) && !PyString_Check(obj)) {
+            PyObject *arr = PyArray_FROM_OTF(obj, NPY_DOUBLE, 0/*no special requirements*/);
+            if(arr && PyArray_NDIM((PyArrayObject*)arr) == 1) {
+                npy_intp size = PyArray_DIM((PyArrayObject*)arr, 0);
+                if(size==1 || size==numPoints) {
+                    result.resize(size);
+                    for(npy_intp i=0; i<size; i++)
+                        result[i] = pyArrayElem<double>(arr, i);
+                }
+            }
+            Py_XDECREF(arr);
+        } else if(PyNumber_Check(obj)) {
+            // it may be a single number
+            double value = PyFloat_AsDouble(obj);
+            if(!PyErr_Occurred())
+                result.push_back(value);
         }
+        if(result.empty()) {
+            PyErr_SetString(PyExc_TypeError,
+                ("Argument '" + std::string(key) + "', if provided, "
+                "must be a single number or an array of the same length as points").c_str());
+        }
+        return result;
     }
-    return defaultValue;
-}
-
-/// check that no unknown arguments remain after extracting all known elements
-/// from the dict of named arguments using popItemFromPyDict() or delItemFromPyDict()
-bool checkNoRemainingArgs(PyObject* dict)
-{
-    Py_ssize_t size = PyDict_Size(dict), pos = 0, count = 0;
-    if(size==0)
-        return true;
-    std::string msg = size>1 ? "Unknown parameters " : "Unknown parameter ";
-    PyObject *key, *value;
-    while(PyDict_Next(dict, &pos, &key, &value)) {
-        if(count++ > 0)
-            msg += ',';
-        msg += toString(key);
-    }
-    PyErr_SetString(PyExc_TypeError, msg.c_str());
-    return false;
-}
+};
 
 /// convert a C++ exception message to a Python exception
 /// (either a KeyboardInterrupt or a generic RuntimeError)
@@ -1740,12 +1692,13 @@ potential::PtrDensity Density_initFromCumulMass(PyObject* cumulMass)
 /// attempt to construct a density from key=value parameters
 potential::PtrDensity Density_initFromDict(PyObject* namedArgs)
 {
+    NamedArgs nargs(namedArgs);
     // check if the input is a cumulative mass profile
-    PyObject* cumulmass = getItemFromPyDict(namedArgs, "cumulmass");
+    PyObject* cumulmass = nargs.pop("cumulmass");
     if(cumulmass)
         return Density_initFromCumulMass(cumulmass);
-    PyObject* dens_obj = getItemFromPyDict(namedArgs, "density");
-    utils::KeyValueMap params = convertPyDictToKeyValueMap(namedArgs);
+    PyObject* dens_obj = nargs.get("density");
+    utils::KeyValueMap params(nargs);
     if(dens_obj && !PyString_Check(dens_obj)) {
         // if it's not a name, it must be a Density instance or a user-defined Python function
         potential::PtrDensity dens = getDensity(dens_obj, &params);
@@ -1814,12 +1767,13 @@ int Density_init(DensityObject* self, PyObject* args, PyObject* namedArgs)
         else if(numargs==0 && numnamed>0)
             self->dens = Density_initFromDict(namedArgs);
         else if(numargs==0)
-            throw std::invalid_argument("Argument list cannot be empty, type help(Density) for details");
+            PyErr_SetString(PyExc_TypeError,
+                "Argument list cannot be empty, type help(Density) for details");
         else if(numargs==1 && numnamed==1) {
             // an exception to the rule below: may provide one positional argument (a user-defined
             // function, but *not* an instance of Density) and one required named argument "symmetry"
             PyObject* arg = PyTuple_GET_ITEM(args, 0);
-            PyObject* namedArg = getItemFromPyDict(namedArgs, "symmetry");
+            PyObject* namedArg = NamedArgs(namedArgs).pop("symmetry");
             if( namedArg &&
                 !PyObject_TypeCheck(arg, DensityTypePtr) &&
                 checkCallable(arg, /*dimension of input*/ 3))
@@ -1827,10 +1781,12 @@ int Density_init(DensityObject* self, PyObject* args, PyObject* namedArgs)
                 self->dens = potential::PtrDensity(new DensityWrapper(arg,
                     potential::getSymmetryTypeByName(toString(namedArg))));
             }
-        }
-        if(!self->dens)
-            throw std::invalid_argument("Invalid arguments passed to the constructor "
+        } else
+            PyErr_SetString(PyExc_TypeError, "Invalid arguments passed to the constructor "
                 "(cannot mix positional and named arguments), type help(Density) for details");
+        if(PyErr_Occurred())
+            return -1;
+        assert(self->dens);
         FILTERMSG(utils::VL_DEBUG, "Agama", "Created "+std::string(self->dens->name())+
             " density at "+utils::toString(self->dens.get()));
         unitsWarning = true;  // any subsequent call to setUnits() will raise a warning
@@ -1886,7 +1842,7 @@ public:
     FncDensityDensity(PyObject* input, PyObject* namedArgs, const potential::BaseDensity& _dens) :
         BatchFunctionVectorized(input, /*input length*/ 3),
         dens(_dens),
-        time(getOptionalArrayArg(namedArgs, "t", numPoints))
+        time(NamedArgs(namedArgs).popArray("t", numPoints))
     {
         if(!PyErr_Occurred()) {
             outputObject = allocateOutput<1>(numPoints, &outputBuffer);
@@ -1924,20 +1880,22 @@ PyObject* Density_density(PyObject* self, PyObject* args, PyObject* namedArgs)
 /// compute the projected (surface) density for an array of points
 class FncDensityProjectedDensity: public BatchFunction {
     const potential::BaseDensity& dens;
-    const std::vector<double> alpha, beta, gamma;
+    std::vector<double> alpha, beta, gamma, time;
     double* outputBuffer;
 public:
     FncDensityProjectedDensity(PyObject* input, PyObject* namedArgs,
         const potential::BaseDensity& _dens) :
         BatchFunction(input, /*input length*/ 2),
-        dens(_dens),
-        alpha(getOptionalArrayArg(namedArgs, "alpha", numPoints, false)),
-        beta (getOptionalArrayArg(namedArgs, "beta" , numPoints, false)),
-        gamma(getOptionalArrayArg(namedArgs, "gamma", numPoints, false))
+        dens(_dens)
     {
-        if(!PyErr_Occurred()) {
+        NamedArgs nargs(namedArgs);
+        alpha = nargs.popArray("alpha", numPoints);
+        beta  = nargs.popArray("beta" , numPoints);
+        gamma = nargs.popArray("gamma", numPoints);
+        time  = nargs.popArray("t"    , numPoints);
+        if(!PyErr_Occurred() && nargs.empty()) {
             outputObject = allocateOutput<1>(numPoints, &outputBuffer);
-            assert(!alpha.empty() && !beta.empty() && !gamma.empty());
+            assert(!alpha.empty() && !beta.empty() && !gamma.empty() && !time.empty());
         }
     }
     virtual void processPoint(npy_intp indexPoint)
@@ -1949,7 +1907,8 @@ public:
                 coord::Orientation(
                     alpha[indexPoint % alpha.size()],
                     beta [indexPoint % beta .size()],
-                    gamma[indexPoint % gamma.size()]) ) /
+                    gamma[indexPoint % gamma.size()]),
+                /*optional time argument*/ time[indexPoint % time.size()] * conv->timeUnit) /
             (conv->massUnit / pow_2(conv->lengthUnit));
     }
 };
@@ -1957,10 +1916,7 @@ public:
 PyObject* Density_projectedDensity(PyObject* self, PyObject* args, PyObject* namedArgs)
 {
     // args may be just two numbers (a single position X,Y), or a Nx2 array of several positions;
-    // namedArgs may be empty or contain up to three rotation angles
-    static const char* keywords[] = {"alpha", "beta", "gamma", NULL};
-    if(!checkNamedArgs(namedArgs, keywords))
-        return NULL;
+    // namedArgs may be empty or contain up to three rotation angles and time
     return FncDensityProjectedDensity(args, namedArgs, *((DensityObject*)self)->dens).run(/*chunk*/64);
 }
 
@@ -2297,6 +2253,8 @@ static PyMethodDef Density_methods[] = {
       "of the image plane in the intrinsic coordinate system of the model; "
       "in particular, beta is the inclination angle. "
       "Angles can be single numbers or arrays of the same length as the number of points.\n"
+      "  t   (optional, default 0): time at which to compute these quantities; "
+      "can be a single number or an array of length N (separate values for each input point).\n"
       "Returns: float or array of floats - the density integrated along the line of sight Z "
       "perpendicular to the image plane."},
     { "export", Density_export, METH_VARARGS,
@@ -2570,11 +2528,6 @@ public:
             throw std::runtime_error("Call to user-defined potential function failed");
         else if(typeerror)
             throw std::runtime_error("Invalid data type returned by user-defined potential function");
-        /*else if(!isFinite(val[0]))
-            throw std::runtime_error("Invalid value (" + utils::toString(val[0]) +
-                ") returned by user-defined potential function at point (" +
-                utils::toString(xyz[0]) + ',' + utils::toString(xyz[1]) + ',' + utils::toString(xyz[2]) + ')');
-        */
         if(potential)
             *potential = val[0] * pow_2(conv->velocityUnit);
         if(deriv) {  // 4-point rule for 1st derivs, accuracy O(h^4)
@@ -2628,24 +2581,26 @@ PyObject* createPotentialObject(const potential::PtrPotential& pot)
 /// attempt to construct an elementary potential from the parameters provided in dictionary
 potential::PtrPotential Potential_initFromDict(PyObject* namedArgs)
 {
+    NamedArgs nargs(namedArgs);
     // check if the arguments contain an array of particles, and if so,
     // convert it to an equivalent C++ class and remove from dict to avoid putting it into KeyValueMap
-    particles::ParticleArray<coord::PosCar> particles = popItemFromPyDict(
-        namedArgs, "particles", convertParticles<coord::PosCar>);
-    utils::KeyValueMap params = convertPyDictToKeyValueMap(namedArgs);
-    if(particles.size()) {
+    PyObject* particles_obj = nargs.pop("particles");
+    // also obtain (but not remove) the next two parameters as Python objects (or possibly strings)
+    PyObject* dens_obj = nargs.get("density");
+    PyObject* pot_obj  = nargs.get("potential");
+    // convert the remaining items in the Python dictionary into a KeyValueMap
+    utils::KeyValueMap params(nargs);
+    if(particles_obj) {
         if(params.contains("file"))
             throw std::invalid_argument("Cannot provide both 'particles' and 'file' arguments");
         if(params.contains("density"))
             throw std::invalid_argument("Cannot provide both 'particles' and 'density' arguments");
         if(!params.contains("type"))
             throw std::invalid_argument("Must provide 'type=\"...\"' argument");
-        return potential::createPotential(params, particles, *conv);
+        return potential::createPotential(params, convertParticles<coord::PosCar>(particles_obj), *conv);
     }
     // check if the list of arguments contains a density object
     // or a string specifying the name of density model
-    PyObject* dens_obj = getItemFromPyDict(namedArgs, "density");
-    PyObject* pot_obj  = getItemFromPyDict(namedArgs, "potential");
     if(int(params.contains("file")) + int(dens_obj!=NULL) + int(pot_obj!=NULL) > 1)
         throw std::invalid_argument("Arguments 'file', 'density', 'potential' are mutually exclusive");
     if(dens_obj) {
@@ -2700,7 +2655,7 @@ potential::PtrPotential Potential_initFromTuple(PyObject* tuple)
     for(Py_ssize_t i=0; i<PyTuple_Size(tuple); i++) {
         PyObject* item = PyTuple_GET_ITEM(tuple, i);
         if(PyDict_Check(item))  // a dictionary with param=value pairs
-            paramsArr.push_back(convertPyDictToKeyValueMap(item));
+            paramsArr.push_back(NamedArgs(item));
         else {
             // could be an existing Potential object or a compatible user-defined function
             potential::PtrPotential pot = getPotential(item);
@@ -2749,12 +2704,13 @@ int Potential_init(PotentialObject* self, PyObject* args, PyObject* namedArgs)
         else if(numargs==0 && numnamed>0)
             self->pot = Potential_initFromDict(namedArgs);
         else if(numargs==0)
-            throw std::invalid_argument("Argument list cannot be empty, type help(Potential) for details");
+            PyErr_SetString(PyExc_TypeError,
+                "Argument list cannot be empty, type help(Potential) for details");
         else if(numargs==1 && numnamed==1) {
             // an exception to the rule below: may provide one positional argument (a user-defined
             // function, but *not* an instance of Potential) and one required named argument "symmetry"
             PyObject* arg = PyTuple_GET_ITEM(args, 0);
-            PyObject* namedArg = getItemFromPyDict(namedArgs, "symmetry");
+            PyObject* namedArg = NamedArgs(namedArgs).pop("symmetry");
             if( namedArg &&
                 !PyObject_TypeCheck(arg, PotentialTypePtr) &&
                 checkCallable(arg, /*dimension of input*/ 3))
@@ -2762,10 +2718,12 @@ int Potential_init(PotentialObject* self, PyObject* args, PyObject* namedArgs)
                 self->pot = potential::PtrPotential(new PotentialWrapper(arg,
                     potential::getSymmetryTypeByName(toString(namedArg))));
             }
-        }
-        if(!self->pot)
-            throw std::invalid_argument("Invalid arguments passed to the constructor "
+        } else
+            PyErr_SetString(PyExc_TypeError, "Invalid arguments passed to the constructor "
                 "(cannot mix positional and named arguments), type help(Potential) for details");
+        if(PyErr_Occurred())
+            return -1;
+        assert(self->pot);
         FILTERMSG(utils::VL_DEBUG, "Agama", "Created "+std::string(self->pot->name())+
             " potential at "+utils::toString(self->pot.get()));
         unitsWarning = true;  // any subsequent call to setUnits() will raise a warning
@@ -2837,7 +2795,7 @@ public:
     FncPotentialPotential(PyObject* input, PyObject* namedArgs, const potential::BasePotential& _pot) :
         BatchFunction(input, /*input length*/ 3),
         pot(_pot),
-        time(getOptionalArrayArg(namedArgs, "t", numPoints))
+        time(NamedArgs(namedArgs).popArray("t", numPoints))
     {
         if(!PyErr_Occurred()) {
             outputObject = allocateOutput<1>(numPoints, &outputBuffer);
@@ -2870,7 +2828,7 @@ public:
     FncPotentialForce(PyObject* input, PyObject* namedArgs, const potential::BasePotential& _pot) :
         BatchFunction(input, /*input length*/ 3),
         pot(_pot),
-        time(getOptionalArrayArg(namedArgs, "t", numPoints))
+        time(NamedArgs(namedArgs).popArray("t", numPoints))
     {
         if(!PyErr_Occurred()) {
             outputObject = DERIV ?
@@ -2911,31 +2869,131 @@ PyObject* Potential_force(PyObject* self, PyObject* args, PyObject* namedArgs) {
 PyObject* Potential_forceDeriv(PyObject* self, PyObject* args, PyObject* namedArgs) {
     if(!Potential_isCorrect(self))
         return NULL;
+    PyErr_WarnEx(PyExc_FutureWarning,
+        "forceDeriv is deprecated, use Potential.eval(..., der=True) instead", 1);
     return FncPotentialForce<true>(args, namedArgs, *((PotentialObject*)self)->pot).run(/*chunk*/1024);
+}
+
+/// compute the potential, acceleration and its derivatives for an array of points
+class FncPotentialEval: public BatchFunction {
+    const potential::BasePotential& pot;
+    std::vector<double> time;
+    double *outputPot, *outputAcc, *outputDer;    // raw buffers for output quantities
+public:
+    FncPotentialEval(PyObject* input, PyObject* namedArgs, const potential::BasePotential& _pot) :
+        BatchFunction(input, /*input length*/ 3),
+        pot(_pot),
+        outputPot(NULL), outputAcc(NULL), outputDer(NULL)
+    {
+        NamedArgs nargs(namedArgs);
+        time = nargs.popArray("t", numPoints);
+        bool needPot = toBool(nargs.pop("pot"), false);
+        bool needAcc = toBool(nargs.pop("acc"), false);
+        bool needDer = toBool(nargs.pop("der"), false);
+        if(PyErr_Occurred() || !nargs.empty())
+            return;
+        assert(!time.empty());
+        double* outputBuffers[3];
+        if(needPot) {
+            if(needAcc) {
+                if(needDer) {
+                    outputObject = allocateOutput<1, 3, 6>(numPoints, outputBuffers);
+                    outputDer = outputBuffers[2];
+                } else {
+                    outputObject = allocateOutput<1, 3   >(numPoints, outputBuffers);
+                }
+                outputAcc = outputBuffers[1];
+            } else {  // no needAcc
+                if(needDer) {
+                    outputObject = allocateOutput<1,    6>(numPoints, outputBuffers);
+                    outputDer = outputBuffers[1];
+                } else {
+                    outputObject = allocateOutput<1      >(numPoints, outputBuffers);
+                }
+            }
+            outputPot = outputBuffers[0];
+        } else {  // no needPot
+            if(needAcc) {
+                if(needDer) {
+                    outputObject = allocateOutput<   3, 6>(numPoints, outputBuffers);
+                    outputDer = outputBuffers[1];
+                } else {
+                    outputObject = allocateOutput<   3   >(numPoints, outputBuffers);
+                }
+                outputAcc = outputBuffers[0];
+            } else {  // no needAcc
+                if(needDer) {
+                    outputObject = allocateOutput<      6>(numPoints, outputBuffers);
+                    outputDer = outputBuffers[0];
+                } else {
+                    PyErr_SetString(PyExc_RuntimeError, "Nothing to compute!");
+                }
+            }
+        }
+    }
+
+    virtual void processPoint(npy_intp indexPoint)
+    {
+        double Phi;
+        coord::GradCar grad;
+        coord::HessCar hess;
+        pot.eval(convertPos(&inputBuffer[indexPoint*3]),
+            outputPot ? &Phi  : NULL,
+            outputAcc ? &grad : NULL,
+            outputDer ? &hess : NULL,
+            time[indexPoint % time.size()] * conv->timeUnit);
+        if(outputPot)
+            outputPot[indexPoint] = Phi / pow_2(conv->velocityUnit);
+        if(outputAcc) {
+            const double convF = 1 / (conv->velocityUnit / conv->timeUnit);
+            outputAcc[indexPoint*3 + 0] = -grad.dx * convF;
+            outputAcc[indexPoint*3 + 1] = -grad.dy * convF;
+            outputAcc[indexPoint*3 + 2] = -grad.dz * convF;
+        }
+        if(outputDer) {
+            const double convD = 1 / (conv->velocityUnit / conv->timeUnit / conv->lengthUnit);
+            outputDer[indexPoint*6 + 0] = -hess.dx2  * convD;
+            outputDer[indexPoint*6 + 1] = -hess.dy2  * convD;
+            outputDer[indexPoint*6 + 2] = -hess.dz2  * convD;
+            outputDer[indexPoint*6 + 3] = -hess.dxdy * convD;
+            outputDer[indexPoint*6 + 4] = -hess.dydz * convD;
+            outputDer[indexPoint*6 + 5] = -hess.dxdz * convD;
+        }
+    }
+};
+
+PyObject* Potential_eval(PyObject* self, PyObject* args, PyObject* namedArgs)
+{
+    // args may be just two numbers (a single position X,Y), or a Nx3 array of several positions;
+    // namedArgs specify which quantities to compute and may also contain the time specification
+    return FncPotentialEval(args, namedArgs, *((PotentialObject*)self)->pot).run(/*chunk*/1024);
 }
 
 /// compute the projected potential, acceleration and its derivatives for an array of points
 class FncPotentialProjectedEval: public BatchFunction {
     const potential::BasePotential& pot;
-    const std::vector<double> alpha, beta, gamma; // conversion between observed and intrinsic coords
-    double *outputPot, *outputAcc, *outputDer;    // raw buffers for output quantities
+    std::vector<double> alpha, beta, gamma;     // conversion between observed and intrinsic coords
+    std::vector<double> time;                   // time(s) at which to evaluate the potential
+    double *outputPot, *outputAcc, *outputDer;  // raw buffers for output quantities
 public:
     FncPotentialProjectedEval(PyObject* input, PyObject* namedArgs,
         const potential::BasePotential& _pot) :
         BatchFunction(input, /*input length*/ 2),
         pot(_pot),
-        alpha(getOptionalArrayArg(namedArgs, "alpha", numPoints, false)),
-        beta (getOptionalArrayArg(namedArgs, "beta" , numPoints, false)),
-        gamma(getOptionalArrayArg(namedArgs, "gamma", numPoints, false)),
         outputPot(NULL), outputAcc(NULL), outputDer(NULL)
     {
-        if(PyErr_Occurred())  // e.g., an error in parsing the angles - keep outputObject=NULL
-            return;
-        assert(!alpha.empty() && !beta.empty() && !gamma.empty());
+        NamedArgs nargs(namedArgs);
+        alpha = nargs.popArray("alpha", numPoints);
+        beta  = nargs.popArray("beta" , numPoints);
+        gamma = nargs.popArray("gamma", numPoints);
+        time  = nargs.popArray("t"    , numPoints);
+        bool needPot = toBool(nargs.pop("pot"), false);
+        bool needAcc = toBool(nargs.pop("acc"), false);
+        bool needDer = toBool(nargs.pop("der"), false);
+        if(PyErr_Occurred() || !nargs.empty())
+            return;  // e.g., an error in parsing the angles - keep outputObject=NULL
+        assert(!alpha.empty() && !beta.empty() && !gamma.empty() && !time.empty());
         double* outputBuffers[3];
-        bool needPot = toBool(getItemFromPyDict(namedArgs, "pot", true), false);
-        bool needAcc = toBool(getItemFromPyDict(namedArgs, "acc", true), false);
-        bool needDer = toBool(getItemFromPyDict(namedArgs, "der", true), false);
         if(needPot) {
             if(needAcc) {
                 if(needDer) {
@@ -2989,7 +3047,8 @@ public:
             /*output*/
             outputPot ? &Phi  : NULL,
             outputAcc ? &grad : NULL,
-            outputDer ? &hess : NULL);
+            outputDer ? &hess : NULL,
+            /*optional time argument*/ time[indexPoint % time.size()] * conv->timeUnit);
         if(outputPot)
             outputPot[indexPoint] = Phi / (pow_2(conv->velocityUnit) * conv->lengthUnit);
         if(outputAcc) {
@@ -3007,10 +3066,7 @@ public:
 PyObject* Potential_projectedEval(PyObject* self, PyObject* args, PyObject* namedArgs)
 {
     // args may be just two numbers (a single position X,Y), or a Nx2 array of several positions;
-    // namedArgs specify which quantities to compute and may contain up to three rotation angles
-    static const char* keywords[] = {"pot", "acc", "der", "alpha", "beta", "gamma", NULL};
-    if(!checkNamedArgs(namedArgs, keywords))
-        return NULL;
+    // namedArgs specify which quantities to compute and may contain up to three rotation angles and time
     return FncPotentialProjectedEval(args, namedArgs, *((PotentialObject*)self)->pot).run(/*chunk*/64);
 }
 
@@ -3154,12 +3210,29 @@ static PyMethodDef Potential_methods[] = {
       "Arguments: a triplet of floats (x,y,z) or array of such triplets; optionally t=... (time)\n"
       "Returns: float[3] - x,y,z components of force, or array of such triplets" },
     { "forceDeriv", (PyCFunction)Potential_forceDeriv, METH_VARARGS | METH_KEYWORDS,
-      "Compute force per unit mass and its derivatives at a given point or array of points\n"
+      "Compute force per unit mass and its derivatives at a given point or array of points.\n"
+      "Deprecated - use the more general method Potential.eval(..., acc=True, der=True).\n"
       "Arguments: a triplet of floats (x,y,z) or array of such triplets; optionally t=... (time)\n"
       "Returns: (float[3],float[6]) - x,y,z components of force, "
       "and the matrix of force derivatives stored as dFx/dx,dFy/dy,dFz/dz,dFx/dy,dFy/dz,dFz/dx; "
       "or if the input was an array of N points, then both items in the tuple are 2d arrays "
       "with sizes Nx3 and Nx6, respectively"},
+    { "eval", (PyCFunction)Potential_eval, METH_VARARGS | METH_KEYWORDS,
+      "Compute any combination of potential, acceleration, and its derivatives "
+      "at a given point or array of points.\n"
+      "Positional arguments: \n"
+      "  a triplet of floats (x,y,z) or a 2d Nx3 array of such triplets.\n"
+      "Keyword arguments:\n"
+      "  pot (optional, default False): whether to compute the potential.\n"
+      "  acc (optional, default False): whether to compute the acceleration.\n"
+      "  der (optional, default False): whether to compute the acceleration derivatives.\n"
+      "  t   (optional, default 0): time at which to compute these quantities; "
+      "can be a single number or an array of length N (separate values for each input point).\n"
+      "Returns: one, two or three arrays, one for each requested quantity.\n"
+      "Potential (Phi) - a single number or an array of the same length as the number of input points.\n"
+      "Acceleration (-d Phi / d x_i) - three numbers or an array of shape (N,3).\n"
+      "Derivatives (-d2 Phi / d x_i d x_j ) - six numbers stored as (i,j) = xx, yy, zz, xy, yz, zx, "
+      "or an array of shape (N,6).\n"},
     { "projectedEval", (PyCFunction)Potential_projectedEval, METH_VARARGS | METH_KEYWORDS,
       "Compute any combination of projected potential, acceleration, and its derivatives "
       "(integral of the corresponding quantities along the line of sight Z, computed "
@@ -3174,17 +3247,19 @@ static PyMethodDef Potential_methods[] = {
       "of the image plane in the intrinsic coordinate system of the model; "
       "in particular, beta is the inclination angle. "
       "Angles can be single numbers or arrays of the same length as the number of points.\n"
+      "  t   (optional, default 0): time at which to compute these quantities; "
+      "can be a single number or an array of length N (separate values for each input point).\n"
       "Returns: one, two or three arrays, one for each requested quantity.\n"
       "Potential is a single number or an array of the same length as the number of input points. "
       "Since the integral of Phi(X,Y,Z) dZ diverges logarithmically at large |Z|, "
       "the actual integration is carried out for the potential difference Phi(X,Y,Z)-Phi(0,0,Z), "
       "and is currently not implemented for potentials that are singular at origin.\n"
-      "Acceleration is two numbers or an array of shape (numpoints,2) containing the X and Y "
+      "Acceleration is two numbers or an array of shape (N,2) containing the X and Y "
       "components of projected acceleration (partial derivatives of projected potential "
       "with the minus sign); the Z component is identically zero and is not computed.\n"
       "Derivatives of acceleration are three numbers (integrals of d2Phi/dX2, d2Phi/dY2, d2Phi/dXdY; "
       "other components are identically zero and are not computed), "
-      "or an array of shape (numpoints,3).\n"},
+      "or an array of shape (N,3).\n"},
     { "Rcirc", (PyCFunction)Potential_Rcirc, METH_VARARGS | METH_KEYWORDS,
       "Find the radius of a circular orbit corresponding to either the given z-component "
       "of angular momentum L or energy E; the potential is averaged over the azimuthal angle (phi) "
@@ -3868,28 +3943,30 @@ PyObject* createDistributionFunctionObject(df::PtrDistributionFunction df)
 /// attempt to construct an elementary distribution function from the parameters provided in dictionary
 df::PtrDistributionFunction DistributionFunction_initFromDict(PyObject* namedArgs)
 {
-    // obtain other parameters as key=value pairs
-    utils::KeyValueMap params = convertPyDictToKeyValueMap(namedArgs);
-    if(!params.contains("type"))
-        throw std::invalid_argument("Should provide the type='...' argument");
-    std::string type = params.getString("type");
+    NamedArgs nargs(namedArgs);
+    PyObject* pot_obj  = nargs.pop("potential");  // borrowed reference or NULL
+    PyObject* dens_obj = nargs.pop("density");
+    // convert other parameters into a KeyValueMap
+    utils::KeyValueMap params(nargs);
 
     // density and potential are needed for some types of DF, but are otherwise unnecessary
-    PyObject *pot_obj = PyDict_GetItemString(namedArgs, "potential");  // borrowed reference or NULL
     potential::PtrPotential pot;
     if(pot_obj!=NULL) {
         pot = getPotential(pot_obj, &params);
         if(!pot)
             throw std::invalid_argument("Argument 'potential' must be a valid Potential object");
     }
-    PyObject *dens_obj = PyDict_GetItemString(namedArgs, "density");
     potential::PtrDensity dens;
     if(dens_obj!=NULL) {
         dens = getDensity(dens_obj, &params);
         if(!dens)
             throw std::invalid_argument("Argument 'density' must be a valid Density object");
-    } else
-        dens = pot;
+    }
+
+    if(!params.contains("type"))
+        // this is not necessary, as the DF constructor performs this check anyway,
+        // but we can display a more meaningful message here
+        throw std::invalid_argument("Should provide the type='...' argument");
 
     // DF constructor may be calling user-defined Python potential & density functions
     // from multiple threads, so we need to release GIL beforehand
@@ -3932,10 +4009,12 @@ int DistributionFunction_init(DistributionFunctionObject* self, PyObject* args, 
         {
             self->df = DistributionFunction_initFromDict(namedArgs);
         } else {
-            throw std::invalid_argument(
+            PyErr_SetString(PyExc_TypeError,
                 "Should provide either a list of key=value arguments to create an elementary DF, "
                 "or a tuple of existing DistributionFunction objects to create a composite DF");
         }
+        if(PyErr_Occurred())
+            return -1;
         assert(self->df);
         FILTERMSG(utils::VL_DEBUG, "Agama", "Created a distribution function at "+
             utils::toString(self->df.get()));
@@ -4573,9 +4652,9 @@ PyObject* GalaxyModel_sample_posvel(GalaxyModelObject* self, PyObject* args)
 class FncGalaxyModelMoments: public BatchFunction {
     PtrSelectionFunction selFunc;                 // selection function
     const galaxymodel::GalaxyModel model;         // potential + df + action finder + sel.fnc.
-    const bool separate;                          // whether to consider each DF component separately
-    const unsigned int numComponents;             // df.numValues() if separate, otherwise 1
-    const std::vector<double> alpha, beta, gamma; // conversion between observed and intrinsic coords
+    bool separate;                                // whether to consider each DF component separately
+    unsigned int numComponents;                   // df.numValues() if separate, otherwise 1
+    std::vector<double> alpha, beta, gamma;       // conversion between observed and intrinsic coords
     double *outputDens, *outputVel, *outputVel2;  // raw buffers for output values
 public:
     FncGalaxyModelMoments(PyObject* input, PyObject* namedArgs, GalaxyModelObject* model_obj) :
@@ -4583,21 +4662,22 @@ public:
             /*custom error message*/ "Input should be a 2d/3d point or an array of points"),
         selFunc(getSelectionFunction(model_obj->sf_obj)),
         model(*model_obj->pot_obj->pot, *model_obj->af_obj->af, *model_obj->df_obj->df, *selFunc),
-        separate(toBool(getItemFromPyDict(namedArgs, "separate", true), false)),
-        numComponents(separate ? model.distrFunc.numValues() : 1),
-        alpha(getOptionalArrayArg(namedArgs, "alpha", numPoints, false)),
-        beta (getOptionalArrayArg(namedArgs, "beta" , numPoints, false)),
-        gamma(getOptionalArrayArg(namedArgs, "gamma", numPoints, false)),
         outputDens(NULL), outputVel(NULL), outputVel2(NULL)
     {
-        if(PyErr_Occurred())  // e.g., an error in parsing the angles - keep outputObject=NULL
-            return;
+        NamedArgs nargs(namedArgs);
+        bool needDens = toBool(nargs.pop("dens"), true);
+        bool needVel  = toBool(nargs.pop("vel" ), false);
+        bool needVel2 = toBool(nargs.pop("vel2"), true);
+        separate      = toBool(nargs.pop("separate"), false);
+        numComponents = separate ? model.distrFunc.numValues() : 1;
+        alpha = nargs.popArray("alpha", numPoints);
+        beta  = nargs.popArray("beta" , numPoints);
+        gamma = nargs.popArray("gamma", numPoints);
+        if(PyErr_Occurred() || !nargs.empty())
+            return;  // e.g., an error in parsing the angles - keep outputObject=NULL
         assert(!alpha.empty() && !beta.empty() && !gamma.empty());
         double* outputBuffers[3];
         int numVal = separate? model.distrFunc.numValues() : 0;
-        bool needDens = toBool(getItemFromPyDict(namedArgs, "dens", true), true);
-        bool needVel  = toBool(getItemFromPyDict(namedArgs, "vel",  true), false);
-        bool needVel2 = toBool(getItemFromPyDict(namedArgs, "vel2", true), true);
         if(needDens) {
             if(needVel) {
                 if(needVel2) {
@@ -4683,34 +4763,34 @@ public:
 
 PyObject* GalaxyModel_moments(GalaxyModelObject* self, PyObject* args, PyObject* namedArgs)
 {
-    static const char* keywords[] = {"dens", "vel", "vel2", "separate", "alpha", "beta", "gamma", NULL};
-    if(!GalaxyModel_isCorrect(self) || !checkNamedArgs(namedArgs, keywords))
+    if(!GalaxyModel_isCorrect(self))
         return NULL;
     return FncGalaxyModelMoments(args, namedArgs, self).run(/*chunk*/1);
 }
 
 /// compute projected distribution function
 class FncGalaxyModelProjectedDF: public BatchFunction {
-    PtrSelectionFunction selFunc;                 // selection function
-    const galaxymodel::GalaxyModel model;         // potential + df + action finder + sel.fnc.
-    const bool separate;                          // whether to consider each DF component separately
-    const unsigned int numComponents;             // df.numValues() if separate, otherwise 1
-    const std::vector<double> alpha, beta, gamma; // conversion between observed and intrinsic coords
-    double* outputBuffer;                         // raw buffer for output values
+    PtrSelectionFunction selFunc;            // selection function
+    const galaxymodel::GalaxyModel model;    // potential + df + action finder + sel.fnc.
+    bool separate;                           // whether to consider each DF component separately
+    unsigned int numComponents;              // df.numValues() if separate, otherwise 1
+    std::vector<double> alpha, beta, gamma;  // conversion between observed and intrinsic coords
+    double* outputBuffer;                    // raw buffer for output values
 public:
     FncGalaxyModelProjectedDF(PyObject* input, PyObject* namedArgs, GalaxyModelObject* model_obj) :
         BatchFunction(input, /*inputLength*/ 8, 8,
             /*custom error message*/ "Input should be a point or an array of points "
             "with 8 numbers per point: X, Y, vX, vY, vZ, vX_error, vY_error, vZ_error"),
         selFunc(getSelectionFunction(model_obj->sf_obj)),
-        model(*model_obj->pot_obj->pot, *model_obj->af_obj->af, *model_obj->df_obj->df, *selFunc),
-        separate(toBool(getItemFromPyDict(namedArgs, "separate", true), false)),
-        numComponents(separate ? model.distrFunc.numValues() : 1),
-        alpha(getOptionalArrayArg(namedArgs, "alpha", numPoints, false)),
-        beta (getOptionalArrayArg(namedArgs, "beta" , numPoints, false)),
-        gamma(getOptionalArrayArg(namedArgs, "gamma", numPoints, false))
+        model(*model_obj->pot_obj->pot, *model_obj->af_obj->af, *model_obj->df_obj->df, *selFunc)
     {
-        if(!PyErr_Occurred()) {
+        NamedArgs nargs(namedArgs);
+        separate      = toBool(nargs.pop("separate"), false);
+        numComponents = separate ? model.distrFunc.numValues() : 1;
+        alpha = nargs.popArray("alpha", numPoints);
+        beta  = nargs.popArray("beta" , numPoints);
+        gamma = nargs.popArray("gamma", numPoints);
+        if(!PyErr_Occurred() && nargs.empty()) {
             outputObject = allocateOutput<1>(
                 numPoints, &outputBuffer, separate? model.distrFunc.numValues() : 0);
             assert(!alpha.empty() && !beta.empty() && !gamma.empty());
@@ -4752,8 +4832,7 @@ public:
 
 PyObject* GalaxyModel_projectedDF(GalaxyModelObject* self, PyObject* args, PyObject* namedArgs)
 {
-    static const char* keywords[] = {"separate", "alpha", "beta", "gamma", NULL};
-    if(!GalaxyModel_isCorrect(self) || !checkNamedArgs(namedArgs, keywords))
+    if(!GalaxyModel_isCorrect(self))
         return NULL;
     return FncGalaxyModelProjectedDF(args, namedArgs, self).run(/*chunk*/1);
 }
@@ -4763,11 +4842,11 @@ class FncGalaxyModelVDF: public BatchFunction {
     static const int SIZEGRIDV = 50;      // default size of the velocity grid
     PtrSelectionFunction selFunc;         // selection function
     const galaxymodel::GalaxyModel model; // potential + df + action finder + sel.fnc.
-    const bool separate;                  // whether to consider each DF component separately
-    const unsigned int numComponents;     // df.numValues() if separate, otherwise 1
+    bool separate;                        // whether to consider each DF component separately
+    unsigned int numComponents;           // df.numValues() if separate, otherwise 1
     int sizegridv;                        // default or user-provided size of velocity grid
     std::vector<double> usergridv;        // user-provided velocity grid (overrides sizegridv if set)
-    const std::vector<double> alpha, beta, gamma; // conversion between observed and intrinsic coords
+    std::vector<double> alpha, beta, gamma; // conversion between observed and intrinsic coords
     PyObject **splvX, **splvY, **splvZ;   // raw buffers of the output arrays to store spline objects
     double* outputDensity;                // raw buffer of the output array to store density (if needed)
 public:
@@ -4776,21 +4855,22 @@ public:
             /*custom error message*/ "Input should be a 2d/3d point or an array of points"),
         selFunc(getSelectionFunction(model_obj->sf_obj)),
         model(*model_obj->pot_obj->pot, *model_obj->af_obj->af, *model_obj->df_obj->df, *selFunc),
-        separate(toBool(getItemFromPyDict(namedArgs, "separate", true), false)),
-        numComponents(separate ? model.distrFunc.numValues() : 1),
         sizegridv(SIZEGRIDV),
-        alpha(getOptionalArrayArg(namedArgs, "alpha", numPoints, false)),
-        beta (getOptionalArrayArg(namedArgs, "beta" , numPoints, false)),
-        gamma(getOptionalArrayArg(namedArgs, "gamma", numPoints, false)),
         splvX(NULL), splvY(NULL), splvZ(NULL), outputDensity(NULL)
     {
-        if(PyErr_Occurred())  // e.g., an error in parsing the angles - keep outputObject=NULL
-            return;
+        NamedArgs nargs(namedArgs);
+        PyObject* gridv_obj =  nargs.pop("gridv");
+        bool needDens = toBool(nargs.pop("dens"), false);
+        separate      = toBool(nargs.pop("separate"), false);
+        numComponents = separate ? model.distrFunc.numValues() : 1;
+        alpha = nargs.popArray("alpha", numPoints);
+        beta  = nargs.popArray("beta" , numPoints);
+        gamma = nargs.popArray("gamma", numPoints);
+        if(PyErr_Occurred() || !nargs.empty())
+            return;  // e.g., an error in parsing the angles - keep outputObject=NULL
         assert(!alpha.empty() && !beta.empty() && !gamma.empty());
-        bool giveDensity = toBool(getItemFromPyDict(namedArgs, "dens", true), false);
         // the "gridv" argument, if provided, may be either the number of nodes in the array
         // or the array itself
-        PyObject* gridv_obj = getItemFromPyDict(namedArgs, "gridv", true);
         if(gridv_obj) {
             sizegridv = toInt(gridv_obj, SIZEGRIDV);
             usergridv = toDoubleArray(gridv_obj);
@@ -4802,12 +4882,12 @@ public:
             math::blas_dmul(conv->velocityUnit, usergridv);  // does nothing if gridv was not provided
         }
 
-        // output is a tuple of 3 or 4 (if giveDensity==true) Python objects:
+        // output is a tuple of 3 or 4 (if needDens==true) Python objects:
         // either individual spline objects, or 1d/2d arrays of such objects.
         if(numPoints==-1 && !separate) {
             // one input point, no separate output for DF components:
             // temporarily initialize the tuple with 3(4) Nones, will be replaced in processPoint()
-            outputObject = giveDensity ?
+            outputObject = needDens ?
                 Py_BuildValue("OOOd", Py_None, Py_None, Py_None, NAN) :
                 Py_BuildValue("OOO",  Py_None, Py_None, Py_None);
             // HACK: assign the pointers to output arrays to the elements of the tuple;
@@ -4816,7 +4896,7 @@ public:
             splvX = (PyObject**)&((PyTupleObject*)outputObject)->ob_item;  // 0th element
             splvY = splvX+1;  // next (1st) element
             splvZ = splvY+1;  // next (2nd) element
-            if(giveDensity)
+            if(needDens)
                 // get the address of the floating-point value in the last (3rd) tuple element
                 outputDensity = &((PyFloatObject*)*(splvZ+1))->ob_fval;
         } else {
@@ -4839,8 +4919,8 @@ public:
             PyObject* arrvX = PyArray_SimpleNew(ndims, dims, NPY_OBJECT);
             PyObject* arrvY = PyArray_SimpleNew(ndims, dims, NPY_OBJECT);
             PyObject* arrvZ = PyArray_SimpleNew(ndims, dims, NPY_OBJECT);
-            PyObject* arrdens = giveDensity? PyArray_SimpleNew(ndims, dims, NPY_DOUBLE) : NULL;
-            if(!arrvX || !arrvY || !arrvZ || (giveDensity && !arrdens)) {
+            PyObject* arrdens = needDens? PyArray_SimpleNew(ndims, dims, NPY_DOUBLE) : NULL;
+            if(!arrvX || !arrvY || !arrvZ || (needDens && !arrdens)) {
                 Py_XDECREF(arrvX);
                 Py_XDECREF(arrvY);
                 Py_XDECREF(arrvZ);
@@ -4848,14 +4928,14 @@ public:
                 return;
             }
             // the returned value will be a tuple of 3 or 4 arrays
-            outputObject = giveDensity ?
+            outputObject = needDens ?
                 Py_BuildValue("NNNN", arrvX, arrvY, arrvZ, arrdens) :
                 Py_BuildValue("NNN",  arrvX, arrvY, arrvZ);
             // obtain raw buffers for the arrays of objects
             splvX = static_cast<PyObject**>(PyArray_DATA((PyArrayObject*)arrvX));
             splvY = static_cast<PyObject**>(PyArray_DATA((PyArrayObject*)arrvY));
             splvZ = static_cast<PyObject**>(PyArray_DATA((PyArrayObject*)arrvZ));
-            if(giveDensity)
+            if(needDens)
                 outputDensity = static_cast<double*>(PyArray_DATA((PyArrayObject*)arrdens));
             // initialize the arrays with Nones, will be replaced in processPoint()
             npy_intp size = (numPoints==-1 ? 1 : numPoints) * numComponents;
@@ -4951,8 +5031,7 @@ public:
 
 PyObject* GalaxyModel_vdf(GalaxyModelObject* self, PyObject* args, PyObject* namedArgs)
 {
-    static const char* keywords[] = {"gridv", "dens", "separate", "alpha", "beta", "gamma", NULL};
-    if(!GalaxyModel_isCorrect(self) || !checkNamedArgs(namedArgs, keywords))
+    if(!GalaxyModel_isCorrect(self))
         return NULL;
     return FncGalaxyModelVDF(args, namedArgs, self).run(/*chunk*/1);
 }
@@ -5157,37 +5236,35 @@ int Component_init(ComponentObject* self, PyObject* args, PyObject* namedArgs)
     }
     if(!onlyNamedArgs(args, namedArgs))
         return -1;
+    NamedArgs nargs(namedArgs);
 
     // check if a potential object was provided
-    PyObject* pot_obj = getItemFromPyDict(namedArgs, "potential");
+    PyObject* pot_obj = nargs.pop("potential");
     potential::PtrPotential pot = getPotential(pot_obj);
     if(pot_obj!=NULL && !pot) {
         PyErr_SetString(PyExc_TypeError, "Argument 'potential' must be a valid Potential object");
         return -1;
     }
-    delItemFromPyDict(namedArgs, "potential");
 
     // check if a density object was provided
-    PyObject* dens_obj = getItemFromPyDict(namedArgs, "density");
+    PyObject* dens_obj = nargs.pop("density");
     potential::PtrDensity dens = getDensity(dens_obj);
     if(dens_obj!=NULL && !dens) {
         PyErr_SetString(PyExc_TypeError, "Argument 'density' must be a valid Density object");
         return -1;
     }
-    delItemFromPyDict(namedArgs, "density");
 
     // check if a df object was provided
-    PyObject* df_obj = getItemFromPyDict(namedArgs, "df");
+    PyObject* df_obj = nargs.pop("df");
     df::PtrDistributionFunction df = getDistributionFunction(df_obj);
     if(df_obj!=NULL && !df) {
         PyErr_SetString(PyExc_TypeError,
             "Argument 'df' must be a valid DistributionFunction object");
         return -1;
     }
-    delItemFromPyDict(namedArgs, "df");
 
     // check if a 'disklike' flag was provided
-    int disklike = popItemFromPyDict(namedArgs, "disklike", toBool, -1);
+    int disklike = toBool(nargs.pop("disklike"), -1);
 
     // choose the variant of component: static or DF-based
     if((pot_obj!=NULL && df_obj!=NULL) || (pot_obj==NULL && df_obj==NULL && dens_obj==NULL)) {
@@ -5202,7 +5279,7 @@ int Component_init(ComponentObject* self, PyObject* args, PyObject* namedArgs)
         return -1;
     }
     if(!df_obj) {   // static component with potential and optionally density
-        if(!checkNoRemainingArgs(namedArgs))  // not all arguments were used, but no more are expected
+        if(PyErr_Occurred() || !nargs.empty())  // not all arguments were used, but no more are expected
             return -1;
         try {
             if(!dens) {  // only potential
@@ -5221,19 +5298,19 @@ int Component_init(ComponentObject* self, PyObject* args, PyObject* namedArgs)
             return -1;
         }
     } else if(disklike == 0) {   // spheroidal component
-        double rmin  = popItemFromPyDict(namedArgs, "rminSph", toDouble, (double)NAN) * conv->lengthUnit;
-        double rmax  = popItemFromPyDict(namedArgs, "rmaxSph", toDouble, (double)NAN) * conv->lengthUnit;
-        int gridSize = popItemFromPyDict(namedArgs, "sizeRadialSph",  toInt, -1);
-        int lmax     = popItemFromPyDict(namedArgs, "lmaxAngularSph", toInt,  0);
-        int mmax     = popItemFromPyDict(namedArgs, "mmaxAngularSph", toInt,  0);
+        double rmin  = toDouble(nargs.pop("rminSph"), NAN) * conv->lengthUnit;
+        double rmax  = toDouble(nargs.pop("rmaxSph"), NAN) * conv->lengthUnit;
+        int gridSize = toInt(nargs.pop("sizeRadialSph"), -1);
+        int lmax     = toInt(nargs.pop("lmaxAngularSph"), 0);
+        int mmax     = toInt(nargs.pop("mmaxAngularSph"), 0);
+        if(PyErr_Occurred() || !nargs.empty())  // not all arguments were used
+            return -1;
         if(rmin<=0 || rmax<=rmin || gridSize<2 || lmax<0 || mmax<0 || mmax>lmax) {
             PyErr_SetString(PyExc_ValueError,
                 "For spheroidal components, should provide valid values for the following arguments: "
                 "rminSph, rmaxSph, sizeRadialSph, lmaxAngularSph[=0], mmaxAngularSph[=0]");
             return -1;
         }
-        if(!checkNoRemainingArgs(namedArgs))  // not all arguments were used
-            return -1;
         try {
             self->comp.reset(new galaxymodel::ComponentWithSpheroidalDF(
                 df, dens, lmax, mmax, gridSize, rmin, rmax));
@@ -5247,21 +5324,21 @@ int Component_init(ComponentObject* self, PyObject* args, PyObject* namedArgs)
             return -1;
         }
     } else {   // disk-like component
-        double Rmin  = popItemFromPyDict(namedArgs, "RminCyl", toDouble, (double)NAN) * conv->lengthUnit;
-        double Rmax  = popItemFromPyDict(namedArgs, "RmaxCyl", toDouble, (double)NAN) * conv->lengthUnit;
-        double zmin  = popItemFromPyDict(namedArgs, "zminCyl", toDouble, (double)NAN) * conv->lengthUnit;
-        double zmax  = popItemFromPyDict(namedArgs, "zmaxCyl", toDouble, (double)NAN) * conv->lengthUnit;
-        int gridSizeR= popItemFromPyDict(namedArgs, "sizeRadialCyl",   toInt, -1);
-        int gridSizez= popItemFromPyDict(namedArgs, "sizeVerticalCyl", toInt, -1);
-        int mmax     = popItemFromPyDict(namedArgs, "mmaxAngularCyl",  toInt,  0);
+        double Rmin  = toDouble(nargs.pop("RminCyl"), NAN) * conv->lengthUnit;
+        double Rmax  = toDouble(nargs.pop("RmaxCyl"), NAN) * conv->lengthUnit;
+        double zmin  = toDouble(nargs.pop("zminCyl"), NAN) * conv->lengthUnit;
+        double zmax  = toDouble(nargs.pop("zmaxCyl"), NAN) * conv->lengthUnit;
+        int gridSizeR= toInt(nargs.pop("sizeRadialCyl"),   -1);
+        int gridSizez= toInt(nargs.pop("sizeVerticalCyl"), -1);
+        int mmax     = toInt(nargs.pop("mmaxAngularCyl"),   0);
+        if(PyErr_Occurred() || !nargs.empty())  // not all arguments were used
+            return -1;
         if(Rmin<=0 || Rmax<=Rmin || gridSizeR<2 || zmin<=0 || zmax<=zmin || gridSizez<2 || mmax<0) {
             PyErr_SetString(PyExc_ValueError,
                 "For disk-like components, should provide valid values for the following arguments: "
                 "RminCyl, RmaxCyl, sizeRadialCyl, zminCyl, zmaxCyl, sizeVerticalCyl, mmaxAngularCyl[=0]");
             return -1;
         }
-        if(!checkNoRemainingArgs(namedArgs))  // not all arguments were used
-            return -1;
         try {
             self->comp.reset(new galaxymodel::ComponentWithDisklikeDF(
                 df, dens, mmax, gridSizeR, Rmin, Rmax, gridSizez, zmin, zmax));
@@ -5396,14 +5473,14 @@ int SelfConsistentModel_init(SelfConsistentModelObject* self, PyObject* args, Py
     }
     if(!onlyNamedArgs(args, namedArgs))
         return -1;
+    NamedArgs nargs(namedArgs);
 
     // allocate a new empty list of components or take it from the input argument
-    PyObject* comp_obj= getItemFromPyDict(namedArgs, "components");
+    PyObject* comp_obj = nargs.pop("components");
     if(comp_obj!=NULL) {
         if(PyList_Check(comp_obj)) {
             self->components = comp_obj;
             Py_INCREF(comp_obj);
-            delItemFromPyDict(namedArgs, "components");
         } else {
             PyErr_SetString(PyExc_TypeError, "Argument 'components' must be a list");
             return -1;
@@ -5413,29 +5490,28 @@ int SelfConsistentModel_init(SelfConsistentModelObject* self, PyObject* args, Py
     }
 
     // check if a potential object was provided
-    PyObject* pot_obj = getItemFromPyDict(namedArgs, "potential");
+    PyObject* pot_obj = nargs.pop("potential");
     self->pot = getPotential(pot_obj);
     if(pot_obj!=NULL && !self->pot) {
         PyErr_SetString(PyExc_TypeError, "Argument 'potential' must be a valid Potential object");
         return -1;
     }
-    delItemFromPyDict(namedArgs, "potential");
 
     // parse remaining parameters and verify that no unknown arguments were provided
-    self->useActionInterpolation = popItemFromPyDict(namedArgs, "useActionInterpolation", toBool, 0);
-    self->verbose        = popItemFromPyDict(namedArgs, "verbose", toBool, 1);
+    self->useActionInterpolation = toBool(nargs.pop("useActionInterpolation"), false);
+    self->verbose       = toBool(nargs.pop("verbose"), true);
     // default values for the grid parameters are invalid, forcing the user to set them explicitly
-    self->rminSph        = popItemFromPyDict(namedArgs, "rminSph", toDouble, (double)NAN);
-    self->rmaxSph        = popItemFromPyDict(namedArgs, "rmaxSph", toDouble, (double)NAN);
-    self->sizeRadialSph  = popItemFromPyDict(namedArgs, "sizeRadialSph", toInt, -1);
-    self->lmaxAngularSph = popItemFromPyDict(namedArgs, "lmaxAngularSph", toInt, -1);
-    self->RminCyl        = popItemFromPyDict(namedArgs, "RminCyl", toDouble, (double)NAN);
-    self->RmaxCyl        = popItemFromPyDict(namedArgs, "RmaxCyl", toDouble, (double)NAN);
-    self->zminCyl        = popItemFromPyDict(namedArgs, "zminCyl", toDouble, (double)NAN);
-    self->zmaxCyl        = popItemFromPyDict(namedArgs, "zmaxCyl", toDouble, (double)NAN);
-    self->sizeRadialCyl  = popItemFromPyDict(namedArgs, "sizeRadialCyl", toInt, -1);
-    self->sizeVerticalCyl= popItemFromPyDict(namedArgs, "sizeVerticalCyl", toInt, -1);
-    if(!checkNoRemainingArgs(namedArgs))
+    self->rminSph     = toDouble(nargs.pop("rminSph"), NAN);
+    self->rmaxSph     = toDouble(nargs.pop("rmaxSph"), NAN);
+    self->sizeRadialSph  = toInt(nargs.pop("sizeRadialSph" ), -1);
+    self->lmaxAngularSph = toInt(nargs.pop("lmaxAngularSph"), -1);
+    self->RminCyl     = toDouble(nargs.pop("RminCyl"), NAN);
+    self->RmaxCyl     = toDouble(nargs.pop("RmaxCyl"), NAN);
+    self->zminCyl     = toDouble(nargs.pop("zminCyl"), NAN);
+    self->zmaxCyl     = toDouble(nargs.pop("zmaxCyl"), NAN);
+    self->sizeRadialCyl  = toInt(nargs.pop("sizeRadialCyl"  ), -1);
+    self->sizeVerticalCyl= toInt(nargs.pop("sizeVerticalCyl"), -1);
+    if(PyErr_Occurred() || !nargs.empty())  // not all arguments were used
         return -1;
     return 0;
 }
@@ -5775,7 +5851,8 @@ int Target_init(TargetObject* self, PyObject* args, PyObject* namedArgs)
     }
     if(!onlyNamedArgs(args, namedArgs))
         return -1;
-    std::string type_str = popItemFromPyDict(namedArgs, "type", toString);
+    NamedArgs nargs(namedArgs);
+    std::string type_str = toString(nargs.pop("type"));
     if(type_str.empty()) {
         PyErr_SetString(PyExc_TypeError, "Must provide a type='...' argument");
         return -1;
@@ -5783,8 +5860,8 @@ int Target_init(TargetObject* self, PyObject* args, PyObject* namedArgs)
     try{
         if(utils::stringsEqual(type_str.substr(0, 7), "Density")) {
             // spatial grids
-            std::vector<double> gridr = popItemFromPyDict(namedArgs, "gridr", toDoubleArray);
-            std::vector<double> gridz = popItemFromPyDict(namedArgs, "gridz", toDoubleArray);
+            std::vector<double> gridr = toDoubleArray(nargs.pop("gridr"));
+            std::vector<double> gridz = toDoubleArray(nargs.pop("gridz"));
             if(gridr.size()<2)
                 throw std::invalid_argument("gridr must be an array with >=2 elements");
             if(gridz.size()<2 && utils::stringsEqual(type_str.substr(0, 18), "DensityCylindrical"))
@@ -5792,13 +5869,13 @@ int Target_init(TargetObject* self, PyObject* args, PyObject* namedArgs)
             math::blas_dmul(conv->lengthUnit, gridr);
             math::blas_dmul(conv->lengthUnit, gridz);
             // orders of angular expansion or number of lines partitioning a spherical shell into cells
-            int lmax = popItemFromPyDict(namedArgs, "lmax", toInt, 0),
-                mmax = popItemFromPyDict(namedArgs, "mmax", toInt, 0),
-                stripsPerPane = popItemFromPyDict(namedArgs, "stripsPerPane", toInt, 2);
+            int lmax = toInt(nargs.pop("lmax"), 0),
+                mmax = toInt(nargs.pop("mmax"), 0),
+                stripsPerPane = toInt(nargs.pop("stripsPerPane"), 2);
             // flattening of the spheroidal grid
             double
-                axisRatioY = popItemFromPyDict(namedArgs, "axisRatioY", toDouble, 1.0),
-                axisRatioZ = popItemFromPyDict(namedArgs, "axisRatioZ", toDouble, 1.0);
+                axisRatioY = toDouble(nargs.pop("axisRatioY"), 1.0),
+                axisRatioZ = toDouble(nargs.pop("axisRatioZ"), 1.0);
             if(utils::stringsEqual(type_str, "DensityClassicTopHat"))
                 self->target.reset(new galaxymodel::TargetDensityClassic<0>(
                     stripsPerPane, gridr, axisRatioY, axisRatioZ));
@@ -5819,8 +5896,8 @@ int Target_init(TargetObject* self, PyObject* args, PyObject* namedArgs)
 
         // check if a KinemShell is being requested
         if(utils::stringsEqual(type_str, "KinemShell")) {
-            int degree = popItemFromPyDict(namedArgs, "degree", toInt, -1);
-            std::vector<double> gridr = popItemFromPyDict(namedArgs, "gridr", toDoubleArray);
+            int degree = toInt(nargs.pop("degree"), -1);
+            std::vector<double> gridr = toDoubleArray(nargs.pop("gridr"));
             if(gridr.size()<2)
                 throw std::invalid_argument("gridr must be an array with >=2 elements");
             math::blas_dmul(conv->lengthUnit, gridr);
@@ -5841,13 +5918,13 @@ int Target_init(TargetObject* self, PyObject* args, PyObject* namedArgs)
         if(utils::stringsEqual(type_str, "LOSVD")) {
             galaxymodel::LOSVDParams params;
             // parameters describing the orientation of the model
-            params.alpha = popItemFromPyDict(namedArgs, "alpha", toDouble, params.alpha);
-            params.beta  = popItemFromPyDict(namedArgs, "beta" , toDouble, params.beta);
-            params.gamma = popItemFromPyDict(namedArgs, "gamma", toDouble, params.gamma);
+            params.alpha = toDouble(nargs.pop("alpha"), params.alpha);
+            params.beta  = toDouble(nargs.pop("beta" ), params.beta);
+            params.gamma = toDouble(nargs.pop("gamma"), params.gamma);
             // parameters of the internal grids in image plane and line-of-sight velocity
-            params.gridx = popItemFromPyDict(namedArgs, "gridx", toDoubleArray);
-            params.gridy = popItemFromPyDict(namedArgs, "gridy", toDoubleArray);
-            params.gridv = popItemFromPyDict(namedArgs, "gridv", toDoubleArray);
+            params.gridx = toDoubleArray(nargs.pop("gridx"));
+            params.gridy = toDoubleArray(nargs.pop("gridy"));
+            params.gridv = toDoubleArray(nargs.pop("gridv"));
             if(params.gridy.empty())
                 params.gridy = params.gridx;
             if(params.gridx.size()<2 || params.gridy.size()<2 || params.gridv.size()<2)
@@ -5856,10 +5933,9 @@ int Target_init(TargetObject* self, PyObject* args, PyObject* namedArgs)
             math::blas_dmul(conv->lengthUnit, params.gridy);
             math::blas_dmul(conv->velocityUnit, params.gridv);
             // explicitly specified symmetry (triaxial by default)
-            params.symmetry = potential::getSymmetryTypeByName(
-                popItemFromPyDict(namedArgs, "symmetry", toString));
+            params.symmetry = potential::getSymmetryTypeByName(toString(nargs.pop("symmetry")));
             // parameters of the point-spread functions (spatial and velocity)
-            PyObject* psf_obj = getItemFromPyDict(namedArgs, "psf");
+            PyObject* psf_obj = nargs.pop("psf");
             if(psf_obj) {
                 double psf = toDouble(psf_obj, NAN) * conv->lengthUnit;
                 if(isFinite(psf))
@@ -5877,11 +5953,10 @@ int Target_init(TargetObject* self, PyObject* args, PyObject* namedArgs)
                             pyArrayElem<double>(psf_arr, k, 0) * conv->lengthUnit,
                             pyArrayElem<double>(psf_arr, k, 1)));
                 }
-                delItemFromPyDict(namedArgs, "psf");
             }  // otherwise no PSF is assigned at all
-            params.velocityPSF = popItemFromPyDict(namedArgs, "velpsf", toDouble, 0.) * conv->velocityUnit;
+            params.velocityPSF = toDouble(nargs.pop("velpsf"), 0.) * conv->velocityUnit;
             // apertures in the image plane where LOSVDs are analyzed
-            std::vector<PyObject*> apertures = toPyObjectArray(getItemFromPyDict(namedArgs, "apertures"));
+            std::vector<PyObject*> apertures = toPyObjectArray(nargs.pop("apertures"));
             if(apertures.empty())
                 throw std::invalid_argument("Must provide a list of polygons in 'apertures=...' argument");
             // two possibilities: either apertures is a single 3d array of shape N_apert x N_vert x 2,
@@ -5925,9 +6000,8 @@ int Target_init(TargetObject* self, PyObject* args, PyObject* namedArgs)
                 }
                 Py_DECREF(ap_arr);
             }
-            delItemFromPyDict(namedArgs, "apertures");
             // degree of B-splines
-            int degree = popItemFromPyDict(namedArgs, "degree", toInt, -1);
+            int degree = toInt(nargs.pop("degree"), -1);
             switch(degree) {
                 case 0: self->target.reset(new galaxymodel::TargetLOSVD<0>(params)); break;
                 case 1: self->target.reset(new galaxymodel::TargetLOSVD<1>(params)); break;
@@ -5947,7 +6021,7 @@ int Target_init(TargetObject* self, PyObject* args, PyObject* namedArgs)
         raisePythonException(ex, "Error in creating a Target object: ");
         return -1;
     }
-    if(!checkNoRemainingArgs(namedArgs))
+    if(!nargs.empty())
         return -1;
     FILTERMSG(utils::VL_DEBUG, "Agama", "Created " + std::string(self->target->name()) +
         " target at " + utils::toString(self->target.get()));

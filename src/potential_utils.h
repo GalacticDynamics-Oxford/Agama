@@ -18,10 +18,11 @@ namespace potential{
     \param[in] orientation  specifies the orientation of the observer's coordinate system X,Y,Z
     with respect to the intrinsic model coordinates, parametrized by three Euler angles;
     if all three are zero, then X,Y,Z coincide with x,y,z.
+    \param[in] time  is the moment of time at which the density is computed (optional, default 0).
     \return  the integral \f$ \Sigma(X,Y) = \int_{-\infty}^{+\infty} \rho(X,Y,Z) dZ  \f$.
 */
-double projectedDensity(
-    const BaseDensity& dens, const coord::PosProj& pos, const coord::Orientation& orientation);
+double projectedDensity(const BaseDensity& dens, const coord::PosProj& pos,
+    const coord::Orientation& orientation, double time=0);
 
 /** Compute any combination of the projected potential, gradient and hessian.
     \param[in] pot  is the potential model.
@@ -38,12 +39,13 @@ double projectedDensity(
     \param[out] hess  if not NULL, will contain the integral of the potential hessian
     \f$ \int_{-\infty}^{+\infty} \partial^2\Phi(X,Y,Z) / \partial P \partial Q dZ,  P,Q={X,Y}  \f$;
     only three components of the hessian are computed (X2, Y2 and XY), remaining ones are zero.
+    \param[in] time  is the moment of time at which the quantites are computed (optional, default 0).
     \throw std::runtime_error if the projected potential value is requested, but the potential
     is singular at origin (this is a technical limitation that may be lifted eventually).
 */
 void projectedEval(
     const BasePotential& pot, const coord::PosProj& pos, const coord::Orientation& orientation,
-    double *value=NULL, coord::GradCar* grad=NULL, coord::HessCar* hess=NULL);
+    double *value=NULL, coord::GradCar* grad=NULL, coord::HessCar* hess=NULL, double time=0);
 
 /** Determine the length and orientation of principal axes of the density profile
     within a given radius, using the ellipsoidally-weighted moment of inertia.

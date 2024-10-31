@@ -14,6 +14,13 @@
 
 namespace df {
 
+CompositeDF::CompositeDF(const std::vector<PtrDistributionFunction> &_components) :
+    components(_components)
+{
+    if(components.empty())
+        throw std::invalid_argument("CompositeDF: List of DF components cannot be empty");
+}
+
 void CompositeDF::evalmany(
     const size_t npoints, const actions::Actions J[], bool separate,
     /*output*/ double values[], DerivByActions derivs[]) const
@@ -171,12 +178,6 @@ ExponentialParam parseExponentialParam(
     return par;
 }
 
-inline void checkNonzero(const potential::BasePotential* potential, const std::string& type)
-{
-    if(potential == NULL)
-        throw std::invalid_argument("Need an instance of potential to initialize "+type+" DF");
-}
-
 }  // namespace
 
 PtrDistributionFunction createDistributionFunction(
@@ -196,6 +197,8 @@ PtrDistributionFunction createDistributionFunction(
     if(massProvided)
         assignParam(mass, kvmap, keys, "mass", "", converter.massUnit);
     if(utils::stringsEqual(type, "DoublePowerLaw")) {
+        if(potential != NULL || density != NULL)
+            throw std::invalid_argument(type+" DF does not need potential or density");
         DoublePowerLawParam par = parseDoublePowerLawParam(kvmap, converter, keys);
         if(massProvided) {
             if(kvmap.contains("norm"))
@@ -206,6 +209,8 @@ PtrDistributionFunction createDistributionFunction(
         result = PtrDistributionFunction(new DoublePowerLaw(par));
     }
     else if(utils::stringsEqual(type, "Exponential")) {
+        if(potential != NULL || density != NULL)
+            throw std::invalid_argument(type+" DF does not need potential or density");
         ExponentialParam par = parseExponentialParam(kvmap, converter, keys);
         if(massProvided) {
             if(kvmap.contains("norm"))
@@ -216,7 +221,10 @@ PtrDistributionFunction createDistributionFunction(
         result = PtrDistributionFunction(new Exponential(par));
     }
     else if(utils::stringsEqual(type, "QuasiIsothermal")) {
-        checkNonzero(potential, type);
+        if(density != NULL)
+            throw std::invalid_argument(type+" DF does not need density");
+        if(potential == NULL)
+            throw std::invalid_argument("Need an instance of potential to initialize "+type+" DF");
         potential::Interpolator pot_interp(*potential);
         QuasiIsothermalParam par = parseQuasiIsothermalParam(kvmap, converter, keys);
         if(mass>0) {
@@ -228,7 +236,9 @@ PtrDistributionFunction createDistributionFunction(
         result = PtrDistributionFunction(new QuasiIsothermal(par, pot_interp));
     }
     else if(utils::stringsEqual(type, "QuasiSpherical")) {
-        checkNonzero(potential, type);
+        if(potential == NULL)
+            throw std::invalid_argument("Need an instance of potential and optionally density "
+                "to initialize "+type+" DF");
         if(density == NULL)
             density = potential;
         double beta0 = 0, r_a = INFINITY;

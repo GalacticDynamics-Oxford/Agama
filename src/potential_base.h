@@ -497,6 +497,10 @@ inline bool isReflSymmetric(const BaseDensity& dens) {
     return  isReflSymmetric(dens.symmetry()); }
 inline bool isZRotSymmetric(const BaseDensity& dens) {
     return  isZRotSymmetric(dens.symmetry()); }
+inline bool isRotSymmetric(const BaseDensity& dens) {
+    return  isRotSymmetric(dens.symmetry()); }
+inline bool isBisymmetric(const BaseDensity& dens) {
+    return  isBisymmetric(dens.symmetry()); }
 inline bool isTriaxial(const BaseDensity& dens) {
     return  isTriaxial(dens.symmetry()); }
 inline bool isAxisymmetric(const BaseDensity& dens) {

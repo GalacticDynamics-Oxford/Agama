@@ -157,8 +157,8 @@ if __name__ == "__main__":
     Sigma = modelDisk.moments(xyz[:,0:2], vel2=False)  # projected density moment
     print("Computing 3d density and velocity dispersion")
     rho,vel,sigma = modelDisk.moments(xyz, dens=True, vel=True, vel2=True)
-    force, deriv = model.potential.forceDeriv(xyz)
-    kappa = numpy.sqrt(-deriv[:,0] - 3*force[:,0]/R)
+    acc,der = model.potential.eval(xyz, acc=True, der=True)
+    kappa = numpy.sqrt(-der[:,0] - 3*acc[:,0]/R)
     ToomreQ = sigma[:,0]**0.5 * kappa / 3.36 / Sigma / agama.G
     numpy.savetxt("disk_plane",
         numpy.column_stack((R, Sigma, rho, sigma[:,0]**0.5, (sigma[:,1]-vel[:,1]**2)**0.5,

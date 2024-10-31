@@ -50,7 +50,7 @@ for i in range(3):
 points = [[0,0,0.1], [1,1,0.5], (0.5,0.5,1)]
 D = d.density(points)
 P = p.density(points)
-H = numpy.sum(-p.forceDeriv(points)[1][:,0:3], axis=1) / (4*numpy.pi)
+H = numpy.sum(-p.eval(points, der=True)[:,0:3], axis=1) / (4*numpy.pi)
 ok &= numpy.allclose(P, D, rtol=0.01) and numpy.allclose(P, H, rtol=1e-15)
 print("rho from Density:   %s\nrho from Potential: %s\nrho from hessian:   %s" % (D, P, H))
 # check the agreement in each of the three sub-groups
@@ -59,7 +59,7 @@ for i in range(3):
     d=agama.Density(*params[i*3:i*3+3])
     Di = d.   density(points)
     Pi = p[i].density(points)
-    Hi = numpy.sum(-p[i].forceDeriv(points)[1][:,0:3], axis=1) / (4*numpy.pi)
+    Hi = numpy.sum(-p[i].eval(points, der=True)[:,0:3], axis=1) / (4*numpy.pi)
     ok &= numpy.allclose(Pi, Di, rtol=0.01) and numpy.allclose(Pi, Hi, rtol=1e-15)
     Ds += Di
     Ps += Pi

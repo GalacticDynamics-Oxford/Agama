@@ -90,9 +90,9 @@ testCond('dens.projectedDensity([1,0],beta=0,gamma=0) > 0')   # first argument i
 testFail('dens.projectedDensity([1,0],0,0)')                  # angles must be named, not positional
 testFail('dens.projectedDensity([1,0],zeta=0)')               # and of course, named arguments must match the function signature
 testCond('dens.projectedDensity([[1,0]]).shape == (1,)')      # if the input is a 2d array (even with one row), output is a 1d array
-testCond('dens.projectedDensity([[1,0],[2,0]]).shape == (2,)')# N input points (Nx2 array) => 1d array of length N
+testCond('dens.projectedDensity([[1,0],[2,0]],t=0).shape == (2,)')  # N input points (Nx2 array) => 1d array of length N
 testCond('dens.projectedDensity([[1,0],[2,0]],beta=0).shape == (2,)')  # one may specify a single value of angle for all points...
-testCond('dens.projectedDensity([[1,0],[2,0]],beta=(0,0),gamma=0).shape == (2,)')  # or one angle per point (each angle can be a single point or an array independent of others)
+testCond('dens.projectedDensity([[1,0],[2,0]],beta=(0,0),gamma=0,t=(0,0)).shape == (2,)')  # or one angle or time value per point (each angle can be a single point or an array independent of others)
 testFail('dens.projectedDensity([[1,0],[2,0]],beta=(0,0,0))') # should fail when the size of the angles array does not match the number of points
 
 testCond('isArray(dens.density([[1,2,3],[4,5,6]], t=1), (2,))')     # optional time argument as a single number
@@ -106,12 +106,12 @@ testCond('isArray(pots.force( [1,0,0] ), (3,))')   # equivalent
 testCond('isArray(pots.force([[1,0,0]]), (1,3))')  # not equivalent: an array of 1 point is not the same as 1 point
 testCond('isArray(pots.force( [1,0,0],[2,0,0] ), (2,3))')
 testCond('isArray(pots.force([[1,0,0],[2,0,0]]), (2,3))')  # equivalent
-testCond('isTuple(pots.forceDeriv(1,0,0), 2)')
-testCond('isArray(pots.forceDeriv(1,0,0)[0], (3,))')
-testCond('isArray(pots.forceDeriv(1,0,0)[1], (6,))')
+testCond('isTuple(pots.eval(1,0,0,pot=True,acc=True,der=True), 3)')  # evaluate three quantities at once: potential, acceleration and its derivatives
+testCond('isArray(pots.eval(1,0,0,acc=True,t=0), (3,))')
+testCond('isArray(pots.eval([[1,2,3],[2,3,4]],der=True,t=[0,1]), (2,6))')  # one can specify times separately for each point
 testCond('isArray(pots.projectedEval(1,0,acc=True), (2,))')  # similar to projectedDensity, but produces two values for each input point consisting of two numbers
-testCond('isTuple(pots.projectedEval(1,1,pot=True,acc=True,der=True), 3)')  # evaluate three quantities at once: potential, acceleration and its derivatives
-testCond('isArray(pots.projectedEval([[1,0],[2,0],[3,2]],acc=True,beta=(0,0,0),gamma=0), (3,2))')  # one can specify angles separately for each input point or one for all (or not specify them at all)
+testCond('isTuple(pots.projectedEval(1,1,pot=True,acc=True,der=True), 3)')  # evaluate three projected quantities at once: potential, acceleration and its derivatives
+testCond('isArray(pots.projectedEval([[1,0],[2,0],[3,2]],acc=True,beta=(0,0,0),gamma=0,t=(1,2,3)), (3,2))')  # one can specify angles and time separately for each input point or one for all (or not specify them at all)
 testCond('isArray(pots.projectedEval([[1,0],[1,2]],pot=True), (2,))')
 testCond('isArray(pots.projectedEval([[1,1],[2,2]],der=True), (2,3))')
 
