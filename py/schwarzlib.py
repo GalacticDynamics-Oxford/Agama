@@ -308,7 +308,7 @@ def readApertures(filename):
         ], dtype=object)
 
 
-def makeGridForTargetLOSVD(polygons, psf, psfwingfrac=0.99, psfcorefrac=0.2, pixelmult=1.0):
+def makeGridForTargetLOSVD(polygons, psf, psfwingfrac=0.99, psfcorefrac=0.2, pixelmult=1.0, maxsize=100):
     '''
     Construct a suitable regular grid for a LOSVD Target, which covers all apertures with some extra margin
     beyond the outer boundaries, to account for PSF smoothing.
@@ -323,6 +323,9 @@ def makeGridForTargetLOSVD(polygons, psf, psfwingfrac=0.99, psfcorefrac=0.2, pix
       pixelmult [default 1.0]: coefficient of proportionality between the pixel size of the internal grid
       and the pixel size of the input grid (smaller => higher-resolution internal grid);
       1.0 is good enough (accuracy ~1%) for 2nd or 3rd-degree B-splines.
+      maxsize [default 100]: maximum number of grid segments per dimension; if the ratio of the grid extent
+      to pixel size exceeds this limit, a non-uniform grid will be created, such that central segments have
+      the size determined from the above algorithm, but they become progressively larger further out.
     '''
     import scipy.special, scipy.optimize
     # first, determine the min/max coords and the pixel size of the voronoi-binned regular grid
@@ -354,10 +357,14 @@ def makeGridForTargetLOSVD(polygons, psf, psfwingfrac=0.99, psfcorefrac=0.2, pix
     # to the smallest resolution element of the input voronoi-binned dataset,
     # but no smaller than minpix (the width of the PSF core).
     pix  = max(pixel * pixelmult, minpix)
-    Xmin = int(_numpy.floor((xmin-margin) / pix))
-    Xmax = int(_numpy.ceil ((xmax+margin) / pix))
-    Ymin = int(_numpy.floor((ymin-margin) / pix))
-    Ymax = int(_numpy.ceil ((ymax+margin) / pix))
+    xmin = xmin - margin
+    xmax = xmax + margin
+    ymin = ymin - margin
+    ymax = ymax + margin
+    Xmin = int(_numpy.floor(xmin / pix))
+    Xmax = int(_numpy.ceil (xmax / pix))
+    Ymin = int(_numpy.floor(ymin / pix))
+    Ymax = int(_numpy.ceil (ymax / pix))
     # if |Xmin| ~= Xmax, make the grid fully symmetric (this saves some cpu time), similarly for Y
     if Xmin<0 and Xmax>0 and (abs(Xmin+Xmax) <= 3 or (-Xmin/Xmax>=0.8) and (-Xmin/Xmax<=1.25)):
         Xmax = max(Xmax, -Xmin)
@@ -368,13 +375,32 @@ def makeGridForTargetLOSVD(polygons, psf, psfwingfrac=0.99, psfcorefrac=0.2, pix
     # sanity check
     if Xmax-Xmin > 1000 or Ymax-Ymin > 1000:
         raise ValueError("Can't construct a suitable grid (pixel size "+str(pix)+" doesn't seem right")
-    # finally, construct two regularly-spaced grids
-    gridx = _numpy.linspace(Xmin*pix, Xmax*pix, Xmax-Xmin+1)
-    gridy = _numpy.linspace(Ymin*pix, Ymax*pix, Ymax-Ymin+1)
+    # finally, construct two regularly-spaced grids if they do not exceed maxsize [ADJUSTABLE]
+    if max(Xmax-Xmin, Ymax-Ymin) <= maxsize:
+        gridx = _numpy.linspace(Xmin*pix, Xmax*pix, Xmax-Xmin+1)
+        gridy = _numpy.linspace(Ymin*pix, Ymax*pix, Ymax-Ymin+1)
+    else:  # otherwise concoct a non-uniformly spaced grid of that size
+        rmax = max(abs(xmin), abs(ymin), abs(xmax), abs(ymax))
+        # if the grid extent is not symmetric, and the grid is non-uniform,
+        # it is not trivial to determine its stretch factor that produces exactly maxsize segments..
+        nnodes = maxsize
+        for nnodes in range(maxsize, 2*maxsize+1):
+            tempgrid = _agama.symmetricGrid(nnodes, pix, rmax)
+            # cut the resulting grid to "barely" cover the desired grid extent
+            tempgridx = tempgrid[min(_numpy.where(tempgrid > xmin)[0]) - 1 : max(_numpy.where(tempgrid < xmax)[0]) + 2]
+            tempgridy = tempgrid[min(_numpy.where(tempgrid > ymin)[0]) - 1 : max(_numpy.where(tempgrid < ymax)[0]) + 2]
+            if max(len(tempgridx), len(tempgridy)) <= maxsize:
+                gridx = tempgridx
+                gridy = tempgridy
+            else:
+                break
+        pix = (pix, max(max(gridx[1:]-gridx[:-1]), max(gridy[1:]-gridy[:-1])))
+
     print(('Kinematic spaxel size is %.2f; %d apertures in the region [%.2f:%.2f, %.2f:%.2f]; '+
-        'PSF is %s; internal kinematic %dx%d grid is [%.2f:%.2f, %.2f:%.2f] with pixel size %.2f') %
+        'PSF is %s; internal kinematic %dx%d grid is [%.2f:%.2f, %.2f:%.2f] with pixel size %s') %
         (pixel, len(polygons), xmin, xmax, ymin, ymax,
-        str(psf), len(gridx), len(gridy), min(gridx), max(gridx), min(gridy), max(gridy), pix))
+        str(psf), len(gridx), len(gridy), min(gridx), max(gridx), min(gridy), max(gridy),
+        ('%.2f-%.2f' % pix) if isinstance(pix, tuple) else ('%.2f' % pix)))
     return gridx, gridy
 
 
@@ -478,6 +504,139 @@ class DensityDataset:
         xy = _numpy.column_stack((_numpy.repeat(gridx, len(gridy)), _numpy.tile(gridy, len(gridx))))
         return (self.density.projectedDensity(xy, alpha=self.alpha, beta=self.beta, gamma=self.gamma).
             reshape(len(gridx), len(gridy)))
+
+
+class KinemDatasetVS:
+    '''
+    Class for representing the Target(type='LOSVD') and observational constraints in the form of first two moments
+    '''
+    def __init__(self, density, vs_val, vs_err, tolerance=0, **target_params):
+        '''
+        Arguments:
+          ghm_val:  N x 2 array of observational constraints - mean velocity (v) and its dispersion (sigma),
+            where N is the number of apertures.
+          ghm_err:  N x 2 array of observational uncertainties for v and sigma
+          density:  3d density profile of stars, needed to compute the normalizations of LOSVDs (aperture masses)
+          tolerance:  fractional error on aperture masses
+          target_params:  all other parameters of the Target(type='LOSVD', ...),
+            except that when gridx, gridy are not provided, they will be constructed automatically
+        '''
+        gridx = None
+        for k in target_params:
+            if k.upper() == 'GRIDX': gridx = target_params[k]
+        if gridx is None:
+            target_params['gridx'], target_params['gridy'] = makeGridForTargetLOSVD(
+                target_params['apertures'], target_params.get('psf', 0))
+        self.target_params = target_params
+        self.target = _agama.Target(**target_params)
+        self.mod_degree = target_params['degree']
+        self.mod_gridv  = target_params['gridv']
+        self.num_bsplines = len(self.mod_gridv) + self.mod_degree - 1
+        self.num_aper = vs_val.shape[0]
+        if vs_val.shape != vs_err.shape:
+            raise ValueError('vs_val and vs_err must have the same shape')
+        # surface density convolved with PSF and integrated over the area of each aperture, normalized to totalMass
+        self.aperture_mass = self.target(density) / density.totalMass()
+        self.aperture_mass_err = self.aperture_mass * tolerance
+        if len(self.aperture_mass) != self.num_aper:
+            raise ValueError('vs_val should have the same number of rows as the number of apertures')
+        # constraint values: aperture masses multiplied by 0th, 1st and 2nd velocity moments
+        self.cons_val = _numpy.column_stack((
+            self.aperture_mass,
+            self.aperture_mass *  vs_val[:,0],
+            self.aperture_mass * (vs_val[:,0]**2 + vs_val[:,1]**2 + vs_err[:,0]**2 + vs_err[:,1]**2),
+        )).reshape(-1)
+        # constraint errors: translate errors in sigma into errors in v^2+sigma^2
+        self.cons_err = _numpy.column_stack((
+            self.aperture_mass_err,
+            self.aperture_mass * vs_err[:,0],
+            self.aperture_mass * (
+                vs_err[:,0]**2 * (2 * vs_err[:,0]**2 + 4 * vs_val[:,0]**2) +
+                vs_err[:,1]**2 * (2 * vs_err[:,1]**2 + 4 * vs_val[:,1]**2) )**0.5
+        )).reshape(-1)
+        # also store the original arrays (v,sigma) and their error estimates
+        self.vs_val = vs_val[:,0:2]
+        self.vs_err = vs_err[:,0:2]
+
+    def getOrbitMatrix(self, kinem_matrix, Upsilon):
+        '''
+        Produce the matrix of orbit contributions to each of the kinematic constraints (incl. aperture mass)
+        from the matrix recorded during orbit integration by the LOSVD Target object.
+        The LOSVDs of each orbit are converted into 0th, 1st and 2nd velocity moments.
+        Upsilon is the mass-to-light ratio of the model, so that its velocity grid is scaled by sqrt(Upsilon).
+        Returns: the matrix to be provided to the optimization solver
+        '''
+        num_orbits = len(kinem_matrix)
+        mod_bsint0 = _agama.bsplineIntegrals(self.mod_degree, self.mod_gridv)
+        mod_bsint1 = _agama.bsplineIntegrals(self.mod_degree, self.mod_gridv, power=1)
+        mod_bsint2 = _agama.bsplineIntegrals(self.mod_degree, self.mod_gridv, power=2)
+        return _numpy.dstack((
+            # 0th column is the contribution of each orbit to aperture masses
+            kinem_matrix.reshape(num_orbits, self.num_aper, self.num_bsplines).dot(mod_bsint0),
+            # 1st and 2nd columns are mean v and mean v^2, after rescaling the model velocity grid by sqrt(Upsilon)
+            kinem_matrix.reshape(num_orbits, self.num_aper, self.num_bsplines).dot(mod_bsint1) * Upsilon**0.5,
+            kinem_matrix.reshape(num_orbits, self.num_aper, self.num_bsplines).dot(mod_bsint2) * Upsilon**1.0,
+        )). reshape(num_orbits, self.num_aper * 3)
+
+    def getPenalty(self, model_losvd, Upsilon):
+        '''
+        Compute the penalty for kinematic constraints from the array of LOSVDs of the model.
+        Arguments:
+          model_losvd:  the array of length num_aper * num_bsplines  containing the LOSVDs of
+          the entire model (i.e., the sum of LOSVDs of each orbit multiplied by orbit weights).
+          Upsilon:  mass-to-light ratio of the model, used to scale the velocity grid.
+        Returns: the error-weighted penalty (chi^2) separately for each type of constraint, summed over all apertures;
+          an array of 3 elements [aperture mass, mean velocity, velocity dispersion (or rather, standard deviation)].
+        '''
+        mod_bsint0 = _agama.bsplineIntegrals(self.mod_degree, self.mod_gridv)
+        mod_bsint1 = _agama.bsplineIntegrals(self.mod_degree, self.mod_gridv, power=1)
+        mod_bsint2 = _agama.bsplineIntegrals(self.mod_degree, self.mod_gridv, power=2)
+        a_mod = model_losvd.reshape(self.num_aper, self.num_bsplines).dot(mod_bsint0)
+        v_mod = model_losvd.reshape(self.num_aper, self.num_bsplines).dot(mod_bsint1) / a_mod * Upsilon**0.5
+        s_mod =(model_losvd.reshape(self.num_aper, self.num_bsplines).dot(mod_bsint2) / a_mod * Upsilon - v_mod**2)**0.5
+        # add the penalty for aperture mass, if the tolerance was not zero
+        use = self.aperture_mass_err != 0
+        return _numpy.array([
+            # penalty for aperture mass
+            _numpy.sum( ((a_mod - self.aperture_mass)[use] / self.aperture_mass_err[use])**2 ),
+            # chi2 w.r.t. originally provided data (v and sigma)
+            _numpy.sum( ((v_mod - self.vs_val[:,0]) / self.vs_err[:,0])**2 ),
+            _numpy.sum( ((s_mod - self.vs_val[:,1]) / self.vs_err[:,1])**2 ),
+        ])
+
+    def getGHMoments(self, model_losvd=None, Upsilon=None):
+        '''
+        Return v & sigma of the observational dataset (if model_losvd is None) or the model LOSVD
+        '''
+        if model_losvd is None:
+            return self.vs_val, self.vs_err
+        else:
+            mod_bsint0 = _agama.bsplineIntegrals(self.mod_degree, self.mod_gridv)
+            mod_bsint1 = _agama.bsplineIntegrals(self.mod_degree, self.mod_gridv, power=1)
+            mod_bsint2 = _agama.bsplineIntegrals(self.mod_degree, self.mod_gridv, power=2)
+            a_mod = model_losvd.dot(mod_bsint0)
+            v_mod = model_losvd.dot(mod_bsint1) / a_mod * Upsilon**0.5
+            s_mod =(model_losvd.dot(mod_bsint2) / a_mod * Upsilon - v_mod**2)**0.5
+            return _numpy.column_stack([v_mod, s_mod, _numpy.zeros((len(v_mod), 4))])
+
+    def getLOSVD(self, gridv):
+        '''
+        Construct the LOSVD profiles (assuming a Gaussian shape) from the observed v and sigma and their uncertainties.
+        Arguments:
+          gridv:  grid for computing the profiles
+        Returns:  array of shape  3 x num_aper x len(gridv)  containing 16, 50 and 84th percentiles of LOSVDs in each aperture
+        '''
+        nboot = 100
+        result= _numpy.zeros((3, self.num_aper, len(gridv)))
+        for n in range(self.num_aper):
+            boots = _agama.ghInterp(
+                self.aperture_mass[n],  # amplitude
+                self.vs_val[n,0] + _numpy.random.normal(size=nboot) * self.vs_err[n,0],  # center
+                self.vs_val[n,1] + _numpy.random.normal(size=nboot) * self.vs_err[n,1],  # width
+                _numpy.array([1,0,0]),
+                gridv)
+            result[:,n] = _numpy.percentile(boots, axis=1, q=[16,50,84])
+        return result
 
 
 class KinemDatasetGH:
@@ -595,11 +754,15 @@ class KinemDatasetGH:
             _numpy.sum( ((ghm_mod - self.ghm_val) / self.ghm_err)**2, axis=0 )  # array of length M
         ))
 
-    def getGHMoments(self):
+    def getGHMoments(self, LOSVD=None, Upsilon=None):
         '''
-        Return v,sigma,h3..hM of the observational dataset
+        Return v,sigma,h3..hM of the observational dataset (if LOSVD is None) or of the model LOSVD
         '''
-        return self.ghm_val, self.ghm_err
+        if LOSVD is None:
+            return self.ghm_val, self.ghm_err
+        else:
+            return _agama.ghMoments(matrix=LOSVD * Upsilon**-0.5,
+                gridv=self.mod_gridv * Upsilon**0.5, degree=self.mod_degree, ghorder=6)[:,(1,2,6,7,8,9)]
 
     def getLOSVD(self, gridv):
         '''
@@ -718,15 +881,20 @@ class KinemDatasetHist:
         error[use] = ( (cons_mod[use] - self.cons_val[use]) / self.cons_err[use] )**2
         return _numpy.sum(error.reshape(self.num_aper, self.num_cons+1), axis=0)
 
-    def getGHMoments(self, ghorder=6):
+    def getGHMoments(self, LOSVD=None, Upsilon=None):
         '''
-        Compute GH moments from the histogrammed LOSVDs
+        Compute GH moments from the observed LOSVD (if LOSVD is None) or from the model LOSVD
         Return: array of size num_aper x ghorder containing the values  v,sigma,h3..hM  in each aperture
         '''
-        ghm_val, ghm_err = ghMomentsErrors(degree=self.obs_degree, gridv=self.obs_gridv,
-            values=self.obs_val, errors=self.obs_err, ghorder=ghorder)
+        ghorder = 6
         ind = tuple([1,2]+range(6,ghorder+4))  # indices of columns containing v,sigma,h3...hM in the matrix returned by ghMoments
-        return ghm_val[:,ind], ghm_err[:,ind]
+        if LOSVD is None:
+            ghm_val, ghm_err = ghMomentsErrors(degree=self.obs_degree, gridv=self.obs_gridv,
+                values=self.obs_val, errors=self.obs_err, ghorder=ghorder)
+            return ghm_val[:,ind], ghm_err[:,ind]
+        else:
+            return _agama.ghMoments(matrix=LOSVD * Upsilon**-0.5,
+                gridv=self.mod_gridv * Upsilon**0.5, degree=self.mod_degree, ghorder=ghorder)[:,ind]
 
     def getLOSVD(self, gridv):
         '''
@@ -847,6 +1015,8 @@ def runModel(datasets, potential, ic, Omega=0, intTime=100.0,
         # solve the matrix equation
         try:
             weights = _agama.solveOpt(matrix=matrix, rhs=rhs, rpenq=pen_cons, xpenq=pen_reg) * mult
+        except KeyboardInterrupt:
+            raise
         except Exception as e:
             print('Error! %s' % str(e))
             # arbitrarily set uniform weights
@@ -998,6 +1168,7 @@ def runPlot(datasets,                           # list of [kinematic] datasets t
             this.selected.set_data([aval[modelIndex]], [bval[modelIndex]])
             LOSVD = archive['LOSVD']
             los_mod = []
+            ghm_mod = []
             indexKinemDataset = 0
             num_aper = [0]  # cumulative number of apertures in each kinematic dataset
             for ds in datasets:
@@ -1007,11 +1178,15 @@ def runPlot(datasets,                           # list of [kinematic] datasets t
                     # rescale the default velocity grid and the B-spline amplitudes to the current Upsilon
                     this.mod_gridv = ds.mod_gridv * Upsilon**0.5
                     los_mod.append(LOSVD[indexKinemDataset][archiveIndex] * Upsilon**-0.5)
+                    if hasattr(ds, 'getGHMoments'):
+                        ghm_mod.append(ds.getGHMoments(LOSVD[indexKinemDataset][archiveIndex], Upsilon))
+                    else:
+                        ghm_mod.append(_agama.ghMoments(matrix=LOSVD[indexKinemDataset][archiveIndex] * Upsilon**-0.5,
+                            gridv=ds.mod_gridv * Upsilon**0.5, degree=ds.mod_degree, ghorder=6)[:,(1,2,6,7,8,9)])
                     indexKinemDataset += 1
                     num_aper.append(num_aper[-1] + len(ds.target_params['apertures']))
             this.los_mod = _numpy.vstack(los_mod)
-            this.ghm_mod = _agama.ghMoments(matrix=this.los_mod, gridv=this.mod_gridv,
-                degree=this.mod_degree, ghorder=6)[:,(1,2,6,7,8,9)]
+            this.ghm_mod = _numpy.vstack(ghm_mod)
             chi2_aper = _numpy.nan_to_num((this.ghm_mod - ghm_val) / ghm_err)**2
             chi2_ds = _numpy.zeros((indexKinemDataset, 6))
             for indexKinemDataset in range(len(chi2_ds)):

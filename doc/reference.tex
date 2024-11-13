@@ -1398,7 +1398,7 @@ This program is designed to work with the mock data from the \href{http://astrow
 
 \paragraph{example_self_consistent_model} \label{sec:ExampleSCM} illustrates various steps of the workflow for creating multicomponent self-consistent galaxy models determined by DFs. It begins with initial guesses for the density profiles of all components, and computes the total potential, which is used to construct a \ppp{QuasiIsothermal} DF for the disk; the \ppp{DoublePowerLaw} DFs of the halo and the bulge do not need a potential. Then it performs several iterations, updating the density of both disk and halo components and recomputing the total potential. Finally, it creates an \Nbody realization of the composite system by sampling particles from both DFs in the converged potential. It also demonstrates the use of INI files for keeping parameters of the model. This example is provided in equivalent \Cpp and \Python versions.
 
-There are a couple of closely related programs (the first one is \Cpp, the rest are \Python):\\
+There are a couple of closely related programs (the first one has both \Cpp and \Python versions, the rest are \Python):\\
 \textbf{example_self_consistent_model_mw} is a very similar program that creates a Milky Way model fitted to \textit{Gaia} DR2 kinematic data \cite{BinneyVasiliev2023}, which uses non-standard (user-defined) DF classes for the disk and the halo components;\\
 \textbf{example_self_consistent_model3} performs the same task for a slightly different three-component galactic model fully specified by DFs and plots several physical quantities in the model (velocity dispersion profiles, LOSVDs, etc.);\\
 \textbf{example_self_consistent_model_simple} is a stripped-down version showing only the bare minimum of steps in the context of a spherical model;\\
@@ -2510,7 +2510,7 @@ A_{a,k} &= \sum_{i,j} \iint_{X,Y\in \Omega_a}
 &\times A_{ijk}\;B^{(X)}_i(X')\;B^{(Y)}_j(Y')\;\; PSF\big( \sqrt{ (X-X')^2 + (Y-Y')^2 } \big)  \nonumber.
 \end{align}
 \end{subequations}
-The amplitudes $A_{a,k}$ of B-spline expansion in the velocity dimension (indexed by $k=1..N_V$) for each aperture (indexed by $a$) are stored in the flattened one-dimensional output array: each consecutive $N_V$ numbers refer to one aperture. The conversion between the internal and the output representations is performed transparently to the user, using a single matrix multiplication, for which the matrix is pre-computed in advance and combines the spatial convolution and rebinning steps. The parameters provided by the user are: the grids in the image plane \ppp{gridx}, \ppp{gridy} and velocity \ppp{gridv}, and the degree of B-spline basis set ranging from 0 to 3 (although \ppp{degree=2} or \ppp{3} is strongly recommended for a much greater accuracy at the same grid size, as illustrated in the appendix of \cite{VasilievValluri2020}). The image-plane grid should cover all apertures, and preferrably have an extra margin of $2-3$ times the PSF width for a more accurate convolution, but needs not be aligned with any of the apertures: the integration over $\Omega_a$ is performed exactly no matter what is the overlap between grid segments and aperture polygons. The spatial size of the grid should be comparable with the PSF width or the aperture size, whichever is larger. For instance, in the typical case that an adaptive binning scheme is employed, the apertures may consist of a single spaxel of the detector in the central area, typically smaller than the PSF width, and contain many such spaxels in the outer parts of the image. Then one may define a non-uniform \ppp{gridx} with smaller segments $\simeq$PSF width in the central part, which gradually become comparable to sizes of outermost apertures towards the endpoints in $X$. The parameter \ppp{gridy} may be omitted if it is identical to \ppp{gridx}.
+The amplitudes $A_{a,k}$ of B-spline expansion in the velocity dimension (indexed by $k=1..N_V$) for each aperture (indexed by $a$) are stored in the flattened one-dimensional output array: each consecutive $N_V$ numbers refer to one aperture. The conversion between the internal and the output representations is performed transparently to the user, using a single matrix multiplication, for which the matrix is pre-computed in advance and combines the spatial convolution and rebinning steps. The parameters provided by the user are: the grids in the image plane \ppp{gridx}, \ppp{gridy} and velocity \ppp{gridv}, and the degree of B-spline basis set ranging from 0 to 3 (although \ppp{degree=2} or \ppp{3} is strongly recommended for a much greater accuracy at the same grid size, as illustrated in the appendix of \cite{VasilievValluri2020}). The image-plane grid should cover all apertures, and preferrably have an extra margin of $2-3$ times the PSF width for a more accurate convolution, but needs not be aligned with any of the apertures: the integration over $\Omega_a$ is performed exactly no matter what is the overlap between grid segments and aperture polygons. The spatial size of the grid should be comparable with the PSF width or the aperture size, whichever is larger. For instance, in the typical case that an adaptive binning scheme is employed, the apertures may consist of a single spaxel of the detector in the central area, typically smaller than the PSF width, and contain many such spaxels in the outer parts of the image. Then one may define a non-uniform \ppp{gridx} with smaller segments $\simeq$PSF width in the central part, which gradually become comparable to sizes of outermost apertures towards the endpoints in $X$. The parameter \ppp{gridy} may be omitted if it is identical to \ppp{gridx}. The routine \ttt{makeGridForTargetLOSVD} in the submodule \texttt{agama.schwarzslib} does a good job at choosing the grid parameters automatically.
 
 One may also perform smoothing along the velocity axis by providing a nonzero \ppp{velpsf} parameter. Since the integrated-light LOSVDs  are usually produced by a spectral fitting code in a velocity-deconvolved form, this is not needed (although won't hurt if the smoothing width is set to a significantly smaller value than the velocity dispersion). However, if the LOSVD is computed from individual stellar velocities, this parameter may represent the typical observational error (unfortunately, it is not easy to account for variable error bars between individual measurements).
 
@@ -2597,24 +2597,26 @@ Now construct a Schwarzschild model for a particular value of mass-to-light rati
 \texttt{mod_gridv_scaled = mod_gridv * Upsilon**0.5}\\[2mm]
 If using LOSVD histograms, transform the matrix of B-spline amplitudes of orbit LOSVDs into the matrix of histogram values (amplitudes of 0th-degree B-spline) defined by the observational velocity grid. This is achieved by the following conversion matrix:\\[2mm]
 \texttt{
-conv~~~~~~= numpy.linalg.solve(\\
+conv~~~~~= numpy.linalg.solve(\\
 \mbox{}~~~~agama.bsplineMatrix(obs_degree, obs_gridv),}
 {\color{Sepia}\textit{\ \ \# same as }\texttt{obs_bsint}}\\
 \texttt{
-\mbox{}~~~~agama.bsplineMatrix(obs_degree, obs_gridv, mod_degree, mod_gridv_scaled))\\
-mat_kin~~~= mat_los.reshape(num_orbits * num_aper, num_mod_bs). \textbackslash\\
-\mbox{}~~~~dot(conv.T). \textbackslash\\
-\mbox{}~~~~reshape(num_orbits, num_aper * num_obs_bs) * Upsilon**-0.5\\
-cons_kin~~= hist_val.reshape(num_aper * num_obs_bs)\\
-err_kin~~~= hist_err.reshape(num_aper * num_obs_bs)}\\[2mm]
+\mbox{}~~~agama.bsplineMatrix(obs_degree, obs_gridv, mod_degree, mod_gridv_scaled))\\
+mat_kin~~= mat_los.reshape(num_orbits * num_aper, num_mod_bs). \textbackslash\\
+\mbox{}~~~dot(conv.T). \textbackslash\\
+\mbox{}~~~reshape(num_orbits, num_aper * num_obs_bs) * Upsilon**-0.5\\
+cons_kin~= hist_val.reshape(num_aper * num_obs_bs)\\
+err_kin~~= hist_err.reshape(num_aper * num_obs_bs)}\\[2mm]
 If using GH moments, the routine \ttt{ghMoments} transforms the matrix of B-spline amplitudes of orbit LOSVDs into the matrix of GH moments computed in the observed GH basis defined by parameter \texttt{ghbasis} (different in each aperture). This matrix has moments $h_0..h_6$ (in this example \texttt{num_obs_gh=6}), but we don't use $h_0$ because it is not available observationally (instead, we constrain the aperture mass), so we reshape the matrix and eliminate the 0th column:\\[2mm]
 \texttt{
-mat_kin~~~= agama.ghMoments(degree=mod_degree, gridv=mod_gridv_scaled, \\
-\mbox{}~~~~matrix=mat_los, ghorder=num_obs_gh, ghbasis=gh_params). \textbackslash\\
-\mbox{}~~~~reshape(num_orbits, num_aper,~ num_obs_gh+1)[:,:,1:].~~ \textbackslash\\
-\mbox{}~~~~reshape(num_orbits, num_aper * num_obs_gh) * Upsilon**-0.5\\
-cons_kin~~= ghm_val.reshape(num_aper * num_obs_gh)\\
-err_kin~~~= ghm_err.reshape(num_aper * num_obs_gh)}\\[2mm]
+mat_kin~~= agama.ghMoments(degree=mod_degree, gridv=mod_gridv_scaled, \\
+\mbox{}~~~matrix=mat_los, ghorder=num_obs_gh, ghbasis=gh_params). \textbackslash\\
+\mbox{}~~~reshape(num_orbits, num_aper,~ num_obs_gh+1)[:,:,1:].~~ \textbackslash\\
+\mbox{}~~~reshape(num_orbits, num_aper * num_obs_gh) * Upsilon**-0.5\\
+cons_kin~= ghm_val.reshape(num_aper * num_obs_gh)\\
+err_kin~~= ghm_err.reshape(num_aper * num_obs_gh)}\\[2mm]
+A third possibility is to compute the ``classical'' moments of LOSVDs, integrating them over the velocity axis weighted by 1, $v$ and $v^2$.
+The observational constraints are then the mean velocity and mean squared velocity ${\overline v}^2 + \sigma^2$, where $\overline v$ and $\sigma$ are interpreted as the true mean and standard deviation (usually referred to as ``dispersion'' in astronomical context) of the LOSVD, \textit{not} the center and width of the best-fit Gaussian, as in the case of GH moments.\\[2mm]
 Finally, solve the quadratic optimization problem to determine orbit weights. In this example, we require that the 3d density and 2d aperture mass constraints be satisfied exactly (set an infinite penalty for them), while the observational kinematic constraints should be satisfied as closely as possible, with the penalty proportional to the inverse squared observational error:\\[2mm]
 \texttt{weights = agama.solveOpt(\\
 \mbox{}~~~~matrix=[mat_den.T, mat_sur.T, mat_kin.T],}
@@ -2623,7 +2625,7 @@ Finally, solve the quadratic optimization problem to determine orbit weights. In
 \textit{\color{Sepia} \ \ \# list of RHS vectors (constraints)}\\
 \texttt{\mbox{}~~~~rpenq=[cons_den*numpy.inf, cons_sur*numpy.inf, 2*err_kin**-2])}
 \textit{\color{Sepia}\# penalties}\\[3mm]
-Many of the above steps are generally applicable to all observationally-constrained Schwarzschild models. The relevant routines and classes reside in the submodule \texttt{agama.schwarzlib}, and the user- and model-specific tasks may be kept in a separate script adapted from the template \texttt{example_forstand.py}.
+Many of the above steps are generally applicable to all observationally-constrained Schwarzschild models. The common tasks are implemented in several classes and routines in the submodule \texttt{agama.schwarzlib}. In particular, the classes \ttt{DensityTarget}, \ttt{KinemTargetHist}, \ttt{KinemTargetGH} and \ttt{KinemTargetVS} facilitate the comparison between observational datasets and datacubes produced by the \ttt{Target} objects. The routine \ttt{runModel} performs the orbit integration and then solves the optimization problem for several values of $\Upsilon$, automatically locating the minimum of $\chi^2$ and mapping the range of $\Upsilon$ around it. The routine \ttt{runPlot} reads the output of the previous routine and displays an interactive plot with kinematic maps, LOSVDs, $\chi^2$ contours, etc. The user- and model-specific tasks may be kept in a separate script adapted from the template \texttt{example_forstand.py}.
 
 
 \newpage

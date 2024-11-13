@@ -4,16 +4,19 @@
 
     This example demonstrates the machinery for constructing multicomponent self-consistent models
     specified by distribution functions in terms of actions.
-    We create a multicomponent galaxy with four disks, bulge stellar and dark halo components
-    defined by their DFs, and a static density profile of gas disk. The thin disk is split by age
-    into 3 groups, and there is a separate thick disk.
+    We create a Milky Way model with four disks, bulge, stellar and dark halo components
+    defined by their DFs, and a static density profile of gas disk.
+    The thin disk is split into 3 age groups, and there is a separate thick disk.
     Then we perform several iterations of recomputing the density profiles of components from
     their DFs and recomputing the total potential.
     Finally, we create N-body representations of all mass components:
-    dark matter halo, stars (bulge, thin and thick disks and stellar halo combined), and gas disk,
+    dark matter halo, stars (bulge, several disks and stellar halo combined), and gas disk,
     and compute various diagnostic quantities written into text files.
     The DFs for the disky and spheroidal components used here differ from the built-in DF types, and
     are defined in the first part of the file; their parameters are contained in a separate INI file.
+    The DF parameters are optimized to fit Gaia DR2 data, as described in Binney&Vasiliev 2023.
+    An equivalent Python program example_self_consistent_model_mw.py introduces the same user-defined
+    DFs implemented as Python functions, and for this reason is less computationally efficient.
 */
 #include "galaxymodel_base.h"
 #include "galaxymodel_selfconsistent.h"
@@ -63,7 +66,7 @@ struct NewDoublePowerLawParam{
 
 class NewDoublePowerLaw: public BaseDistributionFunction{
     const NewDoublePowerLawParam par;  ///< parameters of DF
-    const double beta;              ///< auxiliary coefficient for the case of a central core
+    const double zeta;              ///< auxiliary coefficient for the case of a central core
 public:
     /** Create an instance of double-power-law distribution function with given parameters
         \param[in] params  are the parameters of DF
@@ -76,13 +79,13 @@ public:
         df::DerivByActions *deriv=NULL) const;
 };
 
-/// helper class used in the root-finder to determine the auxiliary coefficient beta for a cored halo
-class NewBetaFinder: public math::IFunctionNoDeriv{
+/// helper class used in the root-finder to determine the auxiliary coefficient zeta for a cored halo
+class NewDoublePowerLawZetaFinder: public math::IFunctionNoDeriv{
     const NewDoublePowerLawParam& par;
 
-    // return the difference between the non-modified and modified DF as a function of beta and
+    // return the difference between the non-modified and modified DF as a function of zeta and
     // the appropriately scaled action variable (t -> hJ), weighted by d(hJ)/dt for the integration in t
-    double deltaf(const double t, const double beta) const
+    double deltaf(const double t, const double zeta) const
     {
         // integration is performed in a scaled variable t, ranging from 0 to 1,
         // which is remapped to hJ ranging from 0 to infinity as follows:
@@ -91,33 +94,34 @@ class NewBetaFinder: public math::IFunctionNoDeriv{
         return hJ * hJ * dhJdt *
                 math::pow(1 + par.J0 / hJ,  par.slopeIn) *
                 math::pow(1 + hJ / par.J0, -par.slopeOut) *
-                (math::pow(1 + par.Jcore/hJ * (par.Jcore/hJ - beta), -0.5*par.slopeIn) - 1);
+                (math::pow(1 + par.Jcore/hJ * (par.Jcore/hJ - zeta), -0.5*par.slopeIn) - 1);
     }
 
     public:
-        NewBetaFinder(const NewDoublePowerLawParam& _par) : par(_par) {}
+        NewDoublePowerLawZetaFinder(const NewDoublePowerLawParam& _par) : par(_par) {}
 
-        virtual double value(const double beta) const
+        virtual double value(const double zeta) const
         {
             double result = 0;
             // use a fixed-order GL quadrature to compute the integrated difference in normalization between
             // unmodified and core-modified DF, which is sought to be zero by choosing an appropriate beta
             static const int GLORDER = 20;  // should be even, to avoid singularity in the integrand at t=0.5
             for(int i=0; i<GLORDER; i++)
-                result += math::GLWEIGHTS[GLORDER][i] * deltaf(math::GLPOINTS[GLORDER][i], beta);
+                result += math::GLWEIGHTS[GLORDER][i] * deltaf(math::GLPOINTS[GLORDER][i], zeta);
             return result;
         }
 };
 
 NewDoublePowerLaw::NewDoublePowerLaw(const NewDoublePowerLawParam &inparams) :
-    par(inparams), beta(math::findRoot(NewBetaFinder(par), 0.0, 2.0, /*root-finder tolerance*/ SQRT_DBL_EPSILON))
+    par(inparams),
+    zeta(math::findRoot(NewDoublePowerLawZetaFinder(par), 0.0, 2.0, /*root-finder tolerance*/ SQRT_DBL_EPSILON))
 {
     // sanity checks on parameters
     if(!(par.norm>0))
         throw std::invalid_argument("NewDoublePowerLaw: normalization must be positive");
     if(!(par.J0>0))
         throw std::invalid_argument("NewDoublePowerLaw: break action J0 must be positive");
-    if(!(par.Jcore>=0 && beta>=0))
+    if(!(par.Jcore>=0 && zeta>=0))
         throw std::invalid_argument("NewDoublePowerLaw: core action Jcore is invalid");
     if(!(par.Jcutoff>=0))
         throw std::invalid_argument("NewDoublePowerLaw: truncation action Jcutoff must be non-negative");
@@ -148,17 +152,13 @@ void NewDoublePowerLaw::evalDeriv(const actions::Actions &J, double *val, df::De
         math::pow(1 + par.J0 / hJ,  par.slopeIn) *
         math::pow(1 + gJ / par.J0, -par.slopeOut);
     if(par.Jcutoff>0){   // exponential cutoff at large J
-        double fac=math::pow(gJ / par.Jcutoff, par.cutoffStrength);
-        if(fac>25)
-            *val = 0;
-        else
-            *val *= exp(-fac);
+        *val *= exp(-math::pow(gJ / par.Jcutoff, par.cutoffStrength));
     }
     if(par.Jcore>0) {   // central core of nearly-constant f(J) at small J
         if(hJ==0)
             *val = par.norm / pow_3(2*M_PI * par.J0);
         else
-            *val *= math::pow(1 + par.Jcore/hJ * (par.Jcore/hJ - beta), -0.5*par.slopeIn);
+            *val *= math::pow(1 + par.Jcore/hJ * (par.Jcore/hJ - zeta), -0.5*par.slopeIn);
     }
     if(par.rotFrac!=0)  // add the odd part
         *val *= 1 + par.rotFrac * tanh(J.Jphi / par.Jphi0);
@@ -204,18 +204,14 @@ void NewExponential::evalDeriv(const actions::Actions &J, double *val, df::Deriv
         *val = 0;
         return;
     }
-    double Jvel = fabs(Jp) + par.addJvel;
+    double Jvel = Jp + par.addJvel;
+    double Jden = Jp + par.addJden;
     double xr = pow(Jvel/par.Jphi0,par.pr)/par.Jr0;
     double xz = pow(Jvel/par.Jphi0,par.pz)/par.Jz0;
     double fr = xr * exp(-xr*J.Jr), fz = xz * exp(-xz*J.Jz);
-    double Jden = Jp + par.addJden;
     double xp = Jden / par.Jphi0;
     double fp = par.norm/par.Jphi0 * fabs(J.Jphi) / par.Jphi0 * exp(-xp);
     *val = fr * fz * fp;
-    if(J.Jphi < 0) {
-        double x=J.Jphi/par.addJden;
-        *val *= exp(x*(1-x));
-    }
 }
 
 PtrDistributionFunction createNewDoublePowerLawDF(
@@ -283,7 +279,7 @@ const units::ExternalUnits extUnits(intUnits, 1.*units::Kpc, 1.*units::kms, 1.*u
 double solarRadius = NAN;
 
 // header line for diagnostic outputs split into individual stellar components
-const std::string componentNames = "bulge\tthin,young\tthin,middle\tthin,old\tthick\tstel.halo";
+const std::string componentNames = "bulge\tthin,young\tthin,middle\tthin,old\tthick\tstellarhalo";
 
 
 // various auxiliary functions for printing out information are non-essential
@@ -312,9 +308,9 @@ void writeRotationCurve(const potential::Composite& potential)
 }
 
 /// print velocity dispersion, in-plane and surface density profiles of each stellar component
-void writeRadialDensityProfile(const galaxymodel::GalaxyModel& model)
+void writeRadialProfile(const galaxymodel::GalaxyModel& model)
 {
-    std::cout << "Writing surface density profile\n";
+    std::cout << "Writing radial density and velocity profiles\n";
     std::vector<double> radii;
     // convert radii to internal units
     for(double r=1./8; r<=30; r<1 ? r*=2 : r<16 ? r+=0.5 : r+=2)
@@ -357,12 +353,12 @@ void writeRadialDensityProfile(const galaxymodel::GalaxyModel& model)
         strmsp << radii[ir] * intUnits.to_Kpc;
         strmvp << radii[ir] * intUnits.to_Kpc;
         for(int ic=0; ic<nc; ic++) {
-            strmsd << '\t' << surfDens[ir*nc+ic] * intUnits.to_Msun_per_pc2;
-            strmvd << '\t' << z0dens  [ir*nc+ic] * intUnits.to_Msun_per_pc3;
+            strmsd << '\t' <<    surfDens[ir*nc+ic]      * intUnits.to_Msun_per_pc2;
+            strmvd << '\t' <<      z0dens[ir*nc+ic]      * intUnits.to_Msun_per_pc3;
             strmsR << '\t' << sqrt(meanv2[ir*nc+ic].vx2) * intUnits.to_kms;
             strmsz << '\t' << sqrt(meanv2[ir*nc+ic].vz2) * intUnits.to_kms;
             strmsp << '\t' << sqrt(meanv2[ir*nc+ic].vy2 - pow_2(meanv[ir*nc+ic].vy)) * intUnits.to_kms;
-            strmvp << '\t' << sqrt(meanv [ir*nc+ic].vy)  * intUnits.to_kms;
+            strmvp << '\t' <<      meanv [ir*nc+ic].vy   * intUnits.to_kms;
         }
         strmsd << '\n';
         strmvd << '\n';
@@ -379,7 +375,7 @@ void writeVerticalDensityProfile(const galaxymodel::GalaxyModel& model)
     std::cout << "Writing vertical density profile\n";
     std::vector<double> heights;
     // convert height to internal units
-    for(double h=0; h<=3; h<0.50001 ? h+=0.05 : h+=0.25)
+    for(double h=0; h<=5.01; h<0.49 ? h+=0.05 : h+=0.25)
         heights.push_back(h * intUnits.from_Kpc);
     int nh = heights.size();
     int nc = model.distrFunc.numValues();
@@ -393,7 +389,7 @@ void writeVerticalDensityProfile(const galaxymodel::GalaxyModel& model)
     }
 
     std::ofstream strm("mwmodel_vertical_density.txt");
-    strm << "# z[Kpc]\t" << componentNames << "\n";
+    strm << "# z[Kpc]\t" << componentNames << "[Msun/pc^3]\n";
     for(int ih=0; ih<nh; ih++) {
         strm << (heights[ih] * intUnits.to_Kpc);
         for(int ic=0; ic<nc; ic++)
@@ -402,41 +398,37 @@ void writeVerticalDensityProfile(const galaxymodel::GalaxyModel& model)
     }
 }
 
-/// compute velocity distributions of each stellar component at several points and write them to respective files
+/// compute velocity distributions of each stellar component at several points and write them to files
 void writeVelocityDistributions(const galaxymodel::GalaxyModel& model)
 {
     std::cout << "Writing velocity distributions\n";
     const int numPoints = 4;
     const double R[numPoints] = {solarRadius-2.0, solarRadius, solarRadius+2.0, solarRadius};
     const double z[numPoints] = {0, 0, 0, 2.0};
-    // create grids in velocity space
-    double vR_max = 120 * intUnits.from_kms;
-    double vp_max = 360 * intUnits.from_kms;
-    double vp_min = -90 * intUnits.from_kms;
-    std::vector<double> gridvR   = math::createUniformGrid(50, -vR_max, vR_max);
-    std::vector<double> gridvz   = gridvR;  // for simplicity use the same grid for two dimensions
-    std::vector<double> gridvphi = math::createUniformGrid(50, vp_min, vp_max);
+    // create grid in velocity space for representing the spline-interpolated VDFs
+    std::vector<double> gridv_spl =
+        math::createSymmetricGrid(75, 6.0 * intUnits.from_kms, 400.0 * intUnits.from_kms);
     // store each component (thin/thick/bulge/etc) separately
     const int numComp = model.distrFunc.numValues();
     std::vector< std::vector<double> > dens(numPoints);
-    std::vector< std::vector< std::vector<double> > > amplvx(numPoints), amplvy(numPoints), amplvz(numPoints);
+    // indexing scheme: [directionIndex, pointIndex, dfComponentIndex, amplIndex],
+    // where directionIndex is {vx, vy, vz}, and amplIndex enumerates B-spline amplitudes
+    std::vector< std::vector< std::vector<double> > > ampl[3];
+    for(int d=0; d<3; d++)
+        ampl[d].resize(numPoints, std::vector< std::vector<double> >(numComp));
     const int ORDER = 3;
-    math::BsplineInterpolator1d<ORDER> intvR(gridvR), intvz(gridvz), intvphi(gridvphi);
+    math::BsplineInterpolator1d<ORDER> interp(gridv_spl);
 
     // loop over all points in parallel
 #ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic)
 #endif
     for(int p=0; p<numPoints; p++) {
-        // allocate output vectors for all components at this point
-        dens  [p].resize(numComp);
-        amplvx[p].resize(numComp);
-        amplvy[p].resize(numComp);
-        amplvz[p].resize(numComp);
+        dens[p].resize(numComp);
         galaxymodel::computeVelocityDistribution<ORDER>(model,
             coord::PosCar(R[p] * intUnits.from_Kpc, 0, z[p] * intUnits.from_Kpc),
-            gridvR, gridvphi, gridvz,
-            /*density*/ &dens[p].front(), &amplvx[p].front(), &amplvy[p].front(), &amplvz[p].front(),
+            gridv_spl, gridv_spl, gridv_spl,
+            /*density*/ &dens[p].front(), &ampl[0][p].front(), &ampl[1][p].front(), &ampl[2][p].front(),
             /*separate*/ true);
     }
 
@@ -447,36 +439,19 @@ void writeVelocityDistributions(const galaxymodel::GalaxyModel& model)
     // therefore we need to multiply it by massUnit/lengthUnit^3/velocityUnit
     double conv = intUnits.to_Msun_per_pc3 / intUnits.to_kms;
     for(int p=0; p<numPoints; p++) {
-        strm.open(("mwmodel_vdf_R"+utils::toString(R[p])+"_z"+utils::toString(z[p])+"_vR.txt").c_str());
-        strm << "# v[km/s]\t" << componentNames << "[Msun/kpc^3/(km/s)]\n";
-        for(int i=-100; i<=100; i++) {
-            double v = i*vR_max/100;
-            strm << v * intUnits.to_kms;
-            for(int c=0; c<numComp; c++)
-                strm << '\t' << dens[p][c] * intvR.interpolate(v, amplvx[p][c]) * conv;
-            strm << '\n';
+        for(int d=0; d<3; d++) {
+            strm.open(("mwmodel_vdf_R" + utils::toString(R[p]) + "_z" + utils::toString(z[p]) + "_v" +
+            (d==0 ? "R" : d==1 ? "phi" : "z") + ".txt").c_str());
+            strm << "# v[km/s]\t" << componentNames << "[Msun/kpc^3/(km/s)]\n";
+            for(double v=-400; v<=400; v+=2) {
+                strm << v;
+                for(int c=0; c<numComp; c++)
+                    strm << '\t' << conv * dens[p][c] *
+                        interp.interpolate(v * intUnits.from_kms, ampl[d][p][c]);
+                strm << '\n';
+            }
+            strm.close();
         }
-        strm.close();
-        strm.open(("mwmodel_vdf_R"+utils::toString(R[p])+"_z"+utils::toString(z[p])+"_vz.txt").c_str());
-        strm << "# v[km/s]\t" << componentNames << "[Msun/kpc^3/(km/s)]\n";
-        for(int i=-100; i<=100; i++) {
-            double v = i*vR_max/100;
-            strm << v * intUnits.to_kms << '\t';
-            for(int c=0; c<numComp; c++)
-                strm << '\t' << dens[p][c] * intvz.interpolate(v, amplvz[p][c]) * conv;
-            strm << '\n';
-        }
-        strm.close();
-        strm.open(("mwmodel_vdf_R"+utils::toString(R[p])+"_z"+utils::toString(z[p])+"_vphi.txt").c_str());
-        strm << "# v[km/s]\t" << componentNames << "[Msun/kpc^3/(km/s)]\n";
-        for(int i=0; i<=200; i++) {
-            double v = i*1.0/200 * (vp_max-vp_min) + vp_min;
-            strm << v * intUnits.to_kms << '\t';
-            for(int c=0; c<numComp; c++)
-                strm << '\t' << dens[p][c] * intvphi.interpolate(v, amplvy[p][c]) * conv;
-            strm << '\n';
-        }
-        strm.close();
     }
 }
 
@@ -505,17 +480,12 @@ void printoutInfo(const galaxymodel::SelfConsistentModel& model)
 
 int main()
 {
-    int numIterations=5;
-    utils::Timer timer;
+    int numIterations = 4;
     // read parameters from the INI file
     const std::string iniFileName = "../data/SCM_MW.ini";
     utils::ConfigFile ini(iniFileName);
     utils::KeyValueMap
-    iniPotenThinDisk = ini.findSection("Potential thin disk"),
-    iniPotenThickDisk= ini.findSection("Potential thick disk"),
     iniPotenGasDisk  = ini.findSection("Potential gas disk"),
-    iniPotenBulge    = ini.findSection("Potential bulge"),
-    iniPotenDarkHalo = ini.findSection("Potential dark halo"),
     iniDFyoungDisk   = ini.findSection("DF young disk"),
     iniDFmiddleDisk  = ini.findSection("DF middle disk"),
     iniDFoldDisk     = ini.findSection("DF old disk"),
@@ -546,38 +516,12 @@ int main()
     model.sizeVerticalCyl = iniSCM.getInt("sizeVerticalCyl");
     model.useActionInterpolation = iniSCM.getBool("useActionInterpolation");
 
-    // initialize density profiles of various components
-    std::vector<potential::PtrDensity> densityStars(3);
-    potential::PtrDensity
-        densityDark = potential::createDensity(iniPotenDarkHalo, extUnits),
-        densityGas  = potential::createDensity(iniPotenGasDisk,  extUnits);
-    densityStars[0] = potential::createDensity(iniPotenBulge,    extUnits);
-    densityStars[1] = potential::createDensity(iniPotenThinDisk, extUnits);
-    densityStars[2] = potential::createDensity(iniPotenThickDisk,extUnits);
-
-    // add components to SCM - at first, all of them are static density profiles
-    model.components.push_back(galaxymodel::PtrComponent(
-        new galaxymodel::ComponentStatic(potential::PtrDensity(
-        new potential::CompositeDensity(densityStars)), true)));
-    model.components.push_back(galaxymodel::PtrComponent(
-        new galaxymodel::ComponentStatic(densityDark, false)));
-    model.components.push_back(galaxymodel::PtrComponent(
-        new galaxymodel::ComponentStatic(densityGas, true)));
-
-    // initialize total potential of the model (first guess)
-    updateTotalPotential(model);
-    printoutInfo(model);
-
-    std::cout << "**** STARTING MODELLING ****\nInitial masses of density components: "
-        "Mbulge=" << (densityStars[0]->totalMass() * intUnits.to_Msun) << " Msun, "
-        "Mthin="  << (densityStars[1]->totalMass() * intUnits.to_Msun) << " Msun, "
-        "Mthick=" << (densityStars[2]->totalMass() * intUnits.to_Msun) << " Msun, "
-        "Mdark="  << (densityDark    ->totalMass() * intUnits.to_Msun) << " Msun, "
-        "Mgas="   << (densityGas     ->totalMass() * intUnits.to_Msun) << " Msun\n";
+    // create the initial potential from all sections of the INI file starting with "[Potential..."
+    model.totalPotential = potential::readPotential(iniFileName, extUnits);
 
     // create the dark halo DF
     df::PtrDistributionFunction dfHalo = df::createNewDoublePowerLawDF(iniDFDarkHalo, extUnits);
-    // same for the stellar components (bulge, thin/thick disks, and stellar halo)
+    // same for the stellar components (bulge, four disks, and stellar halo)
     std::vector<df::PtrDistributionFunction> dfStellarArray;
     dfStellarArray.push_back(df::createNewDoublePowerLawDF(iniDFBulge,      extUnits));
     dfStellarArray.push_back(df::createNewExponentialDF   (iniDFyoungDisk,  extUnits));
@@ -588,7 +532,7 @@ int main()
     // composite DF of all stellar components
     df::PtrDistributionFunction dfStellar(new df::CompositeDF(dfStellarArray));
     // replace the static disk density component of SCM with a DF-based disk component
-    model.components[0] = galaxymodel::PtrComponent(
+    model.components.push_back(galaxymodel::PtrComponent(
         new galaxymodel::ComponentWithDisklikeDF(dfStellar, potential::PtrDensity(),
         iniSCMDisk.getInt("mmaxAngularCyl"),
         iniSCMDisk.getInt("sizeRadialCyl"),
@@ -596,69 +540,54 @@ int main()
         iniSCMDisk.getDouble("RmaxCyl") * extUnits.lengthUnit,
         iniSCMDisk.getInt("sizeVerticalCyl"),
         iniSCMDisk.getDouble("zminCyl") * extUnits.lengthUnit,
-        iniSCMDisk.getDouble("zmaxCyl") * extUnits.lengthUnit));
+        iniSCMDisk.getDouble("zmaxCyl") * extUnits.lengthUnit)));
     // same for the dark halo
-    model.components[1] = galaxymodel::PtrComponent(
+    model.components.push_back(galaxymodel::PtrComponent(
         new galaxymodel::ComponentWithSpheroidalDF(dfHalo, potential::PtrDensity(),
         iniSCMHalo.getInt("lmaxAngularSph"),
         iniSCMHalo.getInt("mmaxAngularSph"),
         iniSCMHalo.getInt("sizeRadialSph"),
         iniSCMHalo.getDouble("rminSph") * extUnits.lengthUnit,
-        iniSCMHalo.getDouble("rmaxSph") * extUnits.lengthUnit));
-    // gas component is left as it is
+        iniSCMHalo.getDouble("rmaxSph") * extUnits.lengthUnit)));
+    // gas component is a fixed density profile
+    model.components.push_back(galaxymodel::PtrComponent(
+        new galaxymodel::ComponentStatic(potential::createDensity(iniPotenGasDisk, extUnits), true)));
     
-    // we can compute the masses even though we don't know the density profile yet
-    std::cout <<
-        "Masses of DF components:"
-            "\nMstars="    << (dfStellar->totalMass() * intUnits.to_Msun) << " Msun" <<
-            " (Mbulge="    << (dfStellarArray[0]->totalMass() * intUnits.to_Msun) <<
-            ", Myoung="    << (dfStellarArray[1]->totalMass() * intUnits.to_Msun) <<
-            ", Mmiddle="   << (dfStellarArray[2]->totalMass() * intUnits.to_Msun) <<
-            ", Mold="      << (dfStellarArray[3]->totalMass() * intUnits.to_Msun) <<
-            ", Mthick="    << (dfStellarArray[4]->totalMass() * intUnits.to_Msun) <<
-            ", Mstel.halo="<< (dfStellarArray[5]->totalMass() * intUnits.to_Msun) <<
-            "); Mdark="    << (dfHalo ->totalMass() * intUnits.to_Msun) << " Msun\n";
-    std::cout << "Potential value at origin=-("<<
-        (sqrt(-model.totalPotential->value(coord::PosCyl(0,0,0))) * intUnits.to_kms) << " km/s)^2\n";
-    // update the action finder
-    std::cout << "Updating action finder..."<<std::flush;
-    model.actionFinder.reset(new actions::ActionFinderAxisymFudge(model.totalPotential,
-        model.useActionInterpolation));
-    std::cout << "done" << std::endl;
-    // do a few more iterations to obtain the self-consistent density profile for both disks
+    utils::Timer timer1;
+    // do a few iterations to obtain the self-consistent density profile for both disks
     for(int iteration=1; iteration<=numIterations; iteration++) {
-        std::cout << "Starting iteration #" << iteration << "\n";
+        std::cout << "\033[1;37mStarting iteration #" << iteration << "\033[0m\n";
         doIteration(model);
         printoutInfo(model);
     }
-    std::cout << utils::toString(timer.deltaSeconds(), 3) + " secs to build the model\n";
-    utils::Timer timer2;
+    std::cout << utils::toString(timer1.deltaSeconds(), 3) + " seconds to build the model\n";
 
     // output various profiles
+    std::cout << "\033[1;37mComputing diagnostics\033[0m\n";
+    utils::Timer timer2;
     galaxymodel::GalaxyModel modelStars(*model.totalPotential, *model.actionFinder, *dfStellar);
-    writeRadialDensityProfile(modelStars);
+    writeRadialProfile(modelStars);
     writeVerticalDensityProfile(modelStars);
     writeVelocityDistributions(modelStars);
+    std::cout << utils::toString(timer2.deltaSeconds(), 3) + " seconds to compute diagnostics\n";
 
     // export model to an N-body snapshot
+    std::cout << "\033[1;37mCreating an N-body representation of the model\033[0m\n";
+    utils::Timer timer3;
     std::string format = "nemo";   // could use "text", "nemo" or "gadget" here
-    std::cout << "Writing a complete DF-based N-body model for the dark matter halo\n";
     particles::writeSnapshot("mwmodel_dm_final.nbody", galaxymodel::samplePosVel(
         galaxymodel::GalaxyModel(*model.totalPotential, *model.actionFinder, *dfHalo), 750000),
         format, extUnits);
-    std::cout << "Writing a complete DF-based N-body model for the stellar bulge, disk and halo\n";
     particles::writeSnapshot("mwmodel_stars_final.nbody", galaxymodel::samplePosVel(
         galaxymodel::GalaxyModel(*model.totalPotential, *model.actionFinder, *dfStellar), 200000),
         format, extUnits);
     // we didn't use an action-based DF for the gas disk, leaving it as a static component;
     // to create an N-body representation, we sample the density profile and assign velocities
     // from the axisymmetric Jeans equation with equal velocity dispersions in R,z,phi
-    std::cout << "Writing an N-body model for the gas disk\n";
     particles::writeSnapshot("mwmodel_gas_final.nbody", galaxymodel::assignVelocity(
         galaxymodel::sampleDensity(*model.components[2]->getDensity(), 50000),
         /*parameters for the axisymmetric Jeans velocity sampler*/
         *model.components[2]->getDensity(), *model.totalPotential, /*beta*/ 0., /*kappa*/ 1.),
         format, extUnits);
-
-    std::cout << utils::toString(timer2.deltaSeconds(), 3) + " secs to compute diagnostics\n";
+    std::cout << utils::toString(timer3.deltaSeconds(), 3) + " seconds to create an N-body snapshot\n";
 }

@@ -160,15 +160,18 @@ alpha_deg = float(args.get('ALPHA', 0.0))       # [REQ] azimuthal angle of viewi
 alpha     = alpha_deg * numpy.pi/180            # same in radians
 degree    = int  (args.get('DEGREE', 2))        # [OPT] degree of B-splines  (0 means histograms, 2 or 3 is preferred)
 symmetry  = 'a'                                 # [OPT] symmetry of the model ('s'pherical, 'a'xisymmetric, 't'riaxial)
-addnoise  = bool (args.get('ADDNOISE', True))   # [OPT] whether to add a realistic amount of noise in generating mock datacubes
-seed      = int  (args.get('SEED', 0))          # [OPT] random seed (different values will create different realizations of the initial conditions for the orbit library)
+addnoise  =      (args.get('ADDNOISE', 'True')  # [OPT] whether to add a realistic amount of noise in generating mock datacubes
+    .upper() in ('TRUE', 'T', 'YES', 'Y'))
 nbody     = int  (args.get('NBODY', 100000))    # [OPT] number of particles for the N-body representation of the best-fit model
 nbodyFormat = args.get('NBODYFORMAT', 'text')   # [OPT] format for storing N-body snapshots (text/nemo/gadget)
 command   = args.get('DO', '').upper()          # [REQ] operation mode: 'RUN' - run a model, 'PLOT' - show the model grid and maps, 'TEST' - show diagnostic plots, 'MOCK' - create mock maps
-usehist   = args.get('HIST', 'n')[0] in 'yYtT1' # [OPT] whether to use LOSVD histograms as input (default 'no' is to use GH moments)
-variant   = 'Hist' if usehist else 'GH'         # suffix for disinguishing runs using histogramed LOSVDs or GH moments
+variant   = args.get('VARIANT', 'GH').upper()   # [OPT] choice between three ways of representing and fitting LOSVDs (see below)
+if 'HIST' not in variant and 'GH' not in variant and 'VS' not in variant:
+    raise RuntimeError('parameter "variant" should be one of "GH" (Gauss-Hermite moments), "VS" (classical moments - v & sigma), or "HIST" (LOSVD histograms)')
 fileResult= 'results%s.txt' % variant           # [OPT] filename for collecting summary results for the entire model grid
-numpy.random.seed(42)                           # [OPT] make things repeatable when generating mock data (*not* related to the seed for the orbit library)
+seed      = int  (args.get('SEED', 99))         # [OPT] random seed (different values will create different realizations of mock data when do=MOCK, or initial conditions for the orbit library when do=RUN)
+agama.setRandomSeed(seed)                       # note that Agama has its own
+numpy.random.seed(seed)                         # make things repeatable when generating mock data (*not* related to the seed for the orbit library)
 numpy.set_printoptions(precision=4, linewidth=9999, suppress=True)
 
 # In this example, we use the Multi-Gaussian Expansion to parametrize
@@ -202,6 +205,7 @@ kinemParams1 = dict(          # parameters passed to the constructor of the Targ
 filenameVorBin1 = 'voronoi_bins_i%.0f_lr.txt' % incl # [REQ] Voronoi binning scheme for this dataset
 filenameHist1   = 'kinem_hist_i%.0f_lr.txt'   % incl # [REQ] histogrammed representation of observed LOSVDs
 filenameGH1     = 'kinem_gh_i%.0f_lr.txt'     % incl # [REQ] Gauss-Hermite parametrization of observed LOSVDs (usually only one of these two files is given)
+filenameVS1     = 'kinem_vs_i%.0f_lr.txt'     % incl # [REQ] 
 
 ### same for the 2nd kinematic dataset [OPT] - may have only one dataset, or as many as needed
 gamma2 = -10.0 * numpy.pi/180
@@ -220,6 +224,92 @@ kinemParams2 = dict(
 filenameVorBin2 = 'voronoi_bins_i%.0f_hr.txt' % incl
 filenameHist2   = 'kinem_hist_i%.0f_hr.txt'   % incl
 filenameGH2     = 'kinem_gh_i%.0f_hr.txt'     % incl
+filenameVS2     = 'kinem_vs_i%.0f_hr.txt'     % incl
+
+
+def makeMockKin(kinemParams, gridxy, nbins, filenameVorBin, filenameHist, filenameGH, filenameVS):
+    # 1st step: construct Voronoi bins for kinematic datasets
+    print('Creating Voronoi bins')
+    xc, yc, bintags = agama.schwarzlib.makeVoronoiBins(
+        posvel,
+        gridx = gridxy,   # [REQ] X-axis pixel boundaries for the 1st (LR) dataset
+        gridy = gridxy,   # [REQ] same for Y axis
+        nbins = nbins,    # [REQ] desired number of Voronoi bins (the result may differ somewhat)
+        alpha = kinemParams['alpha'],  # orientation angles
+        beta  = kinemParams['beta'],
+        gamma = kinemParams['gamma']
+    )
+    # save the binning scheme to text file
+    numpy.savetxt(filenameVorBin, numpy.column_stack((xc, yc, bintags)), fmt='%8.4f %8.4f %7d')
+
+    # 2st step: construct the LOSVD target and apply it to the N-body snapshot
+    print('Computing LOSVDs of input snapshot')
+    apertures    = agama.schwarzlib.getBinnedApertures(xc, yc, bintags)      # obtain boundary polygons from Voronoi bins
+    gridx, gridy = agama.schwarzlib.makeGridForTargetLOSVD(apertures, kinemParams['psf'])  # construct a suitable image-plane grid
+    target       = agama.Target(apertures=apertures, gridx=gridx, gridy=gridy, **kinemParams)
+    datacube     = target((posvel, mass)).reshape(len(apertures), -1)
+
+    # datacube now contains the amplitudes of B-spline representation of LOSVDs in each aperture.
+    # Assign the uncertainties on each amplitude assuming the Poisson noise;
+    # for this we need to know the "typical" amplitude produced by one particle (e.g., placed at the center),
+    # which is the particle mass divided by the bin size of the velocity grid.
+    oneparticle = numpy.mean(mass) / (gridv[1]-gridv[0])
+    noise = numpy.maximum(1, datacube / oneparticle)**0.5
+    # it turns out that this noise level is very low in our example, so we multiply it by some factor >1
+    if '_lr' in filenameGH: noise *= 8
+    else: noise *= 2
+    # to propagate the uncertainties throughout subsequent computations, construct "nboot" realizations
+    # of the original datacube perturbed by Gaussian noise
+    nboot = 16
+    datacubes = datacube + numpy.random.normal(size=(nboot,)+datacube.shape) * noise * oneparticle
+    if addnoise:
+        datacube = datacubes[0]   # take one perturbed realization as the input (noisy) data
+    # else keep datacube as computed originally
+
+    # 3th step, variant A: convert the B-splines to histograms, which are in fact 0th-degree B-splines;
+    # we might have constructed model LOSVDs in terms of histograms directly, but this would have been less accurate
+    # than rebinning the model LOSVDs onto the new velocity grid
+    conv = numpy.linalg.solve(   # conversion matrix from the model B-splines into observed histograms
+        agama.bsplineMatrix(hist_degree, hist_gridv),
+        agama.bsplineMatrix(hist_degree, hist_gridv, degree, gridv) ).T
+    hist_val = datacube.dot(conv)
+    hist_err = numpy.std(datacubes.dot(conv), axis=0)
+    hist_norm= numpy.sum(hist_val, axis=1)[:,None]
+    # save the interleaved values and error estimates of the B-spline amplitudes in each aperture to a text file
+    numpy.savetxt(filenameHist,
+        numpy.dstack((hist_val/hist_norm, hist_err/hist_norm)).reshape(len(apertures), -1),
+        fmt='%9.3g')
+
+    # 3rd step, variant B: convert the B-spline LOSVDs to GH moments
+    print('Computing Gauss-Hermite moments and their error estimates')
+    ghorder = 6  # [OPT] order of GH expansion
+    ghm_val = agama.ghMoments(degree=degree, gridv=gridv, ghorder=ghorder, matrix=datacube)
+    ghm_err = numpy.std(
+        agama.ghMoments(degree=degree, gridv=gridv, ghorder=ghorder,
+            matrix=datacubes.reshape(-1, datacubes.shape[2])).
+        reshape(nboot, len(apertures), -1),
+        axis=0)
+    ind = (1,2,6,7,8,9)  # keep only these columns, corresponding to v,sigma,h3,h4,h5,h6
+    numpy.savetxt(filenameGH,
+        numpy.dstack((ghm_val, ghm_err))[:,ind,:].reshape(len(apertures), -1),
+        fmt='%8.3f', header='v        v_err    sigma    sigma_err '+
+        'h3       h3_err    h4       h4_err    h5       h5_err    h6       h6_err')
+
+    # 3th step, variant C: convert the B-splines to V and sigma
+    i0 = agama.bsplineIntegrals(degree, gridv)
+    i1 = agama.bsplineIntegrals(degree, gridv, power=1)
+    i2 = agama.bsplineIntegrals(degree, gridv, power=2)
+    datacube0  = datacube.dot(i0)
+    datacubes0 = datacubes.dot(i0)
+    meanv_val  = (datacube.dot(i1) / datacube0)
+    sigma_val  = (datacube.dot(i2) / datacube0 - meanv_val**2)**0.5
+    meanv_vals = (datacubes.dot(i1) / datacubes0)
+    sigma_vals = (datacubes.dot(i2) / datacubes0 - meanv_vals**2)**0.5
+    meanv_err  = numpy.std(meanv_vals, axis=0)
+    sigma_err  = numpy.std(sigma_vals, axis=0)
+    numpy.savetxt(filenameVS,
+        numpy.column_stack((meanv_val, meanv_err, sigma_val, sigma_err)),
+        fmt='%8.3f', header='v v_err sigma sigma_err')
 
 
 # generate mock observations from an N-body model ([OPT] - of course this section is not needed when running the script on actual observations)
@@ -245,113 +335,18 @@ if command == 'MOCK':
     posvel[:, 3:6] *= vscale
     mass *= mscale
 
-    # pre-step ([OPT] - can use only for axisymmetric systems): create several rotated copies of the input snapshot to reduce Poisson noise
-    if symmetry[0] in ['s', 'a']:
-        nrot = 9  # [OPT] number of rotation angles
-        posvel_stack = []
-        print('Creating %d rotated copies of input snapshot' % nrot)
-        for ang in numpy.linspace(0, numpy.pi, nrot+1)[:-1]:
-            sina, cosa = numpy.sin(ang), numpy.cos(ang)
-            posvel_stack.append( numpy.column_stack((
-                posvel[:,0] * cosa + posvel[:,1] * sina,
-                posvel[:,1] * cosa - posvel[:,0] * sina,
-                posvel[:,2],
-                posvel[:,3] * cosa + posvel[:,4] * sina,
-                posvel[:,4] * cosa - posvel[:,3] * sina,
-                posvel[:,5] )) )
-        posvel = numpy.vstack(posvel_stack)
-        mass   = numpy.tile(mass, nrot) / nrot
-
-    # 0th step: construct an MGE parametrization of the density (note: this is a commonly used, but not necessarily optimal approach)
+    # 0th step: construct an MGE parameterization of the density (note: this is a commonly used, but not necessarily optimal approach)
     print('Creating MGE')
     mge = agama.schwarzlib.makeMGE(posvel, mass, beta, distance, plot=True)
     numpy.savetxt(filenameMGE, mge, fmt='%12.6g %11.3f %11.4f',
         header='MGE file\nsurface_density  width  axis_ratio\n[Msun/pc^2]   [arcsec]')
 
-    # 1st step: construct Voronoi bins for kinematic datasets
-    # Low-resolution dataset with a FoV 1x1' and pixel size 1" (comparable to ground-based IFU such as SAURON)
+    # Low-resolution dataset with a FoV 1x1' and pixel size 1" (comparable to ground-based IFU such as SAURON).
     # Note: make sure that the pixel size passed to makeVoronoiBins is rounded to at most 4 significant digits,
     # since this is the precision with which we save it later; otherwise the subsequent reading of Voronoi bins will fail
-    print('Creating Voronoi bins')
-    xc, yc, bintags = agama.schwarzlib.makeVoronoiBins(
-        posvel,
-        gridx = numpy.linspace(-30.0, 30.0, 61),   # [REQ] X-axis pixel boundaries for the 1st (LR) dataset
-        gridy = numpy.linspace(-30.0, 30.0, 61),   # [REQ] same for Y axis
-        nbins = 150,     # [REQ] desired number of Voronoi bins (the result may differ somewhat)
-        alpha = alpha,   # orientation angles - same as in kinemParams1
-        beta  = beta,
-        gamma = gamma1
-    )
-    # save the binning scheme to text file
-    numpy.savetxt(filenameVorBin1, numpy.column_stack((xc, yc, bintags)), fmt='%8.4f %8.4f %7d')
-
-    # 2st step: construct the LOSVD target and apply it to the N-body snapshot
-    print('Computing LOSVDs of input snapshot')
-    apertures    = agama.schwarzlib.getBinnedApertures(xc, yc, bintags)      # obtain boundary polygons from Voronoi bins
-    gridx, gridy = agama.schwarzlib.makeGridForTargetLOSVD(apertures, psf1)  # construct a suitable image-plane grid
-    target       = agama.Target(apertures=apertures, gridx=gridx, gridy=gridy, **kinemParams1)
-    datacube     = target((posvel, mass)).reshape(len(apertures), -1)
-    # assign errors/noise on the computed values from the Poisson noise estimate of B-spline amplitudes
-    particlemass = numpy.mean(mass)
-    noisecube    = (numpy.maximum(datacube, particlemass) * particlemass)**0.5
-    # this would be a fair estimate of noise if it were uncorrelated between spatial and velocity bins;
-    # however, in practice the actual discreteness noise is considerably lower than this estimate.
-    # in order to make it more realistic, we may increase the formal uncertainties by a factor of 2-3
-    # and then add actual uncorrelated Gaussian noise to the datacube.
-    if addnoise:
-        noisecube *= 3.0
-        datacube  += numpy.random.normal(size=datacube.shape) * noisecube
-
-    # 3rd step: convert the B-spline LOSVDs to GH moments
-    print('Computing Gauss-Hermite moments and their error estimates')
-    ghorder = 6  # [OPT] order of GH expansion
-    ghm_val, ghm_err = agama.schwarzlib.ghMomentsErrors(degree=degree, gridv=gridv, values=datacube, errors=noisecube, ghorder=ghorder)
-    ind = (1,2,6,7,8,9)  # keep only these columns, corresponding to v,sigma,h3,h4,h5,h6
-    numpy.savetxt(filenameGH1, numpy.dstack((ghm_val, ghm_err))[:,ind,:].reshape(len(apertures), -1), fmt='%8.3f',
-        header='v        v_err    sigma    sigma_err h3       h3_err    h4       h4_err    h5       h5_err    h6       h6_err')
-
-    # 4th step: convert the B-splines to histograms, which are in fact 0th-degree B-splines;
-    # we might have constructed model LOSVDs in terms of histograms directly, but this would have been less accurate
-    # than rebinning the model LOSVDs onto the new velocity grid
-    conv = numpy.linalg.solve(   # conversion matrix from the model B-splines into observed histograms
-        agama.bsplineMatrix(hist_degree, hist_gridv),
-        agama.bsplineMatrix(hist_degree, hist_gridv, degree, gridv) ).T
-    hist_val = datacube.dot(conv)
-    hist_err = (numpy.maximum(hist_val, particlemass) * particlemass)**0.5  # again estimate errors from Poisson noise
-    # save the interleaved values and error estimates of the B-spline amplitudes in each aperture to a text file
-    numpy.savetxt(filenameHist1, numpy.dstack((hist_val, hist_err)).reshape(len(apertures), -1), fmt='%9.3g')
-
-    # repeat for the 2nd dataset
+    makeMockKin(kinemParams1, numpy.linspace(-30.0, 30.0, 61), 150, filenameVorBin1, filenameHist1, filenameGH1, filenameVS1)
     # High-resolution dataset similar to AO-assisted IFU such as NIFS (2x2", pixel size 0.1")
-    print('Same steps for the 2nd dataset')
-    xc, yc, bintags = agama.schwarzlib.makeVoronoiBins(
-        posvel,
-        gridx = numpy.linspace(-1.0, 1.0, 21),
-        gridy = numpy.linspace(-1.0, 1.0, 21),
-        nbins = 50,
-        alpha = alpha,
-        beta  = beta,
-        gamma = gamma2
-    )
-    numpy.savetxt(filenameVorBin2, numpy.column_stack((xc, yc, bintags)), fmt='%8.4f %8.4f %7d')
-
-    apertures    = agama.schwarzlib.getBinnedApertures(xc, yc, bintags)
-    gridx, gridy = agama.schwarzlib.makeGridForTargetLOSVD(apertures, psf2)
-    target       = agama.Target(apertures=apertures, gridx=gridx, gridy=gridy, **kinemParams2)
-    datacube     = target((posvel, mass)).reshape(len(apertures), -1)
-    noisecube    = (numpy.maximum(datacube, particlemass) * particlemass)**0.5
-    # same remark about noise here, but because of much smaller bin sizes, the uncertainties are already realistically large
-    if addnoise:
-        datacube += numpy.random.normal(size=datacube.shape) * noisecube
-
-    ghm_val, ghm_err = agama.schwarzlib.ghMomentsErrors(degree=degree, gridv=gridv, values=datacube, errors=noisecube, ghorder=ghorder)
-    numpy.savetxt(filenameGH2, numpy.dstack((ghm_val, ghm_err))[:,ind,:].reshape(len(apertures), -1), fmt='%8.3f',
-        header='v        v_err    sigma    sigma_err h3       h3_err    h4       h4_err    h5       h5_err    h6       h6_err')
-
-    hist_val = datacube.dot(conv)
-    hist_err = (numpy.maximum(hist_val, particlemass) * particlemass)**0.5
-    numpy.savetxt(filenameHist2, numpy.dstack((hist_val, hist_err)).reshape(len(apertures), -1), fmt='%9.3g')
-
+    makeMockKin(kinemParams2, numpy.linspace(- 1.0,  1.0, 21),  50, filenameVorBin2, filenameHist2, filenameGH2, filenameVS2)
 
     print('Finished creating mock datasets, now you may run this script with the argument  do=plot  or  do=run')
     exit()
@@ -452,8 +447,8 @@ apertures1 = agama.schwarzlib.getBinnedApertures(xcoords=vorbin1[:,0], ycoords=v
 # in Agama, where X points left. Therefore, one will need to invert the X axis of the observed dataset:
 # getBinnedApertures(xcoords=-vorbin[:,0], ...)
 
-# use either histograms or GH moments as input data
-if usehist:
+# use either histograms, GH moments, or classical moments (v & sigma) as input data
+if 'HIST' in variant:
     # [REQ] read the input kinematic data in the form of histograms;
     # if using the mock data as produced by this script, each line contains both values and errors for each velocity bin
     # in a given aperture, but when using data coming from other sources, may need to adjust the order of columns below
@@ -468,7 +463,7 @@ if usehist:
         apertures = apertures1,
         **kinemParams1
     ) )
-else:
+elif 'GH' in variant:
     # [REQ] read the input kinematic data (V, sigma, higher Gauss-Hermite moments);
     # if using the mock data produced by this script, each line contains interleaved values and errors of v,sigma,h3...h6,
     # but when using data coming from other sources, may need to adjust the order of columns below
@@ -481,12 +476,26 @@ else:
         apertures = apertures1,
         **kinemParams1
     ) )
+elif 'VS' in variant:
+    # [REQ] read the input kinematic data (v and sigma, which have a different meaning here than in the case of
+    # Gauss-Hermite moments above; specifically, v is the mean velocity and sigma is its standard deviation,
+    # while for the GH parameterization, v and sigma are the center and width of the best-fit Gaussian);
+    # data format used in this script: v, v_error, sigma, sigma_error, one line per aperture
+    kindat1 = numpy.loadtxt(filenameVS1)
+    datasets.append(agama.schwarzlib.KinemDatasetVS(
+        density   = densityStars,
+        tolerance = 0.01,              # [REQ] relative error in fitting aperture mass constraints
+        vs_val   = kindat1[:, 0::2],   # [REQ] values of v,sigma
+        vs_err   = kindat1[:, 1::2],   # [REQ] errors in the same order
+        apertures = apertures1,
+        **kinemParams1
+    ) )
 
 
 ### 2: [OPT] same for the 2nd kinematic dataset (and similarly for all subsequent ones)
 vorbin2     = numpy.loadtxt(filenameVorBin2)
 apertures2  = agama.schwarzlib.getBinnedApertures(xcoords=vorbin2[:,0], ycoords=vorbin2[:,1], bintags=vorbin2[:,2])
-if usehist:
+if 'HIST' in variant:
     kindat2 = numpy.loadtxt(filenameHist2)
     datasets.append(agama.schwarzlib.KinemDatasetHist(
         density   = densityStars,
@@ -498,13 +507,23 @@ if usehist:
         apertures = apertures2,
         **kinemParams2
     ) )
-else:
+elif 'GH' in variant:
     kindat2 = numpy.loadtxt(filenameGH2)
-    datasets.append(agama.schwarzlib.KinemDatasetGH(
+    if True: datasets.append(agama.schwarzlib.KinemDatasetGH(
         density   = densityStars,
         tolerance = 0.01,
         ghm_val   = kindat2[:, 0::2],
         ghm_err   = kindat2[:, 1::2],
+        apertures = apertures2,
+        **kinemParams2
+    ) )
+elif 'VS' in variant:
+    kindat2 = numpy.loadtxt(filenameVS2)
+    datasets.append(agama.schwarzlib.KinemDatasetVS(
+        density   = densityStars,
+        tolerance = 0.01,
+        vs_val   = kindat2[:, 0:4:2],
+        vs_err   = kindat2[:, 1:4:2],
         apertures = apertures2,
         **kinemParams2
     ) )
@@ -555,10 +574,8 @@ if command == 'RUN':
     #   density.sample(numorbits, potential, beta={0-0.5}, kappa={1 or -1, depending on sign of rotation})
     # Here we add together two sets of IC - the majority of orbits sampled with axisymmetric Jeans eqns,
     # plus a small fraction additionally sampled from the central region to improve coverage.
-    # Different values of the 'seed' parameter will create initial conditions with different number of orbits,
-    # which effectively makes a completely new random sample, and then the number is truncated back to numOrbits.
     ic = numpy.vstack((
-        densityStars.sample(int(numOrbits*0.85)+seed, potential=pot_fidu, beta=0.3, kappa=1)[0][seed:],
+        densityStars.sample(int(numOrbits*0.85), potential=pot_fidu, beta=0.3, kappa=1)[0],
         densityExtra.sample(int(numOrbits*0.15), potential=pot_fidu)[0] ))
 
 
@@ -633,7 +650,7 @@ elif command == 'TEST':
     ax[1].set_yscale('log')
 
     # plot observed parameters of GH expansion v0 and sigma against radius
-    if not usehist:
+    if 'HIST' not in variant:
         aperture_radii1 = numpy.array([numpy.mean(ap[:,0]**2+ap[:,1]**2)**0.5  for ap in apertures1])
         aperture_radii2 = numpy.array([numpy.mean(ap[:,0]**2+ap[:,1]**2)**0.5  for ap in apertures2])
         ax[3].scatter(aperture_radii1, abs(kindat1[:,0]), label='v', c='y', linewidths=0)
@@ -648,7 +665,7 @@ elif command == 'TEST':
         ['total', pot_total] ]:
         vcirc = (-gridrmajor * pot.force(numpy.column_stack((gridrmajor, gridrmajor*0, gridrmajor*0)))[:,0] * Upsilon)**0.5
         ax[3].plot(gridrmajor, vcirc, label=name)
-    ax[3].legend(loc='upper left', scatterpoints=1, ncol=2 if usehist else 3, frameon=False)
+    ax[3].legend(loc='upper left', scatterpoints=1, ncol=(2 if 'HIST' in variant else 3), frameon=False)
     ax[3].set_xscale('log')
     ax[3].set_xlim(min(gridrmajor), max(gridrmajor))
     ax[3].set_ylim(0, max(vcirc)*1.25)
@@ -688,7 +705,7 @@ elif command == 'PLOT':
     # launch interactive plot with [OPT] Mbh vs M/L as the two coordinate axes displayed in chi2 plane (may choose a different pair of parameters)
     agama.schwarzlib.runPlot(datasets=datasets, aval=Mbh, bval=ML, chi2=chi2, filenames=filenames,
         # [OPT] various adjustable parameters for the plots (ranges, names, etc.) - most have reasonable default values
-        alabel='Mbh', blabel='M/L', alim=(0, 4e8), blim=(0.9, 1.1), vlim=(-500,500),
+        alabel='Mbh', blabel='M/L', alim=(0, 4e8), blim=(0.9, 1.2), vlim=(-500,500),
         v0lim=(-150,150), sigmalim=(40,160), v0err=15.0, sigmaerr=15.0, potential=pot_total)
 
 else:

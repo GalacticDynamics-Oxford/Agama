@@ -500,36 +500,49 @@ void computePotentialCoefsFromParticles(
     bool stop = false;
     // parallelize the loop over the nodes of 2d grid, not the inner loop over particles
 #ifdef _OPENMP
-#pragma omp parallel for schedule(dynamic)
+#pragma omp parallel
 #endif
-    for(int ind=0; ind<numPoints; ind++) {
-        if(stop) continue;
-        if(cbrk.triggered()) stop = true;
-        unsigned int iR = ind % sizeR;
-        unsigned int iz = ind / sizeR;
-        try{
-            for(ptrdiff_t b=0; b<nbody; b++) {
-                if(Rz[b].first > gridR.back() || fabs(Rz[b].second) > gridz.back())
-                    continue;   // skip particles that are outside the grid
-                for(unsigned int i=0; i<indices.size(); i++) {
-                    int m = indices[i];
-                    double values[3] = {0,0,0};
-                    computePotentialHarmonicAtPoint(m, Rz[b].first, Rz[b].second,
-                        gridR[iR], gridz[iz], harmonics[m+mmax][b], useDerivs, values);
-                    if(zsym) {  // add symmetric contribution from -z
-                        computePotentialHarmonicAtPoint(m, Rz[b].first, -Rz[b].second,
+    {
+        // thread-local temp storage for all harmonic terms at a single point in the (R,z) plane
+        std::vector<double> temp(indices.size() * numQuantitiesOutput);
+#ifdef _OPENMP
+#pragma omp for schedule(dynamic)
+#endif
+        for(int ind=0; ind<numPoints; ind++) {
+            if(stop) continue;
+            if(cbrk.triggered()) stop = true;
+            unsigned int iR = ind % sizeR;
+            unsigned int iz = ind / sizeR;
+            temp.assign(indices.size() * numQuantitiesOutput, 0);
+            try{
+                for(ptrdiff_t b=0; b<nbody; b++) {
+                    if(Rz[b].first > gridR.back() || fabs(Rz[b].second) > gridz.back())
+                        continue;   // skip particles that are outside the grid
+                    for(unsigned int i=0; i<indices.size(); i++) {
+                        int m = indices[i];
+                        double values[3] = {0,0,0};
+                        computePotentialHarmonicAtPoint(m, Rz[b].first, Rz[b].second,
                             gridR[iR], gridz[iz], harmonics[m+mmax][b], useDerivs, values);
+                        if(zsym) {  // add symmetric contribution from -z
+                            computePotentialHarmonicAtPoint(m, Rz[b].first, -Rz[b].second,
+                                gridR[iR], gridz[iz], harmonics[m+mmax][b], useDerivs, values);
+                            for(unsigned int q=0; q<numQuantitiesOutput; q++)
+                                values[q] *= 0.5;  // average with the one from +z
+                        }
+                        // accumulate the computed quantities in a thread-local array
                         for(unsigned int q=0; q<numQuantitiesOutput; q++)
-                            values[q] *= 0.5;  // average with the one from +z
+                            temp[i*numQuantitiesOutput+q] += values[q];
                     }
-                    for(unsigned int q=0; q<numQuantitiesOutput; q++)
-                        output[q]->at(m+mmax)(iR,iz) += values[q];
                 }
             }
-        }
-        catch(std::exception& e) {
-            errorMsg = e.what();
-            stop = true;
+            catch(std::exception& e) {
+                errorMsg = e.what();
+                stop = true;
+            }
+            // copy the thread-local array into the global array of coefficients
+            for(unsigned int i=0; i<indices.size(); i++)
+                for(unsigned int q=0; q<numQuantitiesOutput; q++)
+                    output[q]->at(indices[i]+mmax)(iR,iz) = temp[i*numQuantitiesOutput+q];
         }
     }
     if(cbrk.triggered())

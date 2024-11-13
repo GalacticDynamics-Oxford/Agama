@@ -65,7 +65,7 @@
 #include "utils.h"
 #include "utils_config.h"
 // text string embedded into the python module as the __version__ attribute (including Github commit number)
-#define AGAMA_VERSION "1.0.147 compiled on " __DATE__
+#define AGAMA_VERSION "1.0.148 compiled on " __DATE__
 
 // older versions of numpy have different macro names
 // (will need to expand this list if other similar macros are used in the code)
@@ -7971,23 +7971,23 @@ static const char* docstringSolveOpt =
     "Solve a linear or quadratic optimization problem.\n"
     "Find a vector x that solves a system of linear equations  A x = rhs,  "
     "subject to elementwise inequalities  xmin <= x <= xmax, "
-    "while minimizing the cost function  F(x) = L^T x + (1/2) x^T Q x + P(A x - rhs), where "
-    "L and Q are penalties for the solution vector, and P(y) is the penalty for violating "
-    "the RHS constraints, consisting of two parts: linear penalty rL^T |y| and quadratic penalty "
-    "|y|^T diag(rQ) |y|  (both rL and rQ are nonnegative vectors of the same length as rhs).\n"
+    "while minimizing the cost function  F(x) = XL^T x + (1/2) x^T XQ x + P(A x - rhs), where "
+    "XL and XQ are penalties for the solution vector, and P(y) is the penalty for violating "
+    "the RHS constraints, consisting of two parts: linear penalty RL^T |y| and quadratic penalty "
+    "(1/2) |y|^T diag(RQ) |y|  (both RL and RQ are nonnegative vectors of the same length as rhs).\n"
     "Arguments:\n"
     "  matrix:  2d matrix A of size RxC, or a tuple of several matrices that would be vertically "
     "stacked (they all must have the same number of columns C, and number of rows R1,R2,...). "
     "Providing a list of matrices does not incur copying, unlike the numpy.vstack() function.\n"
     "  rhs:     1d vector of length R, or a tuple of the same number of vectors as the number of "
     "matrices, with sizes R1,R2,...\n"
-    "  xpenl:   1d vector of length C - linear penalties for the solution x "
+    "  xpenl:   1d vector of length C - linear penalties XL for the solution x "
     "(optional - zero if not provided).\n"
-    "  xpenq:   1d vector of length C - diagonal of the matrix Q of quadratic "
+    "  xpenq:   1d vector of length C - diagonal of the matrix XQ of quadratic "
     "penalties for the solution x (optional).\n"
     "  rpenl:   1d vector of length R, or a tuple of vectors R1,R2,... - "
-    "linear penalties for violating the RHS constraints (optional).\n"
-    "  rpenq:   same for the quadratic penalties (optional - if neither linear nor quadratic "
+    "linear penalties RL for violating the RHS constraints (optional).\n"
+    "  rpenq:   same for the quadratic penalties RQ (optional - if neither linear nor quadratic "
     "penalties for RHS violation were provided, it means that RHS must be satisfied exactly. "
     "If any of these penalties is set to infinity, it has the same effect, i.e. corresponding "
     "constraint must be satisfied exactly).\n"

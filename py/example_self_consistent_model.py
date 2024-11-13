@@ -146,13 +146,13 @@ if __name__ == "__main__":
         densityDarkHalo.totalMass(), densityGasDisk.totalMass()))
 
     # create the dark halo DF
-    dfHalo  = agama.DistributionFunction(potential=model.potential, **iniDFDarkHalo)
+    dfHalo        = agama.DistributionFunction(**iniDFDarkHalo)
     # same for the bulge
-    dfBulge = agama.DistributionFunction(potential=model.potential, **iniDFBulge)
+    dfBulge       = agama.DistributionFunction(**iniDFBulge)
     # same for the stellar components (thin/thick disks and stellar halo)
     dfThinDisk    = agama.DistributionFunction(potential=model.potential, **iniDFThinDisk)
     dfThickDisk   = agama.DistributionFunction(potential=model.potential, **iniDFThickDisk)
-    dfStellarHalo = agama.DistributionFunction(potential=model.potential, **iniDFStellarHalo)
+    dfStellarHalo = agama.DistributionFunction(**iniDFStellarHalo)
     # composite DF of all stellar components except the bulge
     dfStellar     = agama.DistributionFunction(dfThinDisk, dfThickDisk, dfStellarHalo)
     # composite DF of all stellar components including the bulge

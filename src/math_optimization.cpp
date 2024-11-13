@@ -16,6 +16,7 @@
 
 #include "math_optimization.h"
 #include "math_core.h"
+#include "utils.h"
 #include <stdexcept>
 #include <cassert>
 #include <cmath>
@@ -320,7 +321,7 @@ static bool callPythonFunction(PyObject* fnc, PyObject* args)
 template<typename NumT>
 PyObject* initPyMatrixSelfProduct(const SelfProductMatrix<NumT>& S)
 {
-    printf("Using a dense quadratic penalty matrix\n");
+    PySys_WriteStdout("Using a dense quadratic penalty matrix\n");
     // 1. create a temporary matrix, in which the rows of the input matrix M are multiplied
     // by square roots of the elements of the vector p, and the whole thing is transposed
     size_t nrows = S.M.rows(), ncols = S.M.cols();
@@ -691,9 +692,9 @@ std::vector<double> quadraticOptimizationSolve(
     PyDict_SetItemString(args, "b", coefRhs);
     if(useCustomKKT) {
         PyDict_SetItemString(args, "kktsolver", fnc_kkt_getsolve);
-        printf("Using a custom optimized KKT solver\n");
+        PySys_WriteStdout("Using a custom optimized KKT solver\n");
     }
-    printf("numVariables=%zu, numConstraints=%zu, numConsIneq=%zu\n",
+    PySys_WriteStdout("numVariables=%zu, numConstraints=%zu, numConsIneq=%zu\n",
         numVariables, numConstraints, numConsIneq);
 
     // call the solver
@@ -728,7 +729,9 @@ std::vector<double> quadraticOptimizationSolve(
     if(feasible)
         return result;
     if(!result_dict) {
-        PyErr_Print();
+        if(PyErr_ExceptionMatches(PyExc_KeyboardInterrupt))
+            throw std::runtime_error(utils::CtrlBreakHandler::message());
+        PyErr_Print();  // also clears the exception state
         throw std::runtime_error("quadraticOptimizationSolve: solver returned error");
     }
     throw std::runtime_error("quadraticOptimizationSolve: problem is infeasible");
