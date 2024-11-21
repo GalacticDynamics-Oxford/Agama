@@ -326,6 +326,10 @@ AllParam parseParam(const utils::KeyValueMap& kvmap, const units::ExternalUnits&
         (param.potentialType & (PT_DENS_SPHHARM | PT_DENS_CYLGRID |
         PT_BASISSET | PT_MULTIPOLE | PT_CYLSPLINE))));
     PotentialType type  = param.densityType != PT_UNKNOWN ? param.densityType : param.potentialType;
+    if(type == PT_INVALID)
+        // don't perform any further checks; the calling code will raise an exception if the type
+        // is invalid, and we don't want to override it with another message about unknown parameters
+        return param;
     bool massProvided = kvmap.contains("mass");
     assignParam(param.mass,                popString(kvmap, keys, "mass", "",
         type & (PT_DISK | PT_SPHEROID | PT_NUKER | PT_SERSIC | PT_KEPLERBINARY |

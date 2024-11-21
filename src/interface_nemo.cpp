@@ -1,6 +1,6 @@
 /** \file   interface_nemo.cpp
     \author Eugene Vasiliev
-    \date   2014-2020
+    \date   2014-2024
     \brief  Wrapper for AGAMA potentials to be used in NEMO
 
     The shared library agama.so can be used as a plugin in the NEMO
@@ -9,10 +9,20 @@
     The potential must be specified as an INI file with all
     parameters (possibly for a multi-component potential),
     possibly including potential expansion coefficients.
-    The only additional parameter is the pattern speed
-    (Omega, optional, default is 0).
+    There are two optional additional parameters:
+    - Pattern speed Omega (default is 0);
+      a nonzero value makes the potential rotate about the z axis,
+      but a more powerful way of introducing rotation (e.g. with
+      a non-uniform pattern speed or nonzero initial angle)
+      is through the "rotation" modifier in the INI file.
+    - Gravitational constant G (default is 1);
+      if gyrfalcON was invoked with a non-default value Grav!=1,
+      then one needs to duplicate it in the parameters of the external
+      potential, since the plugin has no access to gyrfalcON's G.
+      The mass- or density-related parameters of the potential specified
+      in the INI file are then multiplied by G.
     The usage is as follows: in gyrfalcON, for instance, one adds
-    `accname=agama accfile=params.ini [accpars=Omega]`
+    `accname=agama accfile=params.ini [accpars=Omega[,G]]`
     to the command line arguments, and provides all necessary parameters.
     in the params.ini text file (see the reference documentation for
     explanation of the options).
@@ -177,13 +187,21 @@ extern "C" void inipotential(
             "Should provide the name of INI or potential coefficients file in accfile=...");
         std::exit(1);
     }
-    mypot = potential::readPotential(file);
     Omega = *npar>=1 ? pars[0] : 0;
+    double G = *npar>=2 ? pars[1] : 1;
+    if(G==1)
+        mypot = potential::readPotential(file);
+    else {
+        const units::InternalUnits unit(units::Kpc, units::Kpc/units::kms);
+        mypot = potential::readPotential(file,
+            units::ExternalUnits(unit, units::Kpc, units::kms, units::Msun * unit.to_Msun * G));
+    }
     fprintf(stderr, "Agama plugin for NEMO: Created an instance of %s potential", mypot->name().c_str());
     if(Omega != 0)
-        fprintf(stderr, " with pattern speed %g\n", Omega);
-    else
-        fprintf(stderr, "\n");
+        fprintf(stderr, " with pattern speed %g", Omega);
+    if(G != 1)
+        fprintf(stderr, " with G=%g", G);
+    fprintf(stderr, "\n");
 }
 
 /// install the potential (newer interface)

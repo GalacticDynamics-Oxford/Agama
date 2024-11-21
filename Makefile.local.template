@@ -67,7 +67,7 @@ LINK_FLAGS_LIB_AND_EXE_STATIC    += -L/path/to/gsl/lib -lgsl -lgslcblas
 # (or pythonX.Y-config, where X.Y is the version), and put these into COMPILE_FLAGS_LIB and LINK_FLAGS_LIB
 # respectively, but this may not be enough.
 # The full path to numpy headers is easier to find: just type
-# > python -c 'import numpy.distutils; print(numpy.distutils.misc_util.get_numpy_include_dirs())'
+# > python -c 'import numpy; print(numpy.get_include())'
 # Linking to an incorrect version of Python (i.e. not the one that is invoked when you type 'python'
 # in the terminal) may result in various errors when trying to "import agama" within Python, such as
 # "ImportError: numpy.core.multiarray failed to import",  or

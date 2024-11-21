@@ -32,8 +32,8 @@ target = agama.Target(type='DensitySphHarm', gridr=gridr, lmax=8, mmax=0)
 
 # discretized density profile to be used as the density constraint
 rhs = target(potstars)
-print("Density constraint values")
-for i in range(len(gridr)): print("%s: mass= %g" % (target[i], rhs[i]))
+#print("Density constraint values")
+#for i in range(len(gridr)): print("%s: mass= %g" % (target[i], rhs[i]))
 
 # construct initial conditions for the orbit library:
 # use the anisotropic Jeans eqs to set the (approximate) shape of the velocity ellipsoid and the mean v_phi;

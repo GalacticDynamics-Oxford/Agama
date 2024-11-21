@@ -65,7 +65,7 @@
 #include "utils.h"
 #include "utils_config.h"
 // text string embedded into the python module as the __version__ attribute (including Github commit number)
-#define AGAMA_VERSION "1.0.148 compiled on " __DATE__
+#define AGAMA_VERSION "1.0.149 compiled on " __DATE__
 
 // older versions of numpy have different macro names
 // (will need to expand this list if other similar macros are used in the code)
@@ -80,6 +80,7 @@
 #if PY_MAJOR_VERSION >= 3
 #define PyString_Check PyUnicode_Check
 #define PyString_AsString PyUnicode_AsUTF8
+#define PyString_FromString PyUnicode_FromString
 #define PyInt_Check PyLong_Check
 #define PyInt_AsLong PyLong_AsLong
 #define PyInt_FromLong PyLong_FromLong
@@ -7712,11 +7713,34 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
             fail = true;
     }
 
+    // prepare to show the progress bar using the tqdm python module, if it is available
+    PyObject *tqdm_module = numOrbits>1 && verbose ? PyImport_ImportModule("tqdm") : NULL;
+    PyObject *tqdm_class  = tqdm_module ? PyObject_GetAttrString(tqdm_module, "tqdm") : NULL;
+    PyObject *tqdm_instance = NULL;
+    if(tqdm_class) {
+        PyObject
+        *args  = PyTuple_New(0),
+        *kwargs= PyDict_New(),
+        *count = PyInt_FromLong(numOrbits),
+        *unit  = PyString_FromString("orbit");
+        PyDict_SetItemString(kwargs, "total", count);
+        PyDict_SetItemString(kwargs, "unit", unit);
+        PyDict_SetItemString(kwargs, "leave", Py_False);
+        tqdm_instance = PyObject_Call(tqdm_class, args, kwargs);
+        Py_DECREF(args);
+        Py_DECREF(kwargs);
+        Py_DECREF(count);
+        Py_DECREF(unit);
+    }
+    if(numOrbits>1 && verbose && !tqdm_instance)
+        // failure to import tqdm module or create an instance of progress bar is not critical,
+        PyErr_Clear();  // suppress the error
+
     // set up signal handler to stop the integration on a keyboard interrupt
     utils::CtrlBreakHandler cbrk;
 
     // finally, run the orbit integration
-    volatile npy_intp numComplete = 0;
+    volatile npy_intp numComplete = 0, prevNumComplete = 0;
     utils::Timer timer;
     double tprint = 0;
     std::string errorMessage;
@@ -7829,16 +7853,34 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
                 if(deltat-tprint >= 1) {
                     tprint = deltat;
                     PyAcquireGIL lock;
-                    PySys_WriteStdout("%li/%li orbits complete\r",
-                        (long int)numComplete, (long int)numOrbits);
-                    fflush(stdout);
+                    PyObject* result = NULL;
+                    if(tqdm_instance) {
+                        npy_intp currNumComplete = numComplete;  // copy of the volatile value
+                        result = PyObject_CallMethod(tqdm_instance, const_cast<char*>("update"),
+                            const_cast<char*>("i"), currNumComplete-prevNumComplete);
+                        prevNumComplete = currNumComplete;
+                    }
+                    if(result)  // successfully shown a progress bar using tqdm
+                        Py_DECREF(result);
+                    else {  // otherwise print a simple progress indicator to python stderr
+                        PySys_WriteStderr("%li/%li orbits complete\r",
+                            (long int)numComplete, (long int)numOrbits);
+                    }
                 }
             }
         }
     }
-    if(numOrbits > 1 && verbose)
-        PySys_WriteStdout("%li orbits complete (%.4g orbits/s)\n",
+    if(numOrbits > 1 && verbose) {
+        if(tqdm_instance) {  // clean up the progress bar
+            PyObject* result = PyObject_CallMethod(tqdm_instance, const_cast<char*>("close"), NULL);
+            Py_XDECREF(result);
+            Py_DECREF(tqdm_instance);
+            Py_DECREF(tqdm_class);
+            Py_DECREF(tqdm_module);
+        }
+        PySys_WriteStderr("%li orbits complete (%.4g orbits/s)\n",
             (long int)numComplete, numComplete / timer.deltaSeconds());
+    }
     if(cbrk.triggered()) {
         fail = true;
         errorMessage = cbrk.message();

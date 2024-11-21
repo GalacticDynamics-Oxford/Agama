@@ -58,9 +58,9 @@ MaxNumNgbDeviation                      4
 
 %---- System of units
 UnitLength_in_cm                        3.085678e21   %  1.0 kpc/h
-UnitMass_in_g                           4.624e38      %  232500/h solar masses
+UnitMass_in_g                           1.989e33      %  1 solar mass
 UnitVelocity_in_cm_per_s                1e5           %  1 km/sec
-GravityConstantInternal                 1             %  AGAMA plugin only works in natural N-body units
+GravityConstantInternal                 0             %  determine automatically from the above units
 
 %---- Gravitational softening lengths
 SofteningComovingClass0                 0

@@ -32,7 +32,7 @@ def getaxes(pos, mass, radius=numpy.inf):
         # use particles within the elliptical radius less than the provided value
         ellpos  = pos.dot(evec) / axes
         filter  = numpy.sum(ellpos**2, axis=1) < radius**2
-        inertia = pos[filter].T.dot(pos[filter] * mass[filter,None])
+        inertia = pos[filter].T.dot(pos[filter] * mass[filter][:,None])
         val,vec = numpy.linalg.eigh(inertia)
         order   = numpy.argsort(-val)  # sort axes in decreasing order
         evec    = vec[:,order]         # updated axis directions

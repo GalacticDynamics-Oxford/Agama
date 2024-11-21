@@ -218,7 +218,7 @@ def createMakefile():
         say('    **** Compiling with OpenMP support ****\n')
         COMPILE_FLAGS_ALL += [OMP_FLAG]
         if not MSVC:
-            LINK_FLAGS_LIB += [OMP_FLAG]
+            LINK_FLAGS_LIB_AND_EXE_STATIC += [OMP_FLAG]
     elif MACOS:
         OMP_H_FOUND = False
         OMP_LIB_FOUND = False
@@ -338,6 +338,12 @@ def createMakefile():
     # [2b]: find out the paths to Python.h and libpythonXX.{a,so,dylib,...} (this is rather tricky)
     # and all other relevant compilation/linking flags needed to build a shared library that uses Python
     PYTHON_INC = '-I"%s"' % sysconfig.get_python_inc()
+    if not runCompiler(code="#include <Python.h>\nint main(){}\n", flags=PYTHON_INC):
+        raise CompileError('Python.h is not found.\n'
+            'You may need to install the package "python-dev", '
+            '"python'+sysconfig.get_config_var('VERSION')+'-dev", "python-devel", or something similar '
+            'using the system package manager (apt-get, yum, or whatever is appropriate for your system).\n' +
+            'Alternatively, you may install Anaconda in place of your system-wide Python.')
 
     # various other system libraries that are needed at link time
     PYTHON_LIB_EXTRA = compressList(
@@ -762,7 +768,7 @@ PyInit_agamatest(void) {
     # it should additionally link to the C++ standard library, whose name depends on the compiler
     CLANG = not MSVC and 'clang' in subprocess.Popen(CC + ' -v', shell=True,
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT).communicate()[0].decode().rstrip()
-    LINK_FLAG_EXE_STATIC_NONCPP = ('-lc++' if CLANG else '-lstdc++') + (' -fopenmp' if '-fopenmp' in LINK_FLAGS_LIB else '')
+    LINK_FLAG_EXE_STATIC_NONCPP = '-lc++' if CLANG else '-lstdc++'
 
     # [99]: put everything together and create Makefile.local
     with open('Makefile.local','w') as f: f.write(

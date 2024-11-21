@@ -1,12 +1,11 @@
 diff -u -r -N arepo-master/Makefile arepo-agama/Makefile
 --- arepo-master/Makefile	2024-03-20 11:05:32.000000000 +0000
 +++ arepo-agama/Makefile	2024-03-20 11:27:03.000000000 +0000
-@@ -320,6 +320,10 @@
+@@ -320,6 +320,9 @@
  
  LIBS = $(GMP_LIB) $(MATH_LIB) $(MPICH_LIB) $(HDF5_LIB) $(GSL_LIB) $(FFTW_LIB) $(HWLOC_LIB)
  
 +ifeq (EXTERNALGRAVITY_AGAMA, $(findstring EXTERNALGRAVITY_AGAMA, $(CONFIGVARS)))
-+LIBS += agama.so
 +endif
 +
  FOPTIONS = $(OPTIMIZE)
@@ -116,21 +115,19 @@ diff -u -r -N arepo-master/src/init/begrun.c arepo-agama/src/init/begrun.c
  static void delete_end_file(void);
  
  /*! \brief Prints a welcome message.
-@@ -192,6 +198,19 @@
+@@ -192,6 +198,17 @@
    All.FlushLast = CPUThisRun;
  #endif /* #ifdef REDUCE_FLUSH */
  
 +#ifdef EXTERNALGRAVITY_AGAMA
-+  if(All.G != 1) {
-+    mpi_printf("BEGRUN: G=%g != 1, this is not supported when using external potential from Agama\n", All.G);
-+    exit(1);
-+  }
-+  agama_potential = agama_createPotential("file=agama_potential.ini");
++  char param[100] = "file=agama_potential.ini G=";
++  snprintf(param + strlen(param), 99 - strlen(param), "%.16g", All.G);
++  agama_potential = agama_createPotential(param);
 +  if(!agama_potential) {
 +    mpi_printf("BEGRUN: Cannot initialize Agama potential, halting.\n%s\n", agama_getError());
 +    exit(1);
 +  }
-+  mpi_printf("BEGRUN: Initialized Agama potential.\n");
++  mpi_printf("BEGRUN: Initialized Agama potential with %s.\n", param);
 +#endif
 +
    init_scalars();

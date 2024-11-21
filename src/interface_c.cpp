@@ -31,7 +31,18 @@ agama_Density* agama_createDensity(const char* params)
 agama_Potential* agama_createPotential(const char* params)
 {
     try{
-        return new agama_Potential(potential::createPotential(utils::KeyValueMap(params)));
+        utils::KeyValueMap kvmap(params);
+        potential::PtrPotential result;
+        if(kvmap.contains("G")) {
+            // undocumented hack! instead of providing the full triplet of external units,
+            // one can specify the value of G in these units, which will be used to scale the mass.
+            double G = kvmap.popDouble("G");
+            const units::InternalUnits unit(units::Kpc, units::Kpc/units::kms);
+            result = potential::createPotential(kvmap,
+                units::ExternalUnits(unit, units::Kpc, units::kms, units::Msun * unit.to_Msun * G));
+        } else
+            result = potential::createPotential(kvmap);
+        return new agama_Potential(result);
     }
     catch(std::exception& e) {
         error = e.what();

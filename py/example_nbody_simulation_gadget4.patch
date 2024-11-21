@@ -1,12 +1,11 @@
 diff -u -r -N gadget4-master/Makefile gadget4-agama/Makefile
 --- gadget4-master/Makefile	2024-03-19 18:08:53.000000000 +0000
 +++ gadget4-agama/Makefile	2024-03-19 18:15:17.000000000 +0000
-@@ -446,6 +446,9 @@
+@@ -446,6 +446,8 @@
  
  LIBS = $(MATH_LIBS) $(HDF5_LIBS) $(GSL_LIBS) $(FFTW_LIBS) $(HWLOC_LIBS) $(VTUNE_LIBS) $(TEST_LIBS) $(MAPS_LIBS) $(SHMEM_LIBS)
  
 +ifeq (EXTERNALGRAVITY_AGAMA, $(findstring EXTERNALGRAVITY_AGAMA, $(CONFIGVARS)))
-+LIBS += agama.so
 +endif
  
  SUBDIRS := $(addprefix $(BUILD_DIR)/,$(SUBDIRS))
@@ -81,7 +80,7 @@ diff -u -r -N gadget4-master/src/gravity/grav_external.cc gadget4-agama/src/grav
 diff -u -r -N gadget4-master/src/main/begrun.cc gadget4-agama/src/main/begrun.cc
 --- gadget4-master/src/main/begrun.cc	2024-01-21 12:29:33.000000000 +0000
 +++ gadget4-agama/src/main/begrun.cc	2024-03-20 09:08:47.000000000 +0000
-@@ -49,6 +49,14 @@
+@@ -50,6 +50,14 @@
  #include "../time_integration/driftfac.h"
  #include "../time_integration/timestep.h"
  
@@ -96,21 +95,19 @@ diff -u -r -N gadget4-master/src/main/begrun.cc gadget4-agama/src/main/begrun.cc
  /*!
   *  This file contains various functions to initialize a simulation run. In
   *  particular, the parameter file is read in and parsed and global variables
-@@ -243,6 +251,19 @@
+@@ -267,6 +275,17 @@
      }
  #endif
  
 +#ifdef EXTERNALGRAVITY_AGAMA
-+  if(All.G != 1) {
-+    mpi_printf("BEGRUN: G=%g != 1, this is not supported when using external potential from Agama\n", All.G);
-+    exit(1);
-+  }
-+  agama_potential = agama_createPotential("file=agama_potential.ini");
++  char param[100] = "file=agama_potential.ini G=";
++  snprintf(param + strlen(param), 99 - strlen(param), "%.16g", All.G);
++  agama_potential = agama_createPotential(param);
 +  if(!agama_potential) {
 +    mpi_printf("BEGRUN: Cannot initialize Agama potential, halting.\n%s\n", agama_getError());
 +    exit(1);
 +  }
-+  mpi_printf("BEGRUN: Initialized Agama potential.\n");
++  mpi_printf("BEGRUN: Initialized Agama potential with %s.\n", param);
 +#endif
 +
    Logs.open_logfiles();
