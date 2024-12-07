@@ -1082,8 +1082,12 @@ shared_ptr<const DensitySphericalHarmonic> DensitySphericalHarmonic::create(
         throw std::invalid_argument("DensitySphericalHarmonic: invalid grid parameters");
     if(lmax<0 || mmax<0 || mmax>lmax)
         throw std::invalid_argument("DensitySphericalHarmonic: invalid choice of expansion order");
-    if(isUnknown(sym))
-        throw std::invalid_argument("DensitySphericalHarmonic: symmetry is not specified");
+    if(isUnknown(sym)) {
+        if(lmax==0)
+            sym = coord::ST_SPHERICAL;
+        else
+            throw std::invalid_argument("DensitySphericalHarmonic: symmetry is not specified");
+    }
     chooseGridRadii(particles, gridSizeR, rmin, rmax);
     std::vector<double> gridRadii = math::createExpGrid(gridSizeR, rmin, rmax);
     if(isSpherical(sym))
@@ -1329,8 +1333,12 @@ shared_ptr<const Multipole> Multipole::create(
         throw std::invalid_argument("Multipole: invalid grid parameters");
     if(lmax<0 || mmax<0 || mmax>lmax)
         throw std::invalid_argument("Multipole: invalid choice of expansion order");
-    if(isUnknown(sym))
-        throw std::invalid_argument("Multipole: symmetry is not specified");
+    if(isUnknown(sym)) {
+        if(lmax==0)
+            sym = coord::ST_SPHERICAL;
+        else
+            throw std::invalid_argument("Multipole: symmetry is not specified");
+    }
     chooseGridRadii(particles, gridSizeR, rmin, rmax);
     std::vector<double> gridRadii = math::createExpGrid(gridSizeR, rmin, rmax);
     if(isSpherical(sym))

@@ -65,7 +65,7 @@
 #include "utils.h"
 #include "utils_config.h"
 // text string embedded into the python module as the __version__ attribute (including Github commit number)
-#define AGAMA_VERSION "1.0.149 compiled on " __DATE__
+#define AGAMA_VERSION "1.0.150 compiled on " __DATE__
 
 // older versions of numpy have different macro names
 // (will need to expand this list if other similar macros are used in the code)
@@ -3071,22 +3071,46 @@ PyObject* Potential_projectedEval(PyObject* self, PyObject* args, PyObject* name
     return FncPotentialProjectedEval(args, namedArgs, *((PotentialObject*)self)->pot).run(/*chunk*/64);
 }
 
-/// compute the radius of a circular orbit as a function of energy or Lz
+/// compute the radius of a circular orbit as a function of energy or Lz;
+/// optimization: if the input array is greater than a certain threshold,
+/// construct a potential interpolator for faster root-finding, augmenting it with a polishing step
 template<bool INPUTLZ>
 class FncPotentialRcirc: public BatchFunction {
     const potential::BasePotential& pot;
+    const potential::Axisymmetrized<potential::BasePotential> axipot;
     double* outputBuffer;
 public:
+    shared_ptr<const potential::Interpolator> interp;
     FncPotentialRcirc(PyObject* input, const potential::BasePotential& _pot) :
-        BatchFunction(input, /*input length*/ 1), pot(_pot)
+        BatchFunction(input, /*input length*/ 1), pot(_pot), axipot(pot),
+        interp(numPoints >= 256 ? new potential::Interpolator(pot) : NULL)
     {
         outputObject = allocateOutput<1>(numPoints, &outputBuffer);
     }
     virtual void processPoint(npy_intp indexPoint)
     {
-        outputBuffer[indexPoint] = (INPUTLZ ?
-            R_from_Lz(pot, /*Lz*/ inputBuffer[indexPoint] * conv->lengthUnit * conv->velocityUnit) :
-            R_circ   (pot, /*E */ inputBuffer[indexPoint] * pow_2(conv->velocityUnit))
+        if(interp) {
+            coord::GradCyl grad;
+            coord::HessCyl hess;
+            double R, dR;
+            if(INPUTLZ) {
+                double Lz = inputBuffer[indexPoint] * conv->lengthUnit * conv->velocityUnit;
+                R = interp->R_from_Lz(Lz);
+                axipot.eval(coord::PosCyl(R, 0, 0), NULL, &grad, &hess);
+                dR = -(R * grad.dR - pow_2(Lz/R)) / (3 * grad.dR + R * hess.dR2);
+            } else {
+                double E = inputBuffer[indexPoint] * pow_2(conv->velocityUnit), Phi;
+                R = interp->R_circ(E);
+                axipot.eval(coord::PosCyl(R, 0, 0), &Phi, &grad, &hess);
+                dR = -(2 * (Phi - E) + R * grad.dR) / (3 * grad.dR + R * hess.dR2);
+            }
+            if(fabs(dR / R) < 0.01)  // safety measure against NANs and other corner cases
+                R += dR;
+            outputBuffer[indexPoint] = R / conv->lengthUnit;
+        } else
+            outputBuffer[indexPoint] = (INPUTLZ ?
+                R_from_Lz(pot, /*Lz*/ inputBuffer[indexPoint] * conv->lengthUnit * conv->velocityUnit) :
+                R_circ   (pot, /*E */ inputBuffer[indexPoint] * pow_2(conv->velocityUnit))
             ) / conv->lengthUnit;
     }
 };
@@ -3102,34 +3126,52 @@ PyObject* Potential_Rcirc(PyObject* self, PyObject* args, PyObject* namedArgs)
         &L_obj, &E_obj) &&
         ((L_obj!=NULL) ^ (E_obj!=NULL) /*exactly one of them should be non-NULL*/) )
     {
-        if(L_obj)
-            return FncPotentialRcirc<true >(L_obj, *((PotentialObject*)self)->pot).run(/*chunk*/64);
-        else
-            return FncPotentialRcirc<false>(E_obj, *((PotentialObject*)self)->pot).run(/*chunk*/64);
+        if(L_obj) {
+            FncPotentialRcirc<true > fnc(L_obj, *((PotentialObject*)self)->pot);
+            return fnc.run(/*chunk*/fnc.interp ? 1024 : 64);
+         } else {
+            FncPotentialRcirc<false> fnc(E_obj, *((PotentialObject*)self)->pot);
+            return fnc.run(/*chunk*/fnc.interp ? 1024 : 64);
+         }
     } else {
         PyErr_SetString(PyExc_TypeError, "Rcirc() takes exactly one argument (either L or E)");
         return NULL;
     }
 }
 
-/// compute the period of a circular orbit as a function of energy or x,v
+/// compute the period of a circular orbit as a function of energy or x,v;
+/// same optimization as above, use an interpolator if savings exceed its cost of construction
 class FncPotentialTcirc: public BatchFunction {
     const potential::BasePotential& pot;
+    const potential::Axisymmetrized<potential::BasePotential> axipot;
     double* outputBuffer;
 public:
+    shared_ptr<const potential::Interpolator> interp;
     FncPotentialTcirc(PyObject* input, const potential::BasePotential& _pot) :
         BatchFunction(input, /*input length - two choices*/ 1, 6, /*custom error message*/
             "Input must be a 1d array of energy values or a 2d Nx6 array of position/velocity values"),
-        pot(_pot)
+        pot(_pot), axipot(pot), interp(numPoints >= 256 ? new potential::Interpolator(pot) : NULL)
     {
         outputObject = allocateOutput<1>(numPoints, &outputBuffer);
     }
     virtual void processPoint(npy_intp indexPoint)
     {
         double E = inputLength==6 ?
-            totalEnergy(pot, convertPosVel(&inputBuffer[indexPoint*6])) :  // input is 6 phase-space coords
+            totalEnergy(pot, convertPosVel(&inputBuffer[indexPoint*6])) :  // input is 6 phase-space point
             inputBuffer[indexPoint] * pow_2(conv->velocityUnit);           // input is one value of energy
-        outputBuffer[indexPoint] = T_circ(pot, E) / conv->timeUnit;
+        if(interp) {
+            coord::GradCyl grad;
+            coord::HessCyl hess;
+            double Phi, R = interp->R_circ(E);
+            axipot.eval(coord::PosCyl(R, 0, 0), &Phi, &grad, &hess);
+            double T = sqrt(R / grad.dR) * 2*M_PI;
+            double dR = -(2 * (Phi - E) + R * grad.dR) / (3 * grad.dR + R * hess.dR2);
+            double dT = M_PI / sqrt(R / grad.dR) * dR * (grad.dR - R * hess.dR2) / pow_2(grad.dR);
+            if(fabs(dT / T) < 0.01)  // safety measure against NANs and other corner cases
+                T += dT;
+            outputBuffer[indexPoint] = T / conv->timeUnit;
+        } else
+            outputBuffer[indexPoint] = T_circ(pot, E) / conv->timeUnit;
     }
 };
 
@@ -3137,30 +3179,45 @@ PyObject* Potential_Tcirc(PyObject* self, PyObject* args)
 {
     if(!Potential_isCorrect(self))
         return NULL;
-    return FncPotentialTcirc(args, *((PotentialObject*)self)->pot).run(/*chunk*/64);
+    FncPotentialTcirc fnc(args, *((PotentialObject*)self)->pot);
+    return fnc.run(/*chunk*/fnc.interp ? 1024 : 64);
+
 }
 
-/// compute the maximum radius that can be reached with a given energy
+/// compute the maximum radius that can be reached with a given energy, same optimization as above
 class FncPotentialRmax: public BatchFunction {
     const potential::BasePotential& pot;
+    const potential::Axisymmetrized<potential::BasePotential> axipot;
     double* outputBuffer;
 public:
+    shared_ptr<const potential::Interpolator> interp;
     FncPotentialRmax(PyObject* input, const potential::BasePotential& _pot) :
-        BatchFunction(input, /*input length*/ 1), pot(_pot)
+        BatchFunction(input, /*input length*/ 1), pot(_pot), axipot(pot),
+        interp(numPoints >= 256 ? new potential::Interpolator(pot) : NULL)
     {
         outputObject = allocateOutput<1>(numPoints, &outputBuffer);
     }
     virtual void processPoint(npy_intp indexPoint)
     {
         double E = inputBuffer[indexPoint] * pow_2(conv->velocityUnit);
-        outputBuffer[indexPoint] = R_max(pot, E) / conv->lengthUnit;
+        if(interp) {
+            coord::GradCyl grad;
+            double Phi, R = interp->R_max(E);
+            axipot.eval(coord::PosCyl(R, 0, 0), &Phi, &grad);
+            double dR = (E - Phi) / grad.dR;
+            if(fabs(dR / R) < 0.01)  // safety measure against NANs and other corner cases
+                R += dR;
+            outputBuffer[indexPoint] = R / conv->lengthUnit;
+        } else
+            outputBuffer[indexPoint] = R_max(pot, E) / conv->lengthUnit;
     }
 };
 
 PyObject* Potential_Rmax(PyObject* self, PyObject* args) {
     if(!Potential_isCorrect(self))
         return NULL;
-    return FncPotentialRmax(args, *((PotentialObject*)self)->pot).run(/*chunk*/64);
+    FncPotentialRmax fnc(args, *((PotentialObject*)self)->pot);
+    return fnc.run(/*chunk*/fnc.interp ? 1024 : 64);
 }
 
 /// compute the peri- and apocenter radii of an orbit in the x,y plane with the given E, Lz or x,v

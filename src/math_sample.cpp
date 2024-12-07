@@ -117,7 +117,10 @@ private:
     /// array of function values at sampling points  (size: Npoints)
     std::vector<double> fncValues;
 
-#ifndef DISABLE_QRNG
+#ifdef DISABLE_QRNG
+    /// initial random seed
+    math::PRNGState initstate;
+#else
     /// random offsets in each coordinate, added (mod 1) to the values returned by the quasi-random
     /// number generator, to avoid repetition when the same sampling routine is called twice
     std::vector<double> offsets;
@@ -213,7 +216,9 @@ Sampler::Sampler(const IFunctionNdim& _fnc, const double _xlower[], const double
     xupper(_xupper, _xupper+Ndim),
     numOutputSamples(_numOutputSamples),
     cells(1),  // create the root cell
-#ifndef DISABLE_QRNG
+#ifdef DISABLE_QRNG
+    initstate(math::random() * (1<<31)),
+#else
     offsets(Ndim),
 #endif
     integValue(0),
@@ -387,7 +392,9 @@ void Sampler::addPointsToCell(CellEnum cellIndex, PointEnum firstPointIndex, Poi
     double *cellXupper = cellXlower+Ndim;
     getCellBoundaries(cellIndex, cellXlower, cellXupper);
     math::PRNGState state = lastPointIndex;     // initial seed for the PRNG
-#ifndef DISABLE_QRNG
+#ifdef DISABLE_QRNG
+    state ^= initstate;
+#else
     // Assign point coordinates using quasi-random numbers, but randomize the sequence of these numbers.
     // These quasi-random numbers, or low-discrepancy sequences, have a property that each element of
     // the sequence is reasonably distant from any other element (very close pairs are less likely than
