@@ -133,7 +133,7 @@ double projectedvel2mom_Plummer(double R)
 
 //---- test suite ----//
 bool test(const galaxymodel::GalaxyModel& model, const std::string& name,
-    bool havetruedens = true, bool havetruevel = true, bool isotropic = true, bool spherical = true)
+    bool havetruedens, bool havetruevel, bool isotropic, bool rotating, bool spherical)
 {
     bool ok = true;
 
@@ -185,7 +185,7 @@ bool test(const galaxymodel::GalaxyModel& model, const std::string& name,
         ok &= test(vel2mom.vxvz + vel2true, vel2true, 1e-4, "moments() velocity vx vz = 0");
         ok &= test(vel2mom.vyvz + vel2true, vel2true, 1e-4, "moments() velocity vy vz = 0");
     }
-    if(spherical) {
+    if(!rotating) {
         // mean velocity should be zero in the spherical non-rotating case
         ok &= test(velmom.vx + velmom.vy + velmom.vz + velnorm, velnorm, 1e-4, "moments() mean velocity = 0");
     }
@@ -243,7 +243,7 @@ bool test(const galaxymodel::GalaxyModel& model, const std::string& name,
         ok &= test(vel2proj.vxvz + vel2projtrue, vel2projtrue, 1e-4, "projected moments() velocity vx vz = 0");
         ok &= test(vel2proj.vyvz + vel2projtrue, vel2projtrue, 1e-4, "projected moments() velocity vy vz = 0");
     }
-    if(spherical) {
+    if(!rotating) {
         // mean velocity should be zero in the spherical non-rotating case
         ok &= test(velproj.vx + velproj.vy + velproj.vz + velnorm, velnorm, 1e-4, "projected moments() mean velocity = 0");
     }
@@ -271,8 +271,10 @@ bool test(const galaxymodel::GalaxyModel& model, const std::string& name,
     // no errors in velocity
     if(spherical) {
         galaxymodel::computeProjectedDF(model, posproj, vel, noerr, &projdfface);  // face-on
-        galaxymodel::computeProjectedDF(model, posproj, vel, noerr, &projdfrot, false, ori); // rotated
-        ok &= test(projdfface, projdfrot, 1e-6, "projected df(), no error, rotated vs. non-rotated");
+        if(!rotating) {
+            galaxymodel::computeProjectedDF(model, posproj, vel, noerr, &projdfrot, false, ori); // rotated
+            ok &= test(projdfface, projdfrot, 1e-6, "projected df(), no error, rotated vs. non-rotated");
+        }
         if(havetruevel)
             ok &= test(projdfface, projectedDF_Plummer(R, vel, noerr), 1e-6, "projected df(), no error, vs. analytic");
     }
@@ -280,8 +282,10 @@ bool test(const galaxymodel::GalaxyModel& model, const std::string& name,
     // small errors
     if(spherical) {
         galaxymodel::computeProjectedDF(model, posproj, vel, smallerr, &projdfface);
-        galaxymodel::computeProjectedDF(model, posproj, vel, smallerr, &projdfrot, false, ori);
-        ok &= test(projdfface, projdfrot, 1e-4, "projected df(), small error, rotated vs. non-rotated");
+        if(!rotating) {
+            galaxymodel::computeProjectedDF(model, posproj, vel, smallerr, &projdfrot, false, ori);
+            ok &= test(projdfface, projdfrot, 1e-4, "projected df(), small error, rotated vs. non-rotated");
+        }
         // swapping the velocity components and their respective errors in the isotropic case has no difference
         if(isotropic) {
             double dfswap;
@@ -388,8 +392,8 @@ bool test(const galaxymodel::GalaxyModel& model, const std::string& name,
     ok &= test(vdfi.integrate(vmin, vmax, amplvZ, 2), vel2mom.vz2, 2e-4, "vdf() mean vz^2 vs. moments()");
     // mixed moments are not compared, since VDF does not provide any information about them
 
-    // in the spherical [non-rotating] case, the x- and y-VDFs should be symmetric w.r.t. sign change
-    if(spherical) {
+    // in the non-rotating case, the x- and y-VDFs should be symmetric w.r.t. sign change
+    if(!rotating) {
         ok &= test(vdfi.interpolate(vel.vx, amplvX), vdfi.interpolate(-vel.vx, amplvX), 1e-5, "vdf() f_x(v)==f_x(-v)");
         ok &= test(vdfi.interpolate(vel.vy, amplvY), vdfi.interpolate(-vel.vy, amplvY), 1e-5, "vdf() f_y(v)==f_y(-v)");
     }
@@ -476,8 +480,8 @@ bool test(const galaxymodel::GalaxyModel& model, const std::string& name,
     ok &= test(vdfp.integrate(vmin, vmax, amplvY, 2), vel2proj.vy2, 2e-4, "projected vdf() mean vy^2 vs. projected moments()");
     ok &= test(vdfp.integrate(vmin, vmax, amplvZ, 2), vel2proj.vz2, 2e-4, "projected vdf() mean vz^2 vs. projected moments()");
 
-    // in the spherical [non-rotating] case, the x- and y-VDFs should be symmetric w.r.t. sign change
-    if(spherical) {
+    // in the non-rotating case, the x- and y-VDFs should be symmetric w.r.t. sign change
+    if(!rotating) {
         ok &= test(vdfp.interpolate(vel.vx, amplvX), vdfp.interpolate(-vel.vx, amplvX), 2e-5, "projected vdf() f_x(v)==f_x(-v)");
         ok &= test(vdfp.interpolate(vel.vy, amplvY), vdfp.interpolate(-vel.vy, amplvY), 2e-5, "projected vdf() f_y(v)==f_y(-v)");
     }
@@ -530,7 +534,7 @@ bool test(const galaxymodel::GalaxyModel& model, const std::string& name,
     }
 
     // in the spherical case, projected VDF should be the same in a rotated frame
-    if(spherical) {
+    if(spherical && !rotating) {
         math::blas_daxpy(-1, amplvX, amplvXrot);
         math::blas_daxpy(-1, amplvY, amplvYrot);
         math::blas_daxpy(-1, amplvZ, amplvZrot);
@@ -562,14 +566,24 @@ int main()
         df::QuasiSphericalCOM(
             potential::Sphericalized<potential::BaseDensity>(pot),
             potential::Sphericalized<potential::BasePotential>(pot))),
-        "SphIso", /*havetruedens*/ true, /*havetruevel*/ true, /*isotropic*/ true, /*spherical*/ true);
+        "SphIso",
+        /*havetruedens*/ true,
+        /*havetruevel*/  true,
+        /*isotropic*/    true,
+        /*rotating*/     false,
+        /*spherical*/    true);
 
     std::cout << "\033[1m  Spherical anisotropic Plummer model  \033[0m\n";
     ok &= test(galaxymodel::GalaxyModel(pot, af,
         df::QuasiSphericalCOM(
             potential::Sphericalized<potential::BaseDensity>(pot),
-            potential::Sphericalized<potential::BasePotential>(pot), -0.3, INFINITY*0.8)),
-        "SphAniso", /*havetruedens*/ true, /*havetruevel*/ false, /*isotropic*/ false, /*spherical*/ true);
+            potential::Sphericalized<potential::BasePotential>(pot), -0.3, INFINITY, 0.8, 1.0)),
+        "SphAniso",
+        /*havetruedens*/ true,
+        /*havetruevel*/  false,
+        /*isotropic*/    false,
+        /*rotating*/     true,
+        /*spherical*/    true);
 
     df::DoublePowerLawParam param;
     param.J0       = 1.0;
@@ -587,7 +601,12 @@ int main()
     //actions::ActionFinderAxisymFudge af1(pot1);
     std::cout << "\033[1m  Flattened rotating DoublePowerLaw model  \033[0m\n";
     ok &= test(galaxymodel::GalaxyModel(pot, af, df::DoublePowerLaw(param)),
-        "NonSph", /*havetruedens*/ false, /*havetruevel*/ false, /*isotropic*/ false, /*spherical*/ false);
+        "NonSph",
+        /*havetruedens*/ false,
+        /*havetruevel*/  false,
+        /*isotropic*/    false,
+        /*rotating*/     true,
+        /*spherical*/    false);
 
     if(ok)
         std::cout << "\033[1;32mALL TESTS PASSED\033[0m\n";

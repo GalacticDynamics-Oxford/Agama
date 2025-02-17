@@ -101,8 +101,8 @@ public:
         the first dimension of the array is the number of spherical harmonics (lmax+1)^2,
         and the second dimension is the number of radial grid points.
         If all coefficients of the l=0 harmonic are positive, a logarithmic scaling
-        for this harmonic will be employed, and in any case the l!=0 terms are scaled relative to
-        the l=0 term, and the result is spline-interpolated.
+        for this harmonic will be employed, and all l!=0 terms will be scaled relative to the l=0 term.
+        After this optional scaling, all harmonic coefficients are spline-interpolated in log radius.
     */
     DensitySphericalHarmonic(const std::vector<double> &gridRadii,
         const std::vector< std::vector<double> > &coefs);
@@ -114,8 +114,16 @@ public:
     /** return the radii of spline nodes */
     const std::vector<double>& getRadii() const { return gridRadii; }
 
-    /** return the radii of spline nodes and the array of density expansion coefficients */
+    /** return the radii of spline nodes and the array of density expansion coefficients.
+        \param[out]  radii  will be filled 
+    */
     void getCoefs(std::vector<double> &radii, std::vector< std::vector<double> > &coefsArray) const;
+
+    /** fill the array of density expansion coefficients at a given radius.
+        \param[out]  coefs  is a pre-allocated array of size ind.size(), which will be filled
+        by this routine, but its elements corresponding to empty harmonics are left uninitialized.
+    */
+    void getCoefsAtRadius(double radius, double coefs[]) const;
 
 private:
     /// radial grid

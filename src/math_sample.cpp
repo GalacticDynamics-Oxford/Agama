@@ -121,9 +121,9 @@ private:
     /// initial random seed
     math::PRNGState initstate;
 #else
-    /// random offsets in each coordinate, added (mod 1) to the values returned by the quasi-random
-    /// number generator, to avoid repetition when the same sampling routine is called twice
-    std::vector<double> offsets;
+    /// quasi-random number generators for each coordinate, initialized with a random scrambling
+    /// to avoid repetition when the same sampling routine is called twice
+    std::vector<QuasiRandomHalton> qrng;
 #endif
 
     /// estimate of the integral of f(x) over H, divided by the volume
@@ -217,19 +217,14 @@ Sampler::Sampler(const IFunctionNdim& _fnc, const double _xlower[], const double
     numOutputSamples(_numOutputSamples),
     cells(1),  // create the root cell
 #ifdef DISABLE_QRNG
-    initstate(math::random() * (1<<31)),
-#else
-    offsets(Ndim),
+    initstate(math::random() * (1u<<31)),
 #endif
     integValue(0),
     integError(0)
 {
 #ifndef DISABLE_QRNG
-    if(Ndim > MAX_PRIMES)  // this is only a limitation of the quasi-random number generator
-        throw std::runtime_error("sampleNdim: more than "+utils::toString(MAX_PRIMES)+
-            " dimensions is not supported");
     for(int d=0; d<Ndim; d++)
-        offsets[d] = random();
+        qrng.push_back(math::QuasiRandomHalton(d));
 #endif
     volume = 1;
     for(int d=0; d<Ndim; d++) {
@@ -430,8 +425,9 @@ void Sampler::addPointsToCell(CellEnum cellIndex, PointEnum firstPointIndex, Poi
             pointCoords[ pointIndex * Ndim + d ] = cellXlower[d] +
                 (cellXupper[d] - cellXlower[d]) *
 #ifndef DISABLE_QRNG
-                fmod(quasiRandomHalton(firstPointIndex + perm[pointIndex-firstPointIndex], PRIMES[d]) +
-                     offsets[d], 1);
+                qrng[d](firstPointIndex + perm[pointIndex-firstPointIndex]);
+//                fmod(quasiRandomHalton(firstPointIndex + perm[pointIndex-firstPointIndex], PRIMES[d]) +
+//                     offsets[d], 1);
 #else
                 random(&state);
 #endif

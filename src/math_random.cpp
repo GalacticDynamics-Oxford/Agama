@@ -4,6 +4,7 @@
 #include <cmath>
 #include <ctime>
 #include <algorithm>
+#include <stdexcept>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -220,17 +221,6 @@ void getRandomPermutation(size_t count, size_t output[], PRNGState* state)
     }
 }
 
-double quasiRandomHalton(size_t ind, unsigned int base)
-{
-    double val = 0, fac = 1., invbase = 1./base;
-    while(ind > 0) {
-        fac *= invbase;
-        val += fac * (ind % base);
-        ind /= base;
-    }
-    return val;
-}
-
 // adaptation of MurmurHash64A written by Austin Appleby
 uint64_t hash(const void* data, int len /*length of data in 8-byte chunks*/, unsigned int seed)
 {
@@ -248,6 +238,46 @@ uint64_t hash(const void* data, int len /*length of data in 8-byte chunks*/, uns
     h *= m;
     h ^= h >> 47;
     return h;
+}
+
+QuasiRandomHalton::QuasiRandomHalton(int dimension, PRNGState* state)
+{
+    static const int MAX_PRIMES = 16;  // not that there aren't more!
+    static const int PRIMES[MAX_PRIMES] = { 2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53 };
+    if(dimension > MAX_PRIMES)
+        throw std::runtime_error("QuasiRandomHalton: dimension is too large");
+    base = PRIMES[dimension];
+    invbase = 1./base;
+    // init permutations (the algorithm of Owen 2017; arXiv:1706.02808)
+    int permSize = ceil(54 / log2(base)) - 1;
+    permutations.resize(permSize * base);
+    remainders.resize(permSize);
+    double fac = invbase;
+    for(int i=0; i<permSize; i++) {
+        getRandomPermutation(base, &(permutations[i*base]), state);
+        // table of remainders for each iteration, which considerably reduces
+        // the number of iterations when the index is not too large
+        for(int j=0; j<=i; j++)
+            remainders[j] += fac * permutations[i*base];
+        fac *= invbase;
+    }
+}
+
+double QuasiRandomHalton::operator()(size_t index) const
+{
+    double value = 0, fac = invbase;
+    unsigned int k = 0;
+    while(index > 0) {
+        value += fac * permutations[k * base + index % base];
+        index /= base;
+        fac   *= invbase;
+        k++;
+    }
+    // index becomes zero rather quickly unless the starting value is very large,
+    // so instead of running the loop for the entire set of permutations (k=0..remainders.size()-1),
+    // we retrieve the precomputed remainders summing up 0th elements of permutations
+    // for all subsequent iterations
+    return value + remainders[k];
 }
 
 }  // namespace math

@@ -241,13 +241,15 @@ PtrDistributionFunction createDistributionFunction(
                 "to initialize "+type+" DF");
         if(density == NULL)
             density = potential;
-        double beta0 = 0, r_a = INFINITY;
-        assignParam(beta0, kvmap, keys, "beta", "beta0");
-        assignParam(r_a,   kvmap, keys, "anisotropyRadius", "r_a", converter.lengthUnit);
+        double beta0 = 0, r_a = INFINITY, rotFrac = 0, Jphi0 = 0;
+        assignParam(beta0,   kvmap, keys, "beta", "beta0");
+        assignParam(r_a,     kvmap, keys, "anisotropyRadius", "r_a", converter.lengthUnit);
+        assignParam(rotFrac, kvmap, keys, "rotFrac");
+        assignParam(Jphi0,   kvmap, keys, "Jphi0", "", converter.lengthUnit * converter.velocityUnit);
         result = PtrDistributionFunction(new QuasiSphericalCOM(
             potential::Sphericalized<potential::BaseDensity>  (*density),
             potential::Sphericalized<potential::BasePotential>(*potential),
-            beta0, r_a));
+            beta0, r_a, rotFrac, Jphi0));
     }
     else if(type.empty())
         throw std::runtime_error("Need to provide the distribution function type");

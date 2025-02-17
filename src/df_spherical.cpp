@@ -580,12 +580,16 @@ math::LogLogSpline fitSphericalIsotropicDF(
 
 //------ QuasiSphericalCOM DF class for Cuddeford-Osipkov-Merritt models -------//
 
-QuasiSphericalCOM::QuasiSphericalCOM(
-    const math::IFunction& density, const math::IFunction& potential, double _beta0, double _r_a)
+QuasiSphericalCOM::QuasiSphericalCOM(const math::IFunction& density, const math::IFunction& potential,
+    double _beta0, double _r_a, double _rotFrac, double _Jphi0)
 :
-    QuasiSpherical(potential), invPhi0(1./potential(0)), beta0(_beta0), r_a(_r_a),
+    QuasiSpherical(potential), invPhi0(1./potential(0)),
+    beta0(_beta0), r_a(_r_a), rotFrac(_rotFrac), Jphi0(_Jphi0),
     df(createSphericalDF(density, potential, beta0, r_a))
-{}
+{
+    if(!(fabs(rotFrac)<=1))
+        throw std::invalid_argument("QuasiSphericalCOM: rotFrac must be between -1 and 1");
+}
 
 void QuasiSphericalCOM::evalDeriv(const ClassicalIntegrals& ints,
     double *value, DerivByClassicalIntegrals *deriv) const
@@ -598,11 +602,16 @@ void QuasiSphericalCOM::evalDeriv(const ClassicalIntegrals& ints,
     // note that we don't (and cannot) check that L <= Lcirc(E)
     double Lpow = math::pow(ints.L, -2*beta0);
     *value *= Lpow;
+     // add the odd part if necessary
+    double rot = rotFrac!=0 && Jphi0!=INFINITY ? rotFrac * tanh(ints.Lz / Jphi0) : 0;
+    *value *= (1+rot);
     if(deriv) {
         double dfdQ = Q<0 ? dfdP / pow_2(Q) : 0;
-        deriv->dbyE = Lpow * dfdQ;
-        deriv->dbyL = Lpow * dfdQ * ints.L / pow_2(r_a) + (beta0 ? -2*beta0 * (*value) / ints.L : 0);
+        deriv->dbyE = (1+rot) * Lpow * dfdQ;
+        deriv->dbyL = (1+rot) * Lpow * dfdQ * ints.L / pow_2(r_a) + (beta0 ? -2*beta0 * (*value) / ints.L : 0);
         deriv->dbyLz = 0;
+        if(Jphi0!=0 && rotFrac!=0)
+            deriv->dbyLz += *value * rotFrac * (1 - pow_2(rot / rotFrac)) / (1+rot) / Jphi0;
     }
     // check for invalid range - this shouldn't happen in normal circumstances, so be picky here
     if(ints.L<0 || fabs(ints.Lz)>ints.L || P<0)

@@ -461,7 +461,7 @@ PyInit_agamatest(void) {
     def findPythonLib():
         # try linking against the static python library libpython**.a, if this does not succeed,
         # try the shared library libpython**.so** or libpython**.dylib
-        PY_VERSION = sysconfig.get_config_var('VERSION')
+        PY_VERSION = sysconfig.get_config_var('VERSION') + getattr(sys, 'abiflags', '')
         for PYTHON_LIB_FILENAME in compressList([sysconfig.get_config_var(x) for x in ['LIBRARY', 'LDLIBRARY', 'INSTSONAME']] +
             ['libpython%s.a' % PY_VERSION, 'libpython%s.so' % PY_VERSION, 'libpython%s.dylib' % PY_VERSION] ):
             for PYTHON_LIB_PATH in compressList([sysconfig.get_config_var(x) for x in ['LIBPL', 'LIBDIR', 'srcdir']]):

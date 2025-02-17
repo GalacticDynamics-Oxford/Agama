@@ -2,10 +2,10 @@
 """
 Create a simple single-component flattened self-consistent model
 determined by its distribution function in terms of actions.
-We use the DoublePowerLaw DF approximately corresponding to the Sersic
-model, with parameters found by the program example_doublepowerlaw.exe
-(fitting the DF to a spherical Sersic profile with n=2) and then
-adjusted manually to create some flattening and rotation.
+We use the DoublePowerLaw DF approximately corresponding to
+a flattened Sersic profile with index n=2 and axis ratio q=0.5,
+using the parameters found by example_doublepowerlaw.py and
+slightly adjusting them to add some rotation.
 """
 import agama, numpy, matplotlib.pyplot as plt
 
@@ -13,25 +13,23 @@ import agama, numpy, matplotlib.pyplot as plt
 dfparams = dict(
     type     = 'DoublePowerLaw',
     J0       = 1.0,
-    slopeIn  = 1.5,
-    slopeOut = 1.5,
+    slopeIn  = 1.6,
+    slopeOut = 1.6,
     steepness= 1.0,
-    coefJrIn = 1.0,
-    coefJzIn = 1.5,
-    coefJrOut= 1.0,
-    coefJzOut= 1.6,
-    Jcutoff  = 0.54,
-    cutoffstrength=1.5,
+    coefJrIn = 0.9,
+    coefJzIn = 1.6,
+    coefJrOut= 0.8,
+    coefJzOut= 1.7,
+    Jcutoff  = 0.7,
+    cutoffstrength = 2.0,
     rotFrac  = 1.0,  # make a rotating model (just for fun)
     Jphi0    = 0.05, # size of non-(or weakly-)rotating core
     mass     = 1.0)
 
-# compute the mass and rescale norm to get the total mass = 1
-#dfparams['norm'] /= agama.DistributionFunction(**dfparams).totalMass()
 df = agama.DistributionFunction(**dfparams)
 
 # initial guess for the density profile
-dens = agama.Density(type='sersic', mass=1, scaleRadius=0.65, sersicindex=2)
+dens = agama.Density(type='sersic', mass=1, scaleRadius=0.6, sersicindex=2)
 
 # define the self-consistent model consisting of a single component
 gridparams = dict(rminSph=0.01, rmaxSph=10., sizeRadialSph=25, lmaxAngularSph=8)
@@ -64,11 +62,11 @@ ax[0].set_xlim(min(r), max(r))
 
 # save the final density/potential profile and create an N-body snapshot
 print('Creating N-body model')
-comp.density.export('flattened_sersic_density.ini')
-scm.potential.export('flattened_sersic_potential.ini')
+comp.density.export('example_self_consistent_model_flattened_density.ini')
+scm.potential.export('example_self_consistent_model_flattened_potential.ini')
 gm = agama.GalaxyModel(scm.potential, df)
 xv, m = gm.sample(1000000)
-agama.writeSnapshot('flattened_sersic_nbody.nemo', (xv, m), 'nemo')
+agama.writeSnapshot('example_self_consistent_model_flattened.snap', (xv, m), 'text')
 
 # show the axis ratio
 print('Determining shape')

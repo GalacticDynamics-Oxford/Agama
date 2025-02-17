@@ -2,7 +2,7 @@
 Module for reading and writing N-body snapshots in the NEMO binary format.
 The code for snapshot handling is hacked from AMUSE and reworked into a standalone module.
 """
-import sys, array, numpy, six
+import sys, array, numpy
 
 __all__ = ['NemoFile']
 
@@ -79,6 +79,25 @@ class OrderedMultiDictionary(object):
             yield self.mapping[x][index]
 
 
+# copied from 'six' module to avoid adding it as a dependency
+def add_metaclass(metaclass):
+    """Class decorator for creating a class with a metaclass."""
+    def wrapper(cls):
+        orig_vars = cls.__dict__.copy()
+        slots = orig_vars.get('__slots__')
+        if slots is not None:
+            if isinstance(slots, str):
+                slots = [slots]
+            for slots_var in slots:
+                orig_vars.pop(slots_var)
+        orig_vars.pop('__dict__', None)
+        orig_vars.pop('__weakref__', None)
+        if hasattr(cls, '__qualname__'):
+            orig_vars['__qualname__'] = cls.__qualname__
+        return metaclass(cls.__name__, cls.__bases__, orig_vars)
+    return wrapper
+
+
 class NemoItemType(type):
     mapping = {}
 
@@ -96,7 +115,7 @@ class NemoItemType(type):
         return metaclass.mapping[typecharacter](tagstring, dimensions, mustswap=mustswap)
 
 
-@six.add_metaclass(NemoItemType)
+@add_metaclass(NemoItemType)
 class NemoItem(object):
 
     def __init__(self, tagstring, dimensions=[1], data=None, mustswap=False):
@@ -206,7 +225,7 @@ class LongItem(NemoItem):
 class HalfpItem(NemoItem):
     """  half precision floating """
     typecharacter = "h"
-    datatype = numpy.int16
+    datatype = numpy.float16
 
 
 class FloatItem(NemoItem):
@@ -508,23 +527,31 @@ class NemoFile(object):
         item = SetItem('SnapShot')
         parameters_item = SetItem('Parameters')
         particles_item = SetItem('Particles')
-        nbody = 0
+        nbody = None
         for key in snapshot:
             if key == 'Time':
-                parameters_item.add_item(DoubleItem('Time', data=snapshot['Time']))
+                parameters_item.add_item(DoubleItem('Time', data=float(snapshot['Time'])))
             else:
                 arr = numpy.asanyarray(snapshot[key])
-                if arr.dtype == numpy.float32:
-                    particles_item.add_item(FloatItem(key, dimensions=arr.shape, data=arr))
+                if   arr.dtype == numpy.int8   : Item = ByteItem
+                elif arr.dtype == numpy.int16  : Item = ShortItem
+                elif arr.dtype == numpy.int32  : Item = IntItem
+                elif arr.dtype == numpy.int64  : Item = LongItem
+                elif arr.dtype == numpy.float16: Item = HalfpItem
+                elif arr.dtype == numpy.float32: Item = FloatItem
+                elif arr.dtype == numpy.float64: Item = DoubleItem
                 else:
-                    particles_item.add_item(DoubleItem(key, dimensions=arr.shape, data=arr))
-                nbody = len(arr)
+                    raise TypeError('Invalid dtype: %s' % arr.dtype)
+                particles_item.add_item(Item(key, dimensions=arr.shape, data=arr))
+                if nbody is None:
+                    nbody = len(arr)
+                elif nbody != len(arr):
+                    raise ValueError('Array lengths should be identical')
         parameters_item.add_item(IntItem('Nobj', data=nbody))
         item.add_item(parameters_item)
         item.add_item(particles_item)
         self.write_item(item)
         self.file.flush()
-
 
 # convenience alias
 def open(filename, mode='r'):

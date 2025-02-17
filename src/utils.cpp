@@ -177,6 +177,8 @@ VerbosityLevel verbosityLevel = initVerbosityLevel();
 
 std::string stacktrace()
 {
+    if(verbosityLevel <= VL_MESSAGE)  // stack trace enabled only for non-zero debug levels
+        return "";
 #ifdef HAVE_STACKTRACE
     std::string result;
 #ifdef _OPENMP

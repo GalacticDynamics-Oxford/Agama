@@ -10,7 +10,9 @@ obj/*
 doxy/*
 temp/*
 xcode/*
+.vscode/*
 *.pyc
 *.so
+*.a
 .DS_Store
 Makefile.local

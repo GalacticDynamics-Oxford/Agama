@@ -1,7 +1,7 @@
 /** \file    df_halo.h
     \brief   Distribution functions for the spheroidal component (halo)
     \author  Eugene Vasiliev, James Binney
-    \date    2015-2019
+    \date    2015-2024
 */
 #pragma once
 #include "df_base.h"
@@ -16,7 +16,7 @@ struct DoublePowerLawParam{
 double
     norm,      ///< normalization factor with the dimension of mass
     J0,        ///< break action (defines the transition between inner and outer regions)
-    Jcutoff,   ///< cutoff action (sets exponential suppression at J>Jcutoff, 0 to disable)
+    Jcutoff,   ///< cutoff action (sets exponential suppression at J>Jcutoff, INFINITY disables it)
     slopeIn,   ///< power-law index for actions below the break action (Gamma)
     slopeOut,  ///< power-law index for actions above the break action (Beta)
     steepness, ///< steepness of the transition between two asymptotic regimes (eta)
@@ -29,7 +29,7 @@ double
     Jphi0,     ///< controls the steepness of rotation and the size of non-rotating core
     Jcore;     ///< central core size for a Cole&Binney-type modified double-power-law halo
 DoublePowerLawParam() :  ///< set default values for all fields (NAN means that it must be set manually)
-    norm(NAN), J0(NAN), Jcutoff(0), slopeIn(NAN), slopeOut(NAN), steepness(1), cutoffStrength(2),
+    norm(NAN), J0(NAN), Jcutoff(INFINITY), slopeIn(NAN), slopeOut(NAN), steepness(1), cutoffStrength(2),
     coefJrIn(1), coefJzIn(1), coefJrOut(1), coefJzOut(1), rotFrac(0), Jphi0(0), Jcore(0) {}
 };
 

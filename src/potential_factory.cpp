@@ -1394,18 +1394,7 @@ PtrPotential createPotentialExpansion(const AllParam& param, const utils::KeyVal
         const particles::ParticleArrayCar particles = particles::readSnapshot(param.file, param.converter);
         if(particles.size()==0)
             throw std::runtime_error("Error loading N-body snapshot from " + param.file);
-
-        PtrPotential pot = createPotentialExpansionFromParticles(param, particles);
-
-        // store coefficients in a text file,
-        // later may load this file instead for faster initialization
-        try{
-            writePotential(param.file + ".ini", *pot, param.converter);
-        }
-        catch(std::exception& ex) {  // not a critical error, but worth mentioning
-            utils::msg(utils::VL_MESSAGE, "createPotential", ex.what());
-        }
-        return pot;
+        return createPotentialExpansionFromParticles(param, particles);
     }
 
     // option 3: analytic density or potential model

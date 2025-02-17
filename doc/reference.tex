@@ -688,9 +688,9 @@ The parameters of this model are listed in the structure \ttt{DoublePowerLawPara
 \item \ppp{Jcutoff} [0] additionally suppresses the DF at large actions (beyond $J_\mathrm{cut}$), 0  means disable.
 \item \ppp{cutoffStrength} [2] sets the steepness $\zeta$ of this exponential cutoff at large $J$.
 \item \ppp{rotFrac} [0] controls the amount of streaming motion by setting the odd-$J_\phi$ part of DF to be $\varkappa$ times the even-$J_\phi$ part; $\varkappa=0$ disables rotation and $\varkappa=\pm 1$ correspond to models with maximum rotation.
-\item \ppp{Jphi0} [0] sets the extent $J_{\phi,0}$ the central core with suppressed rotation.
+\item \ppp{Jphi0} [0] sets the extent $J_{\phi,0}$ the central core with suppressed rotation. In general, to construct rotating models, it is better to set $\varkappa$ to $\pm 1$ and control the amount of rotation by adjusting $J_{\phi,0}$, rather than keeping the latter at zero and changing $\varkappa$: the former produces smooth velocity distributions in $v_\phi$, while in the latter case, they have a discontinuity at $v_\phi=0$.
 \end{itemize}
-This DF roughly corresponds to the $\alpha\beta\gamma$ \ttt{Spheroid} model, with the asymptotic power-law indices $\Beta=2\beta-3$ and $\Gamma=(6-\gamma)/(4-\gamma)$ in the self-consistent case. An example program \texttt{example_doublepowerlaw.cpp} helps to find the values of these parameters that best correspond to the given spherical isotropic model.
+This DF roughly corresponds to the $\alpha\beta\gamma$ \ttt{Spheroid} model, with the asymptotic power-law indices $\Beta=2\beta-3$ and $\Gamma=(6-\gamma)/(4-\gamma)$ in the self-consistent case. An example program \texttt{example_doublepowerlaw.cpp} helps to find the values of these parameters that best correspond to the given spherical (possibly anisotropic) model, and a more general \Python program \texttt{example_doublepowerlaw.py} extends this procedure to flattened models (using a different fitting approach).
 
 
 %%%%%%%%%%%%%%
@@ -706,11 +706,12 @@ The previously described types of DFs were defined in terms of an analytic funct
 \begin{align*}
 \beta(r) \equiv 1 - \frac{\sigma_t^2}{2\sigma_r^2} = \frac{\beta_0 + (r/r_a)^2}{1 + (r/r_a)^2}.
 \end{align*}
-$\beta_0$ is the limiting value of anisotropy in the center, and if $r_a<\infty$, the anisotropy coefficient tends to 1 at large $r$ (Osipkov--Merritt profile), otherwise stays equal to $\beta_0$ everywhere. The usual isotropic case is obtained by setting $\beta_0=0, r_a=\infty$.
+$\beta_0$ is the limiting value of anisotropy in the center, and if $r_a<\infty$, the anisotropy coefficient tends to 1 at large $r$ (Osipkov--Merritt profile), otherwise stays equal to $\beta_0$ everywhere. The usual isotropic case is obtained by setting $\beta_0=0, r_a=\infty$. In addition, one may introduce rotation with the usual trick of flipping the sign of $L_z$ for some fraction of stars.
 
-The DF, expressed in terms of energy $E$ and angular momentum $L$, has the following form:
+The DF, expressed in terms of energy $E$, angular momentum $L$, and its $z$-component $L_z\equiv J_\phi$, has the following form:
 \begin{align*}
-f(E,L) = \hat f(Q) \; L^{-2\beta_0}, \quad Q\equiv E + L^2 / (2 r_a^2) .
+f(E,L) = \hat f(Q) \; L^{-2\beta_0}\; \bigg(1 + \varkappa\tanh \frac{L_z}{J_{\phi,0}} \bigg), \quad
+Q\equiv E + L^2 / (2 r_a^2) .
 \end{align*}
 The function $\hat f(Q)$ is computed numerically for the given choice of parameters, density and potential, as explained in Section~\ref{sec:DFsphericalDetails}), and represented in an interpolated form on a suitable grid in $Q$.
 For some combinations of parameters, this produces a DF which is negative in some range of $Q$, in particular, when the central slopes of the density profile $\gamma \equiv -d\ln\rho/d\ln r$, the potential $\delta \equiv -d\ln(-\Phi)/d\ln r$, and the coefficient $\beta_0$ violate the so-called slope--anisotropy theorem \cite{AnEvans2006}: $\gamma \ge 2\beta + (1/2-\beta)\delta$. For the self-gravitating case, $\delta=0$ if the potential is finite at origin, or $\delta=\beta-2$ otherwise. If the computed DF is negative, it is replaced by zero.
@@ -719,11 +720,12 @@ This type of DF has the following parameters:
 \begin{itemize}
 \item \ppp{beta0} [0]  is the central value of velocity anisotropy, must be in the range $-0.5 \le \beta_0 < 1$.
 \item \ppp{r_a} [$\infty$]  is the anisotropy radius, must be positive (in particular, infinity means a constant-anisotropy model).
+\item \ppp{rotFrac} [0] and \ppp{Jphi0} [0] have the same meaning as for the \ttt{DoublePowerLaw} DF, and control the amount of rotation in the model.
 \end{itemize}
 In addition, one needs to provide one-dimensional functions representing the radial profile of the density and the potential (if they are taken from the same model, only the latter is needed). Any spherically-symmetric instances of \ttt{Density} and \ttt{Potential} classes can be used.
 
-The DF is traditionally expressed in terms of $E,L$, and in this form can only be used in the same potential $\Phi$ as it was constructed in. However, it can be put on equal grounds with other action-based DFs, which are manifestly independent of potential, using the following approach.
-An instance of \ttt{ActionFinderSpherical} class, constructed for the original potential $\Phi$, is attached to the instance of a \ttt{QuasiSpherical} DF. To compute the value of DF at the given triplet of actions $\bJ$, we map them to $E,L$ using this original spherical action finder, and then feed these values to the DF. Crucially, in this form the actions $\bJ(\bx,\bv \;|\;\tilde\Phi)$ may be computed in any other potential $\tilde\Phi$ (not necessarily spherical), not just the original $\Phi$. This corresponds to the DF being adiabatically transformed from the original potential to the new one, without changing its dependence on actions.
+The DF is traditionally expressed in terms of $E,L,L_z$, and in this form can only be used in the same potential $\Phi$ as it was constructed in. However, it can be put on equal grounds with other action-based DFs, which are manifestly independent of potential, using the following approach.
+An instance of \ttt{ActionFinderSpherical} class, constructed for the original potential $\Phi$, is attached to the instance of a \ttt{QuasiSpherical} DF. To compute the value of DF at the given triplet of actions $\bJ$, we map them to $E,L,L_z$ using this original spherical action finder, and then feed these values to the DF. Crucially, in this form the actions $\bJ(\bx,\bv \;|\;\tilde\Phi)$ may be computed in any other potential $\tilde\Phi$ (not necessarily spherical), not just the original $\Phi$. This corresponds to the DF being adiabatically transformed from the original potential to the new one, without changing its dependence on actions.
 This is especially convenient for iterative construction of multicomponent self-consistent models (Section~\ref{sec:SCM}): the DFs of spheroidal components (bulge, halo) may be obtained using the Eddington inversion formula or its anisotropic generalization in the initial spherically-symmetric approximation of the total potential, and then expressed as functions of actions $\bJ$. The resulting DF is then viewed as a function of actions only. In subsequent iterations, the potential is no longer spherical, but the density and anisotropy profiles of these components, obtained by integration of their DFs over velocity, are nevertheless quite close to the initial ones.
 
 
@@ -1397,7 +1399,7 @@ The \Python equivalent of this program additionally determines the confidence in
 A more elaborate \Python program \texttt{gc_runfit} determines simultaneously the parameters of the spherically-symmetric potential and the DF that together describe the mock data points drawn from a certain (non-self-consistent) DF but with incomplete data (only the line-of-sight velocity and the projected distance from the origin). The goal is to determine the properties of the potential, treating the DF as nuisance parameters; it also uses the MCMC algorithm to determine uncertainties. 
 This program is designed to work with the mock data from the \href{http://astrowiki.ph.surrey.ac.uk/dokuwiki/doku.php?id=tests:sphtri:spherical}{Gaia Challenge} test suite \cite{Read2021}, but can be easily adapted to other situations.
 
-\paragraph{example_doublepowerlaw} performs a related task: given a spherically-symmetric density and potential profiles (not necessarily related through Poisson equation), numerically construct a \ppp{QuasiSpherical} DF and approximate it with a \ppp{DoublePowerLaw} DF which has an analytic form (see \cite{Jeffreson2017} for a similar approach).
+\paragraph{example_doublepowerlaw} performs a related task: for the given density and potential profiles (not necessarily related through Poisson equation), numerically construct a (possibly anisotropic) \ppp{QuasiSpherical} DF and approximate it with a \ppp{DoublePowerLaw} DF which has an analytic form (see \cite{Jeffreson2017} for a similar approach). This program exists in two variants, which implement rather different approaches. The \Cpp version is limited to spherically-symmetric profiles, while the \Python version can deal with both spherical and flattened profiles, and incorporates additional steps for determining a self-consistent potential corresponding to the best-fit \ppp{DoublePowerLaw} DF and for creating an $N$-body snapshot of the model.
 
 \paragraph{example_vdf_fit_bspline} demonstrates the use of B-splines to construct an arbitrary nonnegative probability distribution (in this case, the velocity distribution function -- \hyperref[sec:VDF]{VDF}) from a discrete sample of velocity measurements, while deconvolving it from the observational uncertainties.
 
@@ -2737,7 +2739,7 @@ Hairer E., N{\o}rsett S., Wanner G., 1993, \textsl{Solving ordinary differential
 Hernquist L., Ostriker J., 1992, ApJ, 386, 375
 
 \bibitem{Hunter2024}
-Hunter G., Sormani M., Beckmann J., et al., 2024, A\&A, in press (arXiv:2403.18000)
+Hunter G., Sormani M., Beckmann J., et al., 2024, A\&A, 642, 216
 
 \bibitem{Hyman}
 Hyman J., 1983, J.~Sci.~Stat.~Comput., 4, 645

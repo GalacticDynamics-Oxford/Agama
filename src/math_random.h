@@ -1,11 +1,12 @@
 /** \file   math_random.h
     \brief  pseudo- and quasi-random number generators
-    \date   2015-2019
+    \date   2015-2025
     \author Eugene Vasiliev
 */
 #pragma once
 #include <cstddef>    // for NULL
 #include <stdint.h>   // for uint64_t
+#include <vector>
 
 namespace math{
 
@@ -65,21 +66,6 @@ void getRandomRotationMatrix(/*output*/ double mat[9], /*input/output*/ PRNGStat
 */
 void getRandomPermutation(size_t count, size_t output[], /*input/output*/ PRNGState* state=NULL);
 
-/** return a quasirandom number from the Halton sequence.
-    \param[in]  index  is the index of the number (should be >0, or better > ~10-20);
-    \param[in]  base   is the base of the sequence, must be a prime number;
-    if one needs an N-dimensional vector of ostensibly independent quasirandom numbers,
-    one may call this function N times with different prime numbers as bases.
-    Keep in mind that the numbers get increasingly more correlated as the base increases,
-    thus it is not recommended to use more than ~6 dimensions unless index spans larger enough range.
-    \return  a number between 0 and 1.
-*/
-double quasiRandomHalton(size_t index, unsigned int base);
-
-/** first ten prime numbers (reordered), may be used as bases in `quasiRandomHalton` */
-static const int MAX_PRIMES = 10;  // not that there aren't more!
-static const int PRIMES[MAX_PRIMES] = { 2, 3, 5, 7, 19, 11, 13, 23, 29, 17 };
-
 /** Construct the initial state of a PRNG from the provided input bitstream.
     The purpose of this function is to produce a predictable but well-mixed output --
     if it is called with the same input, it will always produce the same result,
@@ -101,5 +87,30 @@ PRNGState hash(const void* data, int len, unsigned int seed=0);
 /// an overloaded version which takes an array of doubles as input
 inline PRNGState hash(const double* data, int len, unsigned int seed=0) {
     return hash(static_cast<const void*>(data), len, seed); }
+
+/** Generator of quasirandom numbers from the Halton sequence with a randomly initialized scrambling.
+    Sequences with different dimension indices are independent and have mutually low discrepancy,
+    while sequences with the same dimension but different scrambling seeds are not.
+    Once initialized, the () operator returns the quasi-random number with the given index.
+*/
+class QuasiRandomHalton {
+    unsigned int base;  ///< prime number that depends on dimension
+    double invbase;     ///< inverse of the above
+    std::vector<size_t> permutations;  ///< scrambling set
+    std::vector<double> remainders;    ///< table for speeding up computations for low indices
+public:
+    /** Create the generator for the given dimension and random seed.
+        \param[in] dimension  is the index of dimension, should be <16.
+        \param[in,out] state  is the internal state of a PRNG that is used to initialize the scrambling,
+        which gets updated after the call; if NULL, the internal global state is used.
+    */
+    QuasiRandomHalton(int dimension, /*input/output*/ PRNGState* state=NULL);
+
+    /** Return the quasi-random number between 0 and 1 from this sequence with a given index;
+        the value depends deterministically on index, dimension and random seed used to initialize
+        the scrambling, i.e., subsequent calls with the same index return the same value.
+    */
+    double operator()(size_t index) const;
+};
 
 }  // namespace

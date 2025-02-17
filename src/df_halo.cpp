@@ -62,7 +62,7 @@ DoublePowerLaw::DoublePowerLaw(const DoublePowerLawParam &inparams) :
         throw std::invalid_argument("DoublePowerLaw: core action Jcore is invalid");
     if(!(par.Jcutoff>=0))
         throw std::invalid_argument("DoublePowerLaw: truncation action Jcutoff must be non-negative");
-    if(!(par.slopeOut>3) && par.Jcutoff==0)
+    if(!(par.slopeOut>3) && (par.Jcutoff==0 || par.Jcutoff==INFINITY))
         throw std::invalid_argument(
             "DoublePowerLaw: mass diverges at large J (outer slope must be > 3)");
     if(!(par.slopeIn<3))
@@ -77,9 +77,7 @@ DoublePowerLaw::DoublePowerLaw(const DoublePowerLawParam &inparams) :
         throw std::invalid_argument(
             "DoublePowerLaw: invalid weights in the linear combination of actions");
     if(!(fabs(par.rotFrac)<=1))
-        throw std::invalid_argument(
-            "DoublePowerLaw: amplitude of odd-Jphi component must be between -1 and 1");
-
+        throw std::invalid_argument("DoublePowerLaw: rotFrac must be between -1 and 1");
 }
 
 void DoublePowerLaw::evalDeriv(const actions::Actions &J,
@@ -95,7 +93,7 @@ void DoublePowerLaw::evalDeriv(const actions::Actions &J,
     g = par.coefJrOut* J.Jr + par.coefJzOut* J.Jz + coefJphiOut* J.Jphi,
     J0he = math::pow(par.J0 / h, par.steepness),
     gJ0e = math::pow(g / par.J0, par.steepness),
-    gJcz = par.Jcutoff>0 ? math::pow(g / par.Jcutoff, par.cutoffStrength) : 0;
+    gJcz = par.Jcutoff>0 && par.Jcutoff!=INFINITY ? math::pow(g / par.Jcutoff, par.cutoffStrength) : 0;
     *value = par.norm / pow_3(2*M_PI * par.J0) *
         math::pow(1 + J0he,  par.slopeIn  / par.steepness) *  // H(h)
         math::pow(1 + gJ0e, -par.slopeOut / par.steepness);   // G(g)
@@ -114,8 +112,8 @@ void DoublePowerLaw::evalDeriv(const actions::Actions &J,
         double dlogHdh = -par.slopeIn *
             (J0he + par.Jcore/h * (0.5 * beta * (1 - J0he) - par.Jcore/h)) /
             (h * (1 + J0he) * (1 + par.Jcore/h * (par.Jcore/h - beta)));
-        double dlogGdg = -
-            (par.slopeOut * gJ0e + (par.Jcutoff>0 ? par.cutoffStrength * gJcz * (1 + gJ0e) : 0)) /
+        double dlogGdg = -(par.slopeOut * gJ0e + 
+            (par.Jcutoff>0 && par.Jcutoff!=INFINITY ? par.cutoffStrength * gJcz * (1 + gJ0e) : 0)) /
             (g * (1 + gJ0e));
         deriv->dbyJr   = *value * (par.coefJrIn * dlogHdh + par.coefJrOut * dlogGdg);
         deriv->dbyJz   = *value * (par.coefJzIn * dlogHdh + par.coefJzOut * dlogGdg);

@@ -1,7 +1,7 @@
 /** \file   interface_python.cpp
     \brief  Python interface for the Agama library
     \author Eugene Vasiliev
-    \date   2014-2024
+    \date   2014-2025
 
     This is a Python extension module that provides the interface to
     some of the classes and functions from the Agama C++ library.
@@ -12,7 +12,7 @@
     routine, action finders and mappers, distribution functions, self-consistent
     and Schwarzachild orbit-superposition models, N-dimensional integration and
     sampling routines, spline-related tools, linear and quadratic optimization,
-    and N-body snapshot handling.
+    N-body snapshot handling, and a few helper routines.
     Unit conversion is also part of the calling convention: the quantities
     received from Python are assumed to be in some physical units and converted
     into internal units inside this module, and the output from the Agama library
@@ -65,7 +65,7 @@
 #include "utils.h"
 #include "utils_config.h"
 // text string embedded into the python module as the __version__ attribute (including Github commit number)
-#define AGAMA_VERSION "1.0.150 compiled on " __DATE__
+#define AGAMA_VERSION "1.0.151 compiled on " __DATE__
 
 // older versions of numpy have different macro names
 // (will need to expand this list if other similar macros are used in the code)
@@ -287,6 +287,136 @@ struct PyAcquireGIL {
     PyAcquireGIL() {}
 };
 #endif
+
+///@}
+//  ---------------------------
+/// \name  Progress indication
+//  ---------------------------
+///@{
+
+/// global pointer to the tqdm python class that displays a fancy progress bar (if available)
+PyObject* tqdmClass = NULL;
+
+/** Helper class for displaying progress indication during long computations,
+    using a fancy tdqm progress bar if this module is available, otherwise a simple percentage */
+class ProgressBar {
+public:
+    PyObject* tqdmInstance;      ///< tdqm progress bar instance, if needed
+    bool initialized;            ///< whether the progress indication has begun
+    Py_ssize_t numTotal;         ///< total number of operations
+    Py_ssize_t prevNumCompleted; ///< number of completed operations on previous report
+    double prevDeltaSeconds;     ///< time since the beginning of computations on previous report
+    const char* unitStr;         ///< units of operations (points, orbits, etc.)
+    utils::Timer timer;          ///< timer started at the beginning of computations
+    const double minTotalTime;   ///< threshold for creating the progress bar (seconds)
+    const double minUpdateTime;  ///< threshold for updating the progress bar (seconds)
+    long numUpdateCalls;         ///< keeps track of the number of calls to update()
+    int minNumUpdateCalls;       ///< minimum number of update calls before the progress bar is shown
+
+    ProgressBar(Py_ssize_t total, const char* unit, double _minTotalTime=5.0, double _minUpdateTime=1.0) :
+        tqdmInstance(NULL), initialized(false), numTotal(total), prevNumCompleted(0), prevDeltaSeconds(0),
+        unitStr(unit), minTotalTime(_minTotalTime), minUpdateTime(_minUpdateTime), numUpdateCalls(0)
+    {
+#ifdef _OPENMP
+        // when running an OpenMP-parallelized loop, wait until each thread finishes its first batch of
+        // operations before showing the progress bar, to get a more reliable estimate of the total time
+        minNumUpdateCalls = omp_get_max_threads();
+#else
+        minNumUpdateCalls = 1;
+#endif
+    }
+
+    ~ProgressBar() {
+        clear();
+    }
+
+    /** Update the progress bar with the current number of completed operations.
+        Initially, the progress bar is not created: this happens only after some time (e.g. 2 seconds)
+        has elapsed and the remaining time is expected to be greater than some threshold (e.g. 5 seconds).
+        The update only happens once per second, no matter how often this method is called.
+        Can be invoked from multiple threads, but the updating code is protected by a critical section.
+    */
+    void update(Py_ssize_t numCompleted)
+    {
+#ifdef _OPENMP
+#pragma omp atomic
+#endif
+        ++numUpdateCalls;
+        double deltaSeconds = timer.deltaSeconds();
+        if(deltaSeconds - prevDeltaSeconds < (initialized ? minUpdateTime : 2*minUpdateTime) ||
+            numUpdateCalls < minNumUpdateCalls)
+            return;  // do not update more often than once per second
+        prevDeltaSeconds = deltaSeconds;
+        if(numCompleted >= numTotal)
+            return;  // skip any updates when already finished
+        // create the progress bar only when the estimated completion time is long enough
+        if(!initialized && numTotal * deltaSeconds < numCompleted * minTotalTime)
+            return;
+        PyAcquireGIL lock;
+        // In a free-threaded Python, the absence of GIL lock does not prevent multiple threads
+        // from reaching past this point simultaneously, so an OpenMP critical section is also needed
+#ifdef Py_GIL_DISABLED
+#ifdef _OPENMP
+#pragma omp critical
+#endif
+#endif
+        {
+            if(!initialized && tqdmClass) {
+                // when first reached here, try to create an instance of a fancy progress bar.
+                PyObject
+                    *args  = PyTuple_New(0),
+                    *kwargs= PyDict_New(),
+                    *count = PyInt_FromLong(numTotal),
+                    *value = PyInt_FromLong(numCompleted),
+                    *unit  = PyString_FromString(unitStr);
+                PyDict_SetItemString(kwargs, "total", count);
+                PyDict_SetItemString(kwargs, "initial", value);
+                PyDict_SetItemString(kwargs, "unit", unit);
+                PyDict_SetItemString(kwargs, "leave", Py_False);
+                tqdmInstance = PyObject_Call(tqdmClass, args, kwargs);
+                Py_DECREF(args);
+                Py_DECREF(kwargs);
+                Py_DECREF(count);
+                Py_DECREF(value);
+                Py_DECREF(unit);
+                if(!tqdmInstance)
+                    // failure to create an instance of progress bar is not critical, suppress the error
+                    PyErr_Clear();
+                prevNumCompleted = numCompleted;
+            }
+            initialized = true;  // mark tqdm initialization as complete, even if it failed
+            PyObject* result = NULL;
+            if(tqdmInstance) {
+                result = PyObject_CallMethod(tqdmInstance, const_cast<char*>("update"),
+                    const_cast<char*>("i"), numCompleted-prevNumCompleted);
+                prevNumCompleted = numCompleted;
+            }
+            if(result)  // successfully shown a progress bar using tqdm
+                Py_DECREF(result);
+            else {  // otherwise print a simple progress indicator to python stderr
+                PySys_WriteStderr("%li/%li %ss complete\r",
+                    (long int)numCompleted, (long int)numTotal, unitStr);
+            }
+        }
+    }
+
+    /** Clean up the progress bar after the end of computations (call only from the main thread) */
+    void clear()
+    {
+        if(!initialized)
+            return;
+        if(tqdmInstance) {  // clean up the progress bar
+            PyObject* result = PyObject_CallMethod(tqdmInstance, const_cast<char*>("close"), NULL);
+            Py_XDECREF(result);
+            Py_DECREF(tqdmInstance);
+        } else {  // overwrite the previously printed text (numCompleted/numTotal) with spaces
+            int numSpaces = 2 * (log10(numTotal)+1) + 12 + strlen(unitStr);
+            std::string spaces(numSpaces, ' ');
+            PySys_WriteStderr("%s\r", spaces.c_str());
+        }
+        initialized = false;
+    }
+};
 
 ///@}
 //  ------------------------------------------------------------------
@@ -690,7 +820,8 @@ public:
             if(!PyErr_Occurred())
                 result.push_back(value);
         }
-        if(result.empty()) {
+        if(result.empty() && !PyErr_Occurred()) {
+            // issue an error message but only if no previous errors already being reported
             PyErr_SetString(PyExc_TypeError,
                 ("Argument '" + std::string(key) + "', if provided, "
                 "must be a single number or an array of the same length as points").c_str());
@@ -1045,6 +1176,8 @@ protected:
     npy_intp numPoints;         // number of input points: -1 means a single point, -2 is error
     PyObject* outputObject;     // the Python object returned by the run() method;
                                 // it must be initialized by constructors of derived classes
+    volatile npy_intp numCompleted;  // the number of already completed points
+    ProgressBar progressBar;         // helper object for displaying progress indication
 public:
     /** Constructor of the base class only analyzes the input object, determines the number
         of input points and ensures that the length of each point equals inputLength.
@@ -1074,7 +1207,9 @@ public:
         inputBuffer(NULL),
         inputLength(inputLength1),
         numPoints(-2),
-        outputObject(NULL)
+        outputObject(NULL),
+        numCompleted(0),
+        progressBar(0, "point")
     {
         if(inputObject == NULL) {
             PyErr_SetString(PyExc_TypeError, "No input data provided");
@@ -1146,6 +1281,9 @@ public:
         }
         // reassign the raw input data buffer to the temporary array
         inputBuffer = static_cast<double*>(PyArray_DATA(inputArray));
+
+        // set the total number of points for the progress bar (once it became known)
+        progressBar.numTotal = numPoints;
     }
 
     // deallocate the temporary buffer containing the input array
@@ -1251,8 +1389,12 @@ public:
                     for(npy_intp indBlock=0; indBlock<numBlocks; indBlock++) {
                         if(cbrk.triggered() || stop) continue;
                         try{
-                            processManyPoints(indBlock * blockSize,
-                                std::min( (indBlock+1) * blockSize, numPoints));
+                            npy_intp start = indBlock * blockSize;
+                            npy_intp count = std::min(blockSize, numPoints - start);
+                            processManyPoints(start, start + count);
+#pragma omp atomic
+                            numCompleted += count;
+                            progressBar.update(numCompleted);
                         }
                         catch(std::exception& ex)
                         {
@@ -1266,8 +1408,12 @@ public:
                     for(npy_intp indBlock=0; indBlock<numBlocks; indBlock++) {
                         if(cbrk.triggered() || stop) continue;
                         try{
-                            processManyPoints(indBlock * blockSize,
-                                std::min( (indBlock+1) * blockSize, numPoints));
+                            npy_intp start = indBlock * blockSize;
+                            npy_intp count = std::min(blockSize, numPoints - start);
+                            processManyPoints(start, start + count);
+#pragma omp atomic
+                            numCompleted += count;
+                            progressBar.update(numCompleted);
                         }
                         catch(std::exception& ex)
                         {
@@ -1278,6 +1424,7 @@ public:
                 }
             }
 #endif
+            progressBar.clear();
             // check for any exceptional circumstances
             if(cbrk.triggered())
                 errorMessage = cbrk.message();
@@ -3441,8 +3588,6 @@ int ActionFinder_init(ActionFinderObject* self, PyObject* args, PyObject* namedA
     if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "O|O", const_cast<char**>(keywords),
         &pot_obj, &interp_flag))
     {
-        PyErr_SetString(PyExc_TypeError, "Incorrect arguments for ActionFinder constructor: "
-            "must provide an instance of Potential to work with.");
         return -1;
     }
     potential::PtrPotential pot = getPotential(pot_obj);
@@ -3690,8 +3835,6 @@ int ActionMapper_init(ActionMapperObject* self, PyObject* args, PyObject* namedA
     if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "O|d", const_cast<char**>(keywords),
         &pot_obj, &tol))
     {
-        PyErr_SetString(PyExc_TypeError, "Incorrect arguments for ActionMapper constructor: "
-            "must provide an instance of Potential and optionally the accuracy parameter 'tol'.");
         return -1;
     }
     potential::PtrPotential pot = getPotential(pot_obj);
@@ -7249,11 +7392,11 @@ static PyMethodDef Orbit_methods[] = {
 
 static PyMemberDef Orbit_members[] = {
     { const_cast<char*>("x"), T_OBJECT_EX, offsetof(OrbitObject, x), READONLY,
-      const_cast<char*>("interpolator for the x coordinate") },
+      const_cast<char*>("interpolator for the x coordinate in the inertial frame") },
     { const_cast<char*>("y"), T_OBJECT_EX, offsetof(OrbitObject, y), READONLY,
-      const_cast<char*>("interpolator for the y coordinate") },
+      const_cast<char*>("interpolator for the y coordinate in the inertial frame") },
     { const_cast<char*>("z"), T_OBJECT_EX, offsetof(OrbitObject, z), READONLY,
-      const_cast<char*>("interpolator for the z coordinate") },
+      const_cast<char*>("interpolator for the z coordinate in the inertial frame") },
     { const_cast<char*>("Omega"), T_DOUBLE, offsetof(OrbitObject, Omega), READONLY,
       const_cast<char*>("angular frequency of the rotating frame") },
     { const_cast<char*>("reversed"), T_BOOL, offsetof(OrbitObject, reversed), READONLY,
@@ -7770,36 +7913,14 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
             fail = true;
     }
 
-    // prepare to show the progress bar using the tqdm python module, if it is available
-    PyObject *tqdm_module = numOrbits>1 && verbose ? PyImport_ImportModule("tqdm") : NULL;
-    PyObject *tqdm_class  = tqdm_module ? PyObject_GetAttrString(tqdm_module, "tqdm") : NULL;
-    PyObject *tqdm_instance = NULL;
-    if(tqdm_class) {
-        PyObject
-        *args  = PyTuple_New(0),
-        *kwargs= PyDict_New(),
-        *count = PyInt_FromLong(numOrbits),
-        *unit  = PyString_FromString("orbit");
-        PyDict_SetItemString(kwargs, "total", count);
-        PyDict_SetItemString(kwargs, "unit", unit);
-        PyDict_SetItemString(kwargs, "leave", Py_False);
-        tqdm_instance = PyObject_Call(tqdm_class, args, kwargs);
-        Py_DECREF(args);
-        Py_DECREF(kwargs);
-        Py_DECREF(count);
-        Py_DECREF(unit);
-    }
-    if(numOrbits>1 && verbose && !tqdm_instance)
-        // failure to import tqdm module or create an instance of progress bar is not critical,
-        PyErr_Clear();  // suppress the error
+    // optionally show a progress bar
+    ProgressBar progressBar(numOrbits, "orbit", /*minTotalTime*/ 1.0);
 
     // set up signal handler to stop the integration on a keyboard interrupt
     utils::CtrlBreakHandler cbrk;
 
     // finally, run the orbit integration
-    volatile npy_intp numComplete = 0, prevNumComplete = 0;
-    utils::Timer timer;
-    double tprint = 0;
+    volatile npy_intp numCompleted = 0;
     std::string errorMessage;
     if(!fail) {
         // the GIL must be released when running an OpenMP-parallelized loop
@@ -7904,39 +8025,18 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
 #ifdef _OPENMP
 #pragma omp atomic
 #endif
-            ++numComplete;
-            if(numOrbits > 1 && verbose) {
-                double deltat = timer.deltaSeconds();
-                if(deltat-tprint >= 1) {
-                    tprint = deltat;
-                    PyAcquireGIL lock;
-                    PyObject* result = NULL;
-                    if(tqdm_instance) {
-                        npy_intp currNumComplete = numComplete;  // copy of the volatile value
-                        result = PyObject_CallMethod(tqdm_instance, const_cast<char*>("update"),
-                            const_cast<char*>("i"), currNumComplete-prevNumComplete);
-                        prevNumComplete = currNumComplete;
-                    }
-                    if(result)  // successfully shown a progress bar using tqdm
-                        Py_DECREF(result);
-                    else {  // otherwise print a simple progress indicator to python stderr
-                        PySys_WriteStderr("%li/%li orbits complete\r",
-                            (long int)numComplete, (long int)numOrbits);
-                    }
-                }
-            }
+            ++numCompleted;
+            if(numOrbits > 1 && verbose)
+                progressBar.update(numCompleted);
         }
     }
     if(numOrbits > 1 && verbose) {
-        if(tqdm_instance) {  // clean up the progress bar
-            PyObject* result = PyObject_CallMethod(tqdm_instance, const_cast<char*>("close"), NULL);
-            Py_XDECREF(result);
-            Py_DECREF(tqdm_instance);
-            Py_DECREF(tqdm_class);
-            Py_DECREF(tqdm_module);
-        }
-        PySys_WriteStderr("%li orbits complete (%.4g orbits/s)\n",
-            (long int)numComplete, numComplete / timer.deltaSeconds());
+        progressBar.clear();
+        double orbitsPerSec = numCompleted / progressBar.timer.deltaSeconds();
+        PySys_WriteStderr(orbitsPerSec >= 1000 ?
+            "%li orbits complete (%.0f orbits/s)\n" :
+            "%li orbits complete (%.4g orbits/s)\n",
+            (long int)numCompleted, orbitsPerSec);
     }
     if(cbrk.triggered()) {
         fail = true;
@@ -8292,7 +8392,10 @@ public:
         PyObject* result = PyObject_CallFunctionObjArgs(fnc, args, NULL);
         Py_DECREF(args);
         if(result == NULL) {
-            PyErr_Print();
+            if(PyErr_Occurred() && PyErr_ExceptionMatches(PyExc_KeyboardInterrupt))
+                throw std::runtime_error(utils::CtrlBreakHandler::message());
+            else
+                throw std::runtime_error("Exception occurred inside integrand");
         } else if(PyArray_Check(result) &&
             PyArray_NDIM((PyArrayObject*)result) == 1 &&
             PyArray_DIM ((PyArrayObject*)result, 0) == (npy_intp)npoints)
@@ -8312,10 +8415,10 @@ public:
         else
             typeerror = true;
         Py_XDECREF(result);
-        if(result == NULL)
-            throw std::runtime_error("Exception occurred inside integrand");
-        else if(typeerror)
+        if(typeerror) {
+            PyErr_SetString(PyExc_TypeError, "Invalid data type returned from user-defined function");
             throw std::runtime_error("Invalid data type returned from user-defined function");
+        }
     }
     /// same for one point (not used by integration/sampling routines, but required by the interface)
     virtual void eval(const double vars[], double values[]) const {
@@ -8687,6 +8790,14 @@ PyInit_agama(void)
     Py_INCREFx(&OrbitType);
     // deliberately not adding this class to the module
     OrbitTypePtr = &OrbitType;
+
+    // if available, use a fancy progress bar for long operations
+    PyObject *tqdmModule = PyImport_ImportModule("tqdm");
+    tqdmClass = tqdmModule ? PyObject_GetAttrString(tqdmModule, "tqdm") : NULL; // global reference
+    if(!tqdmClass)  // failure to import tqdm module is not critical, suppress the error
+        PyErr_Clear();
+    else
+        Py_DECREF(tqdmModule);
 
     return thismodule;
 }

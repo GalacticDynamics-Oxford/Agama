@@ -176,7 +176,7 @@ template<>
 inline void collectValues(const BaseDensity& src, const std::vector<coord::PosCyl>& points,
     /*output*/ double values[])
 {
-    src.evalmanyDensityCyl(points.size(), &points[0], values);   // vectorized evaluation at many point
+    src.evalmanyDensityCyl(points.size(), &points[0], values);   // vectorized evaluation at all points
 }
 
 template<>
@@ -212,6 +212,22 @@ void computeSphHarmCoefs(const BaseDensityOrPotential& src,
     unsigned int numPointsRadius = radii.size();
     if(numPointsRadius<1)
         throw std::invalid_argument("computeSphHarmCoefs: radial grid size too small");
+
+    // temporary storage for spherical-harmonic coefs at a single radius
+    std::vector<double> shcoefs(ind.size());
+
+    // shortcut for the case of spherical-harmonic density, avoiding back-and-forth SH transformations
+    const DensitySphericalHarmonic* dsh = dynamic_cast<const DensitySphericalHarmonic*>(&src);
+    if(dsh) {
+        coefs[0].assign(ind.size(), std::vector<double>(numPointsRadius));
+        for(unsigned int indR=0; indR<numPointsRadius; indR++) {
+            dsh->getCoefsAtRadius(radii[indR], &shcoefs.front());
+            for(unsigned int c=0; c<ind.size(); c++)
+                coefs[0][c][indR] = shcoefs[c];
+        }
+        return;
+    }
+
     // 0th step: initialize sph-harm transform
     const math::SphHarmTransformForward trans(ind);
 
@@ -236,7 +252,6 @@ void computeSphHarmCoefs(const BaseDensityOrPotential& src,
     collectValues(src, points, &values[0]);
 
     // 3rd step: transform these values to spherical-harmonic expansion coefficients at each radius
-    std::vector<double> shcoefs(ind.size());
     for(int q=0; q<numQuantities; q++) {
         coefs[q].assign(ind.size(), std::vector<double>(numPointsRadius));
         for(unsigned int indR=0; indR<numPointsRadius; indR++) {
@@ -1185,33 +1200,38 @@ void DensitySphericalHarmonic::getCoefs(
     computeSphHarmCoefs<BaseDensity>(*this, ind, gridRadii, /*output*/ &coefs);
 }
 
-double DensitySphericalHarmonic::densityCyl(const coord::PosCyl &pos, double /*time*/) const
+void DensitySphericalHarmonic::getCoefsAtRadius(double r, double coefs[]) const
 {
-    assert(spl[0]);  // 0th harmonic should always be present
-    // temporary array allocated on the stack
-    double* coefs = static_cast<double*>(alloca(ind.size() * sizeof(double)));
-    double r = sqrt(pow_2(pos.R) + pow_2(pos.z) );
     double rmin = gridRadii.front(), rmax = gridRadii.back();
     double logr = log(math::clip(r, rmin, rmax));  // the argument of spline functions
     // first compute the l=0 coefficient, possibly log-unscaled
-    coefs[0] = spl[0]->value(logr);
+    double coef0 = spl[0]->value(logr);
     if(logScaling)
-        coefs[0] = exp(coefs[0]);
+        coef0 = exp(coef0);
     // extrapolate if necessary
     if(r < rmin)
-        coefs[0] *= pow(r / rmin, innerSlope);
+        coef0 *= pow(r / rmin, innerSlope);
     if(r > rmax)
-        coefs[0] *= pow(r / rmax, outerSlope);
+        coef0 *= pow(r / rmax, outerSlope);
+    coefs[0] = coef0;
+    if(!logScaling)
+        coef0 = 1;
     // then compute other coefs, which are scaled by the value of l=0 coef (if using log-scaling)
     for(int m=ind.mmin(); m<=ind.mmax; m++)
         for(int l=ind.lmin(m); l<=ind.lmax; l+=ind.step) {
             unsigned int c = ind.index(l, m);
             if(c==0)
                 continue;
-            coefs[c] = spl[c]->value(logr);
-            if(logScaling)
-                coefs[c] *= coefs[0];
+            coefs[c] = spl[c]->value(logr) * coef0;
         }
+}
+
+double DensitySphericalHarmonic::densityCyl(const coord::PosCyl &pos, double /*time*/) const
+{
+    assert(spl[0]);  // 0th harmonic should always be present
+    // temporary array of SH coefs allocated on the stack
+    double* coefs = static_cast<double*>(alloca(ind.size() * sizeof(double)));
+    getCoefsAtRadius(sqrt(pow_2(pos.R) + pow_2(pos.z)), coefs);
     double tau = pos.z == 0 ? 0 : pos.z / (sqrt(pow_2(pos.R) + pow_2(pos.z)) + pos.R);
     return math::sphHarmTransformInverse(ind, coefs, tau, pos.phi);
 }
@@ -1555,15 +1575,15 @@ MultipoleInterp1d::MultipoleInterp1d(
     const std::vector<double> &radii,
     const std::vector< std::vector<double> > &Phi,
     const std::vector< std::vector<double> > &dPhi) :
-    ind(getIndicesFromCoefs(Phi, dPhi))
+    ind(getIndicesFromCoefs(Phi, dPhi)),
+    // whether to perform logarithmic scaling for the amplitude of l=0 term:
+    logScaling(true)  // will be enabled if all values of Phi_00(r) are negative
 {
     unsigned int gridSizeR = radii.size();
     assert(gridSizeR >= MULTIPOLE_MIN_GRID_SIZE &&
         ind.size() == Phi.size() && ind.size() == dPhi.size() &&
         Phi[0].size() == gridSizeR && ind.lmax >= 0 && ind.mmax <= ind.lmax);
 
-    // whether to perform logarithmic scaling for the amplitude of l=0 term
-    logScaling = true;  // will be enabled if all values of Phi_00(r) are negative
     // compute the extrapolation coefficients at small r;
     // if s>0, the potential is finite at r=0 and equal to W
     double s, U, W;

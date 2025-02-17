@@ -188,7 +188,7 @@ public:
     constructed for a given combination of potential and density.
 */
 class QuasiSphericalCOM: public QuasiSpherical {
-    const double invPhi0, beta0, r_a;
+    const double invPhi0, beta0, r_a, rotFrac, Jphi0;
     const math::LogLogSpline df;
 public:
     /** construct the DF for the provided density/potential pair and anisotropy parameters:
@@ -201,9 +201,14 @@ public:
         class into a function of one variable;
         \param[in]  beta0      is the value of anisotropy coefficient at r-->0, should be -1/2<=beta0<=1
         \param[in]  r_a        is the Osipkov-Merritt anisotropy radius (may be infinite).
+        \param[in]  rotFrac    optionally introduces some rotation by multiplying the DF by
+        [1 + rotFrac * tanh(Jphi/Jphi0)];
+        rotFrac is the relative amplitude of the odd-Jphi component (-1 to 1, 0 means no rotation).
+        \param[in]  Jphi0      controls the sharpness of transition between positive and negative
+        parts of the azimuthal velocity distribution, as defined by the above expression.
     */
     QuasiSphericalCOM(const math::IFunction& density, const math::IFunction& potential,
-        double beta0=0, double r_a=INFINITY);
+        double beta0=0, double r_a=INFINITY, double rotFrac=0, double Jphi0=0);
 
     using QuasiSpherical::evalDeriv;  // bring both overloaded functions into scope
 
