@@ -708,7 +708,15 @@ PyInit_agamatest(void) {
         say('GLPK library (optional) is not found, ignored\n')
 
     # [7]: test if UNSIO is present (optional), download and compile if needed
-    if not MSVC and runCompileShared('#include <uns.h>\nvoid run() { uns::CunsOut("temp", "nemo"); }\n', flags=' '.join(
+    try:
+        # Installed & available for python (maybe via pip)
+        import unsio
+        have_unsio = True
+    except ImportError:
+        have_unsio = False
+    if have_unsio:
+        pass
+    elif not MSVC and runCompileShared('#include <uns.h>\nvoid run() { uns::CunsOut("temp", "nemo"); }\n', flags=' '.join(
             COMPILE_FLAGS_LIB + LINK_FLAGS_ALL + LINK_FLAGS_LIB + LINK_FLAGS_LIB_AND_EXE_STATIC + ['-lunsio', '-lnemo'])):
         COMPILE_FLAGS_LIB += ['-DHAVE_UNSIO']
         LINK_FLAGS_LIB_AND_EXE_STATIC += ['-lunsio', '-lnemo']
