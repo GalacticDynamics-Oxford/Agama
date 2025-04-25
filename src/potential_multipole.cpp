@@ -500,7 +500,7 @@ void chooseGridRadii(const particles::ParticleArray<coord::PosCyl>& particles,
     A safety measure is to ensure that the slope of l>0 harmonics (s) is no smaller/larger
     than that of the l=0 (s0) for inward/outward extrapolation.
 */
-void computeExtrapolationCoefs(double Phi1, double Phi2, double dPhi1,
+void computeExtrapolationCoefs(double Phi1, double Phi2, double dPhi1, double dPhi2,
     double r1, double r2, int v, double s0, /*output*/ double& s, double& U, double& W)
 {
     double lnr = log(r2/r1);
@@ -541,6 +541,19 @@ void computeExtrapolationCoefs(double Phi1, double Phi2, double dPhi1,
         U = r1*dPhi1 - v*Phi1;
         W = Phi1;
     }
+    if(v==0) {
+        // test an alternative hypothesis that Phi = W + U * (r/r1)^2 + V * (r/r1)^3,
+        // by comparing the predictions for dPhi/dr|_{r=r2} from the two alternative asymptotic forms
+        double dPhi2a = U * s * exp(s*lnr) / r2;
+        double dPhi2b = r2/r1 * (6 * r1 * (Phi2-Phi1) / (r2-r1) - dPhi1 * (2*r1+r2)) / (2*r2+r1);
+        if(fabs(dPhi2-dPhi2b) < fabs(dPhi2-dPhi2a)) {
+            // adopt a simpler extrapolation: Phi = W + U * (r/r1)^2, forget about the next term
+            // (impose a constant-density core instead of a weak cusp inferred by the default method)
+            s = 2;
+            U = 0.5 * r1 * dPhi1;
+            W = Phi1 - U;
+        }
+    }
 }
 
 /** construct asymptotic power-law potential for extrapolation to small or large radii
@@ -571,7 +584,7 @@ PtrPotential initAsympt(const std::vector<double>& radii,
     // determine the coefficients for potential extrapolation at small and large radii
     for(unsigned int c=0; c<nc; c++) {
         int l = math::SphHarmIndices::index_l(c);
-        computeExtrapolationCoefs(Phi[c][index1], Phi[c][index2], dPhi[c][index1],
+        computeExtrapolationCoefs(Phi[c][index1], Phi[c][index2], dPhi[c][index1], dPhi[c][index2],
             radii[index1], radii[index2], inner ? l : -l-1, /*slope of the l=0 harmonic*/ S[0],
             /*output*/ S[c], U[c], W[c]);
         if(l==0)
@@ -1148,22 +1161,47 @@ DensitySphericalHarmonic::DensitySphericalHarmonic(const std::vector<double> &_g
                 logScaling &= coefs[0][k] > 0;
             for(unsigned int k=0; k<gridSizeR; k++)
                 tmparr[k] = logScaling ? log(coefs[0][k]) : coefs[0][k];
-            spl[0].reset(new math::CubicSpline(gridLogR, tmparr));
+
+            // attempt to determine the inner slope and limiting value at r=0 from 3 innermost points
+            double innerCoef = NAN, derivLeft = NAN;
+            if(gridSizeR >= 3)
+                math::findAsymptote(gridRadii[0], gridRadii[1], gridRadii[2],
+                    coefs[0][0], coefs[0][1], coefs[0][2], innerCoef, innerSlope, centralValue);
+            if(isFinite(innerSlope + innerCoef + centralValue)) {  // rho = a*r^b+c
+                // if the input density was positive everywhere, make sure that the extrapolation
+                // remains so even when the density declines towards small radii
+                if(logScaling && innerSlope>0 && centralValue<0) {
+                    centralValue = 0;
+                    innerSlope = log(coefs[0][1]/coefs[0][0]) / log(gridRadii[1]/gridRadii[0]);
+                }
+                derivLeft = innerCoef * innerSlope * pow(gridRadii[0], innerSlope);
+                if(logScaling)
+                    derivLeft /= coefs[0][0];
+            } else { // fit from 3 points failed, use a simpler power-law asymptotic rho ~ a*r^b
+                innerSlope = NAN;  // will be determined after the spline is constructed
+            }
+
+            spl[0].reset(new math::CubicSpline(gridLogR, tmparr, false, derivLeft));
             // when using log-scaling, the endpoint derivatives of spline are simply
             // d[log(rho(log(r)))] / d[log(r)] = power-law indices of the inner/outer slope;
             // without log-scaling, the endpoint derivatives of spline are
             // d[rho(log(r))] / d[log(r)] = power-law indices multiplied by the values of rho.
-            spl[0]->evalDeriv(gridLogR.front(), NULL, &innerSlope);
-            spl[0]->evalDeriv(gridLogR.back(),  NULL, &outerSlope);
+            spl[0]->evalDeriv(gridLogR[gridSizeR-1],  NULL, &outerSlope);
             if(!logScaling) {
-                if(coefs[0].front() != 0)
-                    innerSlope /= coefs[0].front();
-                else
-                    innerSlope = 0;
-                if(coefs[0].back() != 0)
-                    outerSlope /= coefs[0].back();
+                if(coefs[0][gridSizeR-1] != 0)
+                    outerSlope /= coefs[0][gridSizeR-1];
                 else
                     outerSlope = 0;
+            }
+            if(innerSlope!=innerSlope) {  // was not determined earlier from 3-point asymptote
+                centralValue = 0;
+                spl[0]->evalDeriv(gridLogR[0], NULL, &innerSlope);
+                if(!logScaling) {
+                    if(coefs[0][0] != 0)
+                        innerSlope /= coefs[0][0];
+                    else
+                        innerSlope = 0;
+                }
             }
 
             // We check (and correct if necessary) the logarithmic slope of density profile
@@ -1175,12 +1213,22 @@ DensitySphericalHarmonic::DensitySphericalHarmonic(const std::vector<double> &_g
             // but the potential tends to a finite limit as long as the slope is less than -2.
             // Both these 'dangerous' semi-infinite regimes are allowed here,
             // but likely may result in problems elsewhere.
-            if(!isFinite(innerSlope))
+            if(!isFinite(innerSlope)) {
+                centralValue = coefs[0][0];
                 innerSlope = 0;
+            }
             if(!isFinite(outerSlope))
-                outerSlope = coefs[0].back()==0 ? 0 : -4.;
+                outerSlope = coefs[0][gridSizeR-1]==0 ? 0 : -4.;
             innerSlope = std::max(innerSlope, -2.8);
             outerSlope = std::min(outerSlope, -2.2);
+            FILTERMSG(utils::VL_DEBUG, "DensitySphericalHarmonic",
+                "rho ~ " + utils::toString(innerCoef) +
+                "*r^" + utils::toString(innerSlope) +
+                (centralValue>=0 ? "+" : "") + utils::toString(centralValue) +
+                " at r<" + utils::toString(gridRadii[0]) + "; "
+                "rho ~ " + utils::toString(coefs[0][gridSizeR-1] / pow(gridRadii.back(), outerSlope)) +
+                "*r^" + utils::toString(outerSlope) +
+                " at r>" + utils::toString(gridRadii[gridSizeR-1]));
         } else {
             // values of l!=0 components are normalized to the value of l=0 component at each radius,
             // if the latter are non-zero everywhere (i.e. when using log-scaling),
@@ -1210,7 +1258,7 @@ void DensitySphericalHarmonic::getCoefsAtRadius(double r, double coefs[]) const
         coef0 = exp(coef0);
     // extrapolate if necessary
     if(r < rmin)
-        coef0 *= pow(r / rmin, innerSlope);
+        coef0 = (coef0 - centralValue) * pow(r / rmin, innerSlope) + centralValue;
     if(r > rmax)
         coef0 *= pow(r / rmax, outerSlope);
     coefs[0] = coef0;
@@ -1587,8 +1635,8 @@ MultipoleInterp1d::MultipoleInterp1d(
     // compute the extrapolation coefficients at small r;
     // if s>0, the potential is finite at r=0 and equal to W
     double s, U, W;
-    computeExtrapolationCoefs(Phi[0][0], Phi[0][1], dPhi[0][0], radii[0], radii[1], 0, /*unused*/NAN,
-        /*output*/s, U, W);
+    computeExtrapolationCoefs(Phi[0][0], Phi[0][1], dPhi[0][0], dPhi[0][1], radii[0], radii[1],
+        /*l*/0, /*unused*/NAN, /*output*/s, U, W);
     invPhi0 = s>0 ? 1./W : 0;
 
     // set up a logarithmic radial grid
@@ -1749,8 +1797,8 @@ MultipoleInterp2d::MultipoleInterp2d(
     // compute the extrapolation coefficients at small r;
     // if s>0, the potential is finite at r=0 and equal to W
     double s, U, W;
-    computeExtrapolationCoefs(Phi[0][0], Phi[0][1], dPhi[0][0], radii[0], radii[1], 0, /*unused*/NAN,
-        /*output*/s, U, W);
+    computeExtrapolationCoefs(Phi[0][0], Phi[0][1], dPhi[0][0], dPhi[0][1], radii[0], radii[1],
+        /*l*/0, /*unused*/NAN, /*output*/s, U, W);
     invPhi0 = s>0 ? 1./W : 0;
 
     // set up a 2D grid in ln(r) and tau = cos(theta)/(sin(theta)+1):
@@ -2071,7 +2119,9 @@ void computePotentialCoefsBSE(
     int mstep = (ind.symmetry() & coord::ST_TRIAXIAL) == coord::ST_TRIAXIAL ? 2 : 1;
     bool oddl = (ind.symmetry() & coord::ST_REFLECTION) != coord::ST_REFLECTION;  // use odd l?
 
-    coefs.assign(ind.size(), std::vector<double>(nmax+1, 0.));
+    coefs.assign(ind.size(), std::vector<double>(nmax+1));
+    // residuals (extra bits of precision) for the compensated summation
+    std::vector< std::vector<double> > resid(ind.size(), std::vector<double>(nmax+1));
     std::string errorMsg;
     utils::CtrlBreakHandler cbrk;  // catch Ctrl-Break keypress
     bool stop = false;
@@ -2079,8 +2129,12 @@ void computePotentialCoefsBSE(
 #pragma omp parallel
 #endif
     {
-        // thread-local temporary arrays for expansion coefs
-        std::vector<std::vector<double> > thread_coefs(ind.size(), std::vector<double>(nmax+1, 0.));
+        // thread-local temporary arrays for expansion coefs, storing values in quad precision
+        // and employing the Kahan-Babuska-Neumaier compensated summation algorithm to ensure
+        // that the result is independent of the number of threads and their order of execution
+        // (not that we really need all 16 digits of precision here, but only for reproducibility)
+        std::vector<std::vector<std::pair<double, double> > >
+            thread_coefs(ind.size(), std::vector<std::pair<double, double> >(nmax+1));
 #ifdef _OPENMP
 #pragma omp for schedule(static)
 #endif
@@ -2111,8 +2165,15 @@ void computePotentialCoefsBSE(
                         P = Q;
                         Q = N;
                         for(int c=cmin; c<=cmax; c+=mstep)
-                            if(!harmonics[c].empty())
-                                thread_coefs[c][n] += Pnl * harmonics[c][i];
+                            if(!harmonics[c].empty()) {
+                                // accumulate extra precision bits in thread_coefs.second
+                                double val1 = thread_coefs[c][n].first;
+                                double val2 = Pnl * harmonics[c][i];
+                                double tmp  = val1 + val2;
+                                thread_coefs[c][n].second += fabs(val1) > fabs(val2) ?
+                                    (val1 - tmp) + val2 : (val2 - tmp) + val1;
+                                thread_coefs[c][n].first = tmp;
+                            }
                     }
                 }
             }
@@ -2127,14 +2188,28 @@ void computePotentialCoefsBSE(
 #endif
         {
             for(int m=ind.mmin(); m<=ind.mmax; m++)
-                for(int l=ind.lmin(m); l<=ind.lmax; l+=ind.step)
-                    math::blas_daxpy(1, thread_coefs[ind.index(l, m)], coefs[ind.index(l, m)]);
+                for(int l=ind.lmin(m); l<=ind.lmax; l+=ind.step) {
+                    unsigned int c = ind.index(l, m);
+                    for(unsigned int n=0; n<=nmax; n++) {
+                        double val1 = thread_coefs[c][n].first;
+                        double val2 = coefs[c][n];
+                        double tmp  = val1 + val2;
+                        resid[c][n] += (fabs(val1) > fabs(val2) ?
+                            (val1 - tmp) + val2 : (val2 - tmp) + val1) + thread_coefs[c][n].second;
+                        coefs[c][n] = tmp;
+                    }
+                }
         }
     }
     if(cbrk.triggered())
         throw std::runtime_error(cbrk.message());
     if(!errorMsg.empty())
         throw std::runtime_error("computeDensityCoefsBSE: " + errorMsg);
+
+    // final round of corrections for the compensated summation
+    for(int m=ind.mmin(); m<=ind.mmax; m++)
+        for(int l=ind.lmin(m); l<=ind.lmax; l+=ind.step)
+            math::blas_daxpy(1, resid[ind.index(l, m)], coefs[ind.index(l, m)]);
 }
 
 } // end internal namespace

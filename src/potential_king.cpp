@@ -27,13 +27,15 @@ class KingPotentialIntegrator: public math::IOdeSystem {
     const double gamma;  ///< value of Gamma function for trunc+3/2
     const double norm;   ///< normalization constant for the density
     const double phicrit;///< smallest value below which we use analytic approximation for gammainc
+    const double& rbegin;///< radius at the beginning of the current step, updated by the calling code
 public:
-    KingPotentialIntegrator(double _W0, double _trunc) :
+    KingPotentialIntegrator(double _W0, double _trunc, const double& _rbegin) :
         W0(_W0),
         trunc(_trunc),
         gamma(math::gamma(trunc+1.5)),
         norm(exp(-W0) / (gamma - math::gammainc(trunc+1.5, W0))),
-        phicrit(1e-3 * pow_3(trunc+0.1))
+        phicrit(1e-3 * pow_3(trunc+0.1)),
+        rbegin(_rbegin)
     {}
 
     /// dimensionless density as a function of dimensionless potential
@@ -45,9 +47,9 @@ public:
             norm * pow(phi, trunc+1.5) / (trunc+1.5) * (1 + phi / (trunc+2.5));
     }
 
-    virtual void eval(const double r, const double y[], double dydr[]) const
+    virtual void eval(const double deltar, const double y[], double dydr[], double* /*ignored*/) const
     {
-        double phi = y[0], dphidr = y[1];
+        double r = rbegin + deltar, phi = y[0], dphidr = y[1];
         dydr[0] = dphidr;
         dydr[1] = r==0 ? -3 * rho(phi) : -9 * rho(phi) - 2/r * dphidr;
     }
@@ -59,19 +61,19 @@ public:
 /// helper function for locating the radius where phi(r)=0
 class FindRadiusFromPhi: public math::IFunction {
 public:
-    FindRadiusFromPhi(const math::BaseOdeSolver& _solver, double _phi0) :
-        solver(_solver), phi0(_phi0) {};
-    /** used in root-finder to locate the root phi(r)=phi0 */
-    virtual void evalDeriv(const double r, double* val, double* der, double*) const
+    FindRadiusFromPhi(const math::BaseOdeStepper& _stepper, double _phi0) :
+        stepper(_stepper), phi0(_phi0) {};
+    /** used in root-finder to locate the root phi(rprev+deltar)=phi0 */
+    virtual void evalDeriv(const double deltar, double* val, double* der, double*) const
     {
         if(val)
-            *val = solver.getSol(r, 0)-phi0;  // phi-phi0
+            *val = stepper.getSol(deltar, 0) - phi0;  // phi-phi0
         if(der)
-            *der = solver.getSol(r, 1);  // dphi/dr
+            *der = stepper.getSol(deltar, 1);  // dphi/dr
     }
     virtual unsigned int numDerivs() const { return 1; }
 private:
-    const math::BaseOdeSolver& solver;
+    const math::BaseOdeStepper& stepper;
     const double phi0;
 };
 
@@ -90,19 +92,21 @@ void createKingModel(double mass, double scaleRadius, double W0, double trunc,
 
     // compute the potential in dimensionless units by solving an ODE
     double vars[2] = {W0, 0};
-    KingPotentialIntegrator odeSystem(W0, trunc);
-    math::OdeSolverDOP853 solver(odeSystem, ACCURACY_INTEGR);
-    solver.init(vars);
-    bool finished = false;
     double rcurr = 0, phicurr = W0, phitrans = NAN;
+    KingPotentialIntegrator odeSystem(W0, trunc,
+        /*variable containing the radius at the beginning of the current step*/ rcurr);
+    math::OdeStepperDOP853 stepper(odeSystem, ACCURACY_INTEGR);
+    stepper.init(vars);
+    bool finished = false;
     int numStepsODE = 0;
     while(!finished) {
-        if(solver.doStep() <= 0 || ++numStepsODE >= MAX_NUM_STEPS_ODE) {
+        double deltar = stepper.doStep(INFINITY);
+        if(deltar <= 0 || ++numStepsODE >= MAX_NUM_STEPS_ODE) {
             finished = true;
         } else {
-            double rprev = rcurr, phiprev = phicurr;
-            rcurr = solver.getTime();
-            phicurr = solver.getSol(rcurr, 0);
+            double phiprev = phicurr, rprev = rcurr;
+            rcurr = rprev + deltar;
+            phicurr = stepper.getSol(/*offset from rprev at the end of this step*/ deltar, 0);
             // when we approach the outer boundary (phi=0), output a more densely spaced radial grid,
             // to improve the accuracy of interpolation of density profile.
             // Instead of placing one point at the end of each radial integration step,
@@ -111,16 +115,17 @@ void createKingModel(double mass, double scaleRadius, double W0, double trunc,
             if(phicurr < phiprev * 0.75 || phitrans > 0) {
                 if(phitrans != phitrans)
                     phitrans = phiprev;  // switch to the predefined grid mode
-                const int ngrid=8;
-                for(int igrid=ngrid-1; igrid>=0; igrid--) {
-                    double phiinter = phitrans * pow_2(igrid*1./ngrid);  // quadratically spaced grid
+                const int NGRID=8;
+                for(int igrid=NGRID-1; igrid>=0; igrid--) {
+                    double phiinter = phitrans * pow_2(igrid*1./NGRID);  // quadratically spaced grid
                     if(phiinter < phiprev && phiinter >= phicurr) {
-                        // the predefined grid is specified for phi, convert it to radius
-                        double rinter = math::findRoot(
-                            FindRadiusFromPhi(solver, phiinter), rprev, rcurr, ACCURACY_ROOT);
-                        radii. push_back(rinter);
+                        // the predefined grid is specified for phi, convert it to radius;
+                        // deltarinter is the offset in radius from rprev (between 0 and deltar)
+                        double deltarinter = math::findRoot(
+                            FindRadiusFromPhi(stepper, phiinter), 0, deltar, ACCURACY_ROOT);
+                        radii. push_back(rprev + deltarinter);
                         phi.   push_back(phiinter);
-                        dphidr.push_back(solver.getSol(rinter, 1));
+                        dphidr.push_back(stepper.getSol(deltarinter, 1));
                         rho.   push_back(odeSystem.rho(phiinter));
                         if(phiinter == 0)    // the last grid point is exactly at the truncation radius
                             finished = true;
@@ -130,7 +135,7 @@ void createKingModel(double mass, double scaleRadius, double W0, double trunc,
                 // store the values of phi, dphi/dr and rho at the end of the current radial step
                 radii. push_back(rcurr);
                 phi.   push_back(phicurr);
-                dphidr.push_back(solver.getSol(rcurr, 1));
+                dphidr.push_back(stepper.getSol(/*offset from rprev*/ deltar, 1));
                 rho.   push_back(odeSystem.rho(phicurr));
             }
         }

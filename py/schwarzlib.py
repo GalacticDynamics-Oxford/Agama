@@ -284,7 +284,9 @@ def getBinnedApertures(xcoords, ycoords, bintags):
         if edges>=1000:
             raise ValueError('Lost in the way for bin '+str(b))
         polygons.append( _numpy.array(vertices) )
-    return _numpy.array(polygons, dtype=object)
+    result = _numpy.empty(len(polygons), dtype=object)
+    result[:] = polygons
+    return result #_numpy.array(polygons, dtype=object)  <-- this doesn't work when all arrays are of the same size
 
 
 def writeApertures(filename, polygons):
@@ -302,10 +304,11 @@ def readApertures(filename):
     Read the list of polygons from a text file
     '''
     with open(filename) as dfile:
-        return _numpy.array([
-            _numpy.array([float(a) for a in b.split()]).reshape(-1,2)
-            for b in dfile.read().split('\n\n')
-        ], dtype=object)
+        polygons = [ _numpy.array([float(a) for a in b.split()]).reshape(-1,2)
+            for b in dfile.read().split('\n\n') ]
+    result = _numpy.empty(len(polygons), dtype=object)
+    result[:] = polygons
+    return result
 
 
 def makeGridForTargetLOSVD(polygons, psf, psfwingfrac=0.99, psfcorefrac=0.2, pixelmult=1.0, maxsize=100):

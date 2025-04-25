@@ -12,7 +12,7 @@ static const double ROUNDOFF = 10*DBL_EPSILON;
 
 //---- RuntimeTrajectory ----//
 
-bool RuntimeTrajectory::processTimestep(const double tbegin, const double tend)
+bool RuntimeTrajectory::processTimestep(const double tbegin, const double timestep)
 {
     if(t0!=t0)
         t0 = tbegin;   // record the first ever moment of time
@@ -21,26 +21,27 @@ bool RuntimeTrajectory::processTimestep(const double tbegin, const double tend)
         // which always contains the current orbital state and time
         if(trajectory.empty())
             trajectory.resize(1);
-        trajectory[0].first = orbint.getSol(tend);
-        trajectory[0].second = tend;
+        trajectory[0].first = orbint.getSol(timestep);  // solution at the end of this timestep
+        trajectory[0].second = tbegin + timestep;
     } else if(samplingInterval > 0) {
         // store trajectory at regular intervals of time
-        double sign = tend>=tbegin ? +1 : -1;  // integrating forward or backward in time
+        double sign = timestep>=0 ? +1 : -1;  // integrating forward or backward in time
+        double tend = tbegin + timestep;
         double dtroundoff = ROUNDOFF * fmax(fmax(fabs(tend), fabs(tbegin)), fabs(t0));
-        ptrdiff_t ibegin = static_cast<ptrdiff_t>((sign * (tbegin-t0) - dtroundoff) / samplingInterval);
-        ptrdiff_t iend   = static_cast<ptrdiff_t>((sign * (tend-t0)   + dtroundoff) / samplingInterval);
+        ptrdiff_t iout = static_cast<ptrdiff_t>(ceil( sign * (tbegin-t0) / samplingInterval));
+        ptrdiff_t iend = static_cast<ptrdiff_t>((sign * (tend-t0) + dtroundoff) / samplingInterval);
         trajectory.resize(iend + 1);
-        for(ptrdiff_t iout=ibegin; iout<=iend; iout++) {
-            double tout = sign * samplingInterval * iout + t0;
-            if(sign * tout >= sign * tbegin - dtroundoff && sign * tout <= sign * tend + dtroundoff)
-                trajectory[iout] = Trajectory::value_type(orbint.getSol(tout), tout);
+        for(; iout <= iend; iout++) {
+            double timeout = sign * samplingInterval * iout + t0;
+            double offsetout = math::clip(sign * (timeout - tbegin), 0.0, sign * timestep) * sign;
+            trajectory[iout] = Trajectory::value_type(orbint.getSol(offsetout), timeout);
         }
     } else {
         // store trajectory at every integration timestep
         if(trajectory.empty())  // add the initial point
-            trajectory.push_back(Trajectory::value_type(orbint.getSol(tbegin), tbegin));
+            trajectory.push_back(Trajectory::value_type(orbint.getSol(0), tbegin));
         // add the current point (at the end of the timestep)
-        trajectory.push_back(Trajectory::value_type(orbint.getSol(tend), tend));
+        trajectory.push_back(Trajectory::value_type(orbint.getSol(timestep), tbegin+timestep));
     }
     return true;
 }
@@ -48,48 +49,61 @@ bool RuntimeTrajectory::processTimestep(const double tbegin, const double tend)
 
 //---- OrbitIntegrator ----//
 
-coord::PosVelCar BaseOrbitIntegrator::run(const double totalTime)
+coord::PosVelCar BaseOrbitIntegrator::run(const double timeTotal)
 {
-    if(totalTime==0 || !isFinite(totalTime))  // don't bother
-        return getSol(solver->getTime());
+    double timeEnd = timeBegin + timeTotal, timeStep = 0;
+    if(timeTotal==0 || !isFinite(timeEnd)) {  // don't bother - return the current state
+        bool keepGoing = true;
+        for(size_t i=0; keepGoing && i<fncs.size(); i++)
+            keepGoing &= fncs[i]->processTimestep(timeBegin, timeStep);
+        return getSol(timeStep);
+    }
     size_t numSteps = 0;
-    double sign = totalTime>0 ? +1 : -1;   // integrate forward (+1) or backward (-1) in time
-    double currentTime = solver->getTime(), endTime = totalTime + currentTime;
-    while(true) {
-        if(!(solver->doStep(sign>0 ? +0.0 : -0.0) * sign > 0.)) {
+    double sign = timeTotal>0 ? +1 : -1;   // integrate forward (+1) or backward (-1) in time
+    // on entry, timeBegin contains the initial time set by init(),
+    // and it will be updated after every timestep is completed and processed by runtime fncs.
+    while(timeBegin != timeEnd) {
+        double timeRemaining = timeEnd - timeBegin;
+        // actual length of the step taken is smaller than timeRemaining until the very last step
+        timeStep = stepper->doStep(timeRemaining);
+        if(!(timeStep * sign > 0.)) {
             // signal of error
-            FILTERMSG(utils::VL_WARNING,
-                "OrbitIntegrator", "terminated at t="+utils::toString(currentTime));
+            FILTERMSG(utils::VL_WARNING, "OrbitIntegrator",
+                "terminated at t=" + utils::toString(timeBegin) +
+                ", timestep=" + utils::toString(timeStep));
             break;
         }
-        double prevTime = currentTime;
-        currentTime = fmin(solver->getTime()*sign, endTime*sign) * sign;
-        bool contin = true;
-        for(size_t i=0; contin && i<fncs.size(); i++)
-            contin &= fncs[i]->processTimestep(prevTime, currentTime);
-        if(!contin || currentTime*sign >= endTime*sign || ++numSteps >= maxNumSteps)
+        bool keepGoing = true;
+        for(size_t i=0; keepGoing && i<fncs.size(); i++)
+            keepGoing &= fncs[i]->processTimestep(timeBegin, timeStep);
+        timeBegin = timeStep == timeRemaining ? timeEnd : timeBegin + timeStep;
+        if(!keepGoing || ++numSteps >= maxNumSteps)
             break;
     }
-    return getSol(currentTime);
+    return getSol(timeStep);  // last point on the trajectory
 }
 
 template<typename CoordT>
-void OrbitIntegrator<CoordT>::init(const coord::PosVelCar& ic, double time)
+void OrbitIntegrator<CoordT>::init(const coord::PosVelCar& ic, double newTime)
 {
+    if(newTime == newTime)
+        timeBegin = newTime;
     double posvel[6];
     coord::toPosVel<coord::Car, CoordT>(ic).unpack_to(posvel);
-    solver->init(posvel, time);
+    stepper->init(posvel);
 }
 
 // a different implementation for the cartesian case, where the integration is performed
 // in the inertial frame, while the input/output coords are provided in the rotating frame
 template<>
-void OrbitIntegrator<coord::Car>::init(const coord::PosVelCar& ic, double time)
+void OrbitIntegrator<coord::Car>::init(const coord::PosVelCar& ic, double newTime)
 {
+    if(newTime == newTime)
+        timeBegin = newTime;
     double posvel[6];
     if(Omega) {
-        double ca=1, sa=0, t = time==time ? time : solver->getTime();
-        math::sincos(Omega * t, sa, ca);
+        double ca=1, sa=0;
+        math::sincos(Omega * timeBegin, sa, ca);
         posvel[0] = ic.x *ca - ic.y *sa;
         posvel[1] = ic.y *ca + ic.x *sa;
         posvel[2] = ic.z;
@@ -99,19 +113,19 @@ void OrbitIntegrator<coord::Car>::init(const coord::PosVelCar& ic, double time)
     }
     else
         ic.unpack_to(posvel);
-    solver->init(posvel, time);
+    stepper->init(posvel);
 }
 
 template<>
-coord::PosVelCar OrbitIntegrator<coord::Car>::getSolNative(double time) const
+coord::PosVelCar OrbitIntegrator<coord::Car>::getSolNative(double timeOffset) const
 {
     double data[6];
     for(int i=0; i<6; i++)
-        data[i] = solver->getSol(time, i);
+        data[i] = stepper->getSol(timeOffset, i);
     if(Omega) {
         // integration is performed in the inertial frame; transform output to the rotating frame
         double ca=1, sa=0;
-        math::sincos(Omega * time, sa, ca);
+        math::sincos(Omega * (timeOffset + timeBegin), sa, ca);
         return coord::PosVelCar(data[0]*ca + data[1]*sa, data[1]*ca - data[0]*sa, data[2],
                                 data[3]*ca + data[4]*sa, data[4]*ca - data[3]*sa, data[5]);
     } else
@@ -120,11 +134,11 @@ coord::PosVelCar OrbitIntegrator<coord::Car>::getSolNative(double time) const
 
 // retrieve and normalize the position-velocity from the ODE integrator [rectify cases of r<0 or R<0]
 template<>
-coord::PosVelCyl OrbitIntegrator<coord::Cyl>::getSolNative(double time) const
+coord::PosVelCyl OrbitIntegrator<coord::Cyl>::getSolNative(double timeOffset) const
 {
     double data[6];
     for(int i=0; i<6; i++)
-        data[i] = solver->getSol(time, i);
+        data[i] = stepper->getSol(timeOffset, i);
     if(data[0] < 0) {
         data[2] += M_PI;
         data[0]  = -data[0];
@@ -135,11 +149,11 @@ coord::PosVelCyl OrbitIntegrator<coord::Cyl>::getSolNative(double time) const
 }
 
 template<>
-coord::PosVelSph OrbitIntegrator<coord::Sph>::getSolNative(double time) const
+coord::PosVelSph OrbitIntegrator<coord::Sph>::getSolNative(double timeOffset) const
 {
     double data[6];
     for(int i=0; i<6; i++)
-        data[i] = solver->getSol(time, i);
+        data[i] = stepper->getSol(timeOffset, i);
     double r = data[0];
     double phi = data[2];
     int signr = 1, signt = 1;
@@ -166,63 +180,89 @@ coord::PosVelSph OrbitIntegrator<coord::Sph>::getSolNative(double time) const
 }
 
 template<>
-void OrbitIntegrator<coord::Car>::eval(const double time, const double x[], double dxdt[]) const
+void OrbitIntegrator<coord::Car>::eval(const double timeOffset, const double xv[],
+    /*output*/ double dxdt[], double* accFac) const
 {
     double ca=1, sa=0;
     if(Omega)
-        math::sincos(Omega * time, sa, ca);
+        math::sincos(Omega * (timeBegin + timeOffset), sa, ca);
     // it appears to be more efficient to perform the integration in an inertial frame,
     // and rotate the potential instead (same as adding the Rotating modifier to the potential,
     // but storing the resulting orbit in the rotating frame)
+    double Epot;
     coord::GradCar grad;
-    potential.eval(coord::PosCar(x[0]*ca + x[1]*sa, x[1]*ca - x[0]*sa, x[2]), NULL, &grad, NULL, time);
+    potential.eval(coord::PosCar(xv[0]*ca + xv[1]*sa, xv[1]*ca - xv[0]*sa, xv[2]),
+        accFac ? &Epot : NULL, &grad, NULL, timeBegin + timeOffset);
     // time derivative of position
-    dxdt[0] = x[3];
-    dxdt[1] = x[4];
-    dxdt[2] = x[5];
+    dxdt[0] = xv[3];
+    dxdt[1] = xv[4];
+    dxdt[2] = xv[5];
     // time derivative of velocity
     dxdt[3] = -grad.dx*ca + grad.dy*sa;
     dxdt[4] = -grad.dy*ca - grad.dx*sa;
     dxdt[5] = -grad.dz;
+    if(accFac) {
+        double Ekin = 0.5 * (pow_2(xv[3]) + pow_2(xv[4]) + pow_2(xv[5]));
+        *accFac = fmin(1, fabs(Epot + Ekin) / fmax(fabs(Epot), Ekin));
+    }
 }
 
 template<typename CoordT>
-void OrbitIntegrator<CoordT>::eval(const double, const double[], double[], double[]) const
+void OrbitIntegrator<CoordT>::eval2(const double, const double[], double[], double[], double*) const
 {
-    throw std::runtime_error("Hermite integration in non-Cartesian coordinates is not implemented");
+    throw std::runtime_error("2nd order ODE integration in non-Cartesian coordinates is not implemented");
 }
 
 template<>
-void OrbitIntegrator<coord::Car>::eval(const double time, const double xv[],
-    double d2xdt2[], double d3xdt3[]) const
+void OrbitIntegrator<coord::Car>::eval2(const double timeOffset, const double xv[],
+    /*output*/ double d2xdt2[], double d3xdt3[], double* accFac) const
 {
+    double ca=1, sa=0;
     if(Omega)
-        throw std::runtime_error("Hermite integration in the rotating frame is not implemented");
+        math::sincos(Omega * (timeBegin + timeOffset), sa, ca);
+    double Epot;
     coord::GradCar grad;
     coord::HessCar hess;
-    potential.eval(coord::PosCar(xv[0], xv[1], xv[2]), NULL, &grad, &hess, time);
+    potential.eval(coord::PosCar(xv[0]*ca + xv[1]*sa, xv[1]*ca - xv[0]*sa, xv[2]),
+        accFac ? &Epot : NULL,
+        &grad,
+        /*only for Hermite integrator*/ d3xdt3 ? &hess : NULL,
+        timeBegin + timeOffset);
     // time derivative of velocity
-    d2xdt2[0] = -grad.dx;
-    d2xdt2[1] = -grad.dy;
+    d2xdt2[0] = -grad.dx*ca + grad.dy*sa;
+    d2xdt2[1] = -grad.dy*ca - grad.dx*sa;
     d2xdt2[2] = -grad.dz;
-    // time derivative of acceleration; NB: does not work in the rotating frame!!
-    d3xdt3[0] = -hess.dx2  * xv[3] - hess.dxdy * xv[4] - hess.dxdz * xv[5];
-    d3xdt3[1] = -hess.dxdy * xv[3] - hess.dy2  * xv[4] - hess.dydz * xv[5];
-    d3xdt3[2] = -hess.dxdz * xv[3] - hess.dydz * xv[4] - hess.dz2  * xv[5];
+    if(d3xdt3) {
+        if(Omega)
+            throw std::runtime_error("Hermite integration in the rotating frame is not implemented");
+        // time derivative of acceleration;
+        // NB: although tedious, it can be (but is not) implemented for a rotating potential;
+        // however, for a time-dependent potential it cannot be implemented without knowing dPhi/dt
+        // (there is no way to check whether the potential is time-dependent!)
+        d3xdt3[0] = -hess.dx2  * xv[3] - hess.dxdy * xv[4] - hess.dxdz * xv[5];
+        d3xdt3[1] = -hess.dxdy * xv[3] - hess.dy2  * xv[4] - hess.dydz * xv[5];
+        d3xdt3[2] = -hess.dxdz * xv[3] - hess.dydz * xv[4] - hess.dz2  * xv[5];
+    }
+    if(accFac) {
+        double Ekin = 0.5 * (pow_2(xv[3]) + pow_2(xv[4]) + pow_2(xv[5]));
+        *accFac = fmin(1, fabs(Epot + Ekin) / fmax(fabs(Epot), Ekin));
+    }
 }
 
 template<>
-void OrbitIntegrator<coord::Cyl>::eval(const double time, const double x[], double dxdt[]) const
+void OrbitIntegrator<coord::Cyl>::eval(const double timeOffset, const double xv[],
+    /*output*/ double dxdt[], double* accFac) const
 {
-    coord::PosVelCyl p(x);
-    if(x[0]<0) {    // R<0
+    coord::PosVelCyl p(xv);
+    if(xv[0]<0) {    // R<0
         p.R = -p.R; // apply reflection
         p.phi += M_PI;
     }
+    double Epot;
     coord::GradCyl grad;
-    potential.eval(p, NULL, &grad, NULL, time);
+    potential.eval(p, accFac ? &Epot : NULL, &grad, NULL, timeBegin + timeOffset);
     double Rinv = p.R!=0 ? 1/p.R : 0;  // avoid NAN in degenerate cases
-    if(x[0]<0)
+    if(xv[0]<0)
         grad.dR = -grad.dR;
     dxdt[0] = p.vR;
     dxdt[1] = p.vz;
@@ -230,15 +270,20 @@ void OrbitIntegrator<coord::Cyl>::eval(const double time, const double x[], doub
     dxdt[3] = -grad.dR + pow_2(p.vphi) * Rinv;
     dxdt[4] = -grad.dz;
     dxdt[5] = -(grad.dphi + p.vR*p.vphi) * Rinv;
+    if(accFac) {
+        double Ekin = 0.5 * (pow_2(p.vR) + pow_2(p.vz) + pow_2(p.vphi));
+        *accFac = fmin(1, fabs(Epot + Ekin) / fmax(fabs(Epot), Ekin));
+    }
 }
 
 template<>
-void OrbitIntegrator<coord::Sph>::eval(const double time, const double x[], double dxdt[]) const
+void OrbitIntegrator<coord::Sph>::eval(const double timeOffset, const double xv[],
+    /*output*/ double dxdt[], double* accFac) const
 {
-    double r = x[0];
-    double phi = x[2];
+    double r = xv[0];
+    double phi = xv[2];
     int signr = 1, signt = 1;
-    double theta = fmod(x[1], 2*M_PI);
+    double theta = fmod(xv[1], 2*M_PI);
     // normalize theta to the range 0..pi, and r to >=0
     if(theta<-M_PI) {
         theta += 2*M_PI;
@@ -256,9 +301,10 @@ void OrbitIntegrator<coord::Sph>::eval(const double time, const double x[], doub
     }
     if((signr == -1) ^ (signt == -1))
         phi += M_PI;
-    const coord::PosVelSph p(r, theta, phi, x[3], x[4], x[5]);
+    const coord::PosVelSph p(r, theta, phi, xv[3], xv[4], xv[5]);
+    double Epot;
     coord::GradSph grad;
-    potential.eval(p, NULL, &grad, NULL, time);
+    potential.eval(p, accFac ? &Epot : NULL, &grad, NULL, timeBegin + timeOffset);
     double rinv = r!=0 ? 1/r : 0, sintheta, costheta;
     math::sincos(theta, sintheta, costheta);
     double sinthinv = sintheta!=0 ? 1./sintheta : 0;
@@ -269,14 +315,10 @@ void OrbitIntegrator<coord::Sph>::eval(const double time, const double x[], doub
     dxdt[3] = -grad.dr*signr + (pow_2(p.vtheta) + pow_2(p.vphi)) * rinv;
     dxdt[4] = (-grad.dtheta*signt + pow_2(p.vphi)*cottheta - p.vr*p.vtheta) * rinv;
     dxdt[5] = (-grad.dphi * sinthinv - (p.vr+p.vtheta*cottheta) * p.vphi) * rinv;
-}
-
-template<typename CoordT>
-double OrbitIntegrator<CoordT>::getAccuracyFactor(const double time, const double x[]) const
-{
-    double Epot = potential.value(coord::PosT<CoordT>(x[0], x[1], x[2]), time);
-    double Ekin = 0.5 * (x[3]*x[3] + x[4]*x[4] + x[5]*x[5]);
-    return fmin(1, fabs(Epot + Ekin) / fmax(fabs(Epot), Ekin));
+    if(accFac) {
+        double Ekin = 0.5 * (pow_2(p.vr) + pow_2(p.vtheta) + pow_2(p.vphi));
+        *accFac = fmin(1, fabs(Epot + Ekin) / fmax(fabs(Epot), Ekin));
+    }
 }
 
 

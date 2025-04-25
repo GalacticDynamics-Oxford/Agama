@@ -21,7 +21,8 @@ LDFLAGS  likewise will set additional link flags (e.g., -L/path/to/my/library/li
 The setup script will attempt to download and compile the required GSL library (if it wasn't found)
 and the optional Eigen, CVXOPT and UNSIO libraries
 (asking the user for a confirmation, unless command-line arguments include --yes or --assume-yes).
-Eigen is header-only so it is only downloaded; UNSIO is downloaded and compiled;
+Eigen is header-only so it is only downloaded; UNSIO is downloaded and compiled (we use a customized
+fork of the original C++ library hosted at https://github.com/GalacticDynamics-Oxford/unsio);
 CVXOPT is a python library, so it will be installed by calling "pip install [--user] cvxopt"
 (you might wish to manually install it if your preferred options are different).
 The optional GLPK library is ignored if not found (it is superseded by CVXOPT for all practical

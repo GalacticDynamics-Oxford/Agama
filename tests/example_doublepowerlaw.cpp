@@ -108,15 +108,6 @@ public:
     virtual void eval(const double vars[], double values[]) const
     {
         df::DoublePowerLawParam params = dfparams(vars);
-        std::cout <<
-            utils::pp(params.J0,       8) << "  " <<
-            utils::pp(params.slopeIn,  8) << "  " <<
-            utils::pp(params.slopeOut, 8) << "  " <<
-            utils::pp(params.steepness,8) << "  " <<
-            utils::pp(params.coefJrIn, 8) << "  " <<
-            utils::pp(params.coefJrOut,8) << "  " <<
-            utils::pp(params.Jcutoff,  8) << "  " <<
-            utils::pp(params.cutoffStrength, 8) << " : ";
         try{
             double kld =
                 params.slopeIn  <0   || params.slopeIn >=3   ||
@@ -127,11 +118,19 @@ public:
                 params.cutoffStrength<0.2 || params.cutoffStrength>5 ?
                 /*INFINITY*/ 1e100 :
                 kullbackLeiblerDistance(f, df::DoublePowerLaw(params));
-            std::cout << utils::pp(kld, 8) << std::endl;
+            std::cout <<
+            utils::pp(params.J0,       8) + "  " +
+            utils::pp(params.slopeIn,  8) + "  " +
+            utils::pp(params.slopeOut, 8) + "  " +
+            utils::pp(params.steepness,8) + "  " +
+            utils::pp(params.coefJrIn, 8) + "  " +
+            utils::pp(params.coefJrOut,8) + "  " +
+            utils::pp(params.Jcutoff,  8) + "  " +
+            utils::pp(params.cutoffStrength, 8) + " : " +
+            utils::pp(kld, 8) + "\r";
             values[0] = kld;
         }
         catch(std::exception&e) {
-            std::cout << e.what() << std::endl;
             values[0] = /*INFINITY*/ 1e100;
         }
     }
@@ -229,9 +228,9 @@ int main(int argc, char* argv[])
     double bestScore = INFINITY, currScore;
     // run the Nelder-Mead search a few times, because it can get stuck in a local minimum
     for(int loop=0; loop<maxNumLoop; loop++) {
-        int numIter = math::findMinNdim(fnc, bestparams, stepsizes, toler, maxNumIter, bestparams);
-        std::cout << numIter << " iterations\n";
+        math::findMinNdim(fnc, bestparams, stepsizes, toler, maxNumIter, bestparams);
         fnc.eval(bestparams, &currScore);
+        std::cout << '\n';
         if(currScore >= 0.9*bestScore)  // doesn't improve - hopefully found the global minimum
             break;
         bestScore = fmin(currScore, bestScore);

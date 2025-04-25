@@ -79,7 +79,10 @@ In the manual mode, follow these steps:
     either GLPK or (preferrably) CVXOPT are required for non-parametric DF or Schwarzschild modelling.
     - UNSIO library for reading/writing N-body snapshots in various formats:
     http://projets.lam.fr/projects/unsio
-    (without it only the text format is supported).
+    (without it only the text format is supported). Note that we use the C++ part of the library,
+    not its python interface (which could be installed separately from pip), and moreover prefer
+    a customized fork of the code hosted at
+    http://github.com/GalacticDynamics-Oxford/unsio
     - Cuba library for multidimensional integration (the alternative, which is actually preferred,
     is the Cubature library that is bundled with this distribution):
     http://www.feynarts.de/cuba/

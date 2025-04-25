@@ -463,27 +463,17 @@ std::string pp(double num, unsigned int width)
     return result;
 }
 
-std::vector<std::string> splitString(const std::string& src, const std::string& delim)
+std::vector<std::string> splitString(const std::string& str, const std::string& delim)
 {
     std::vector<std::string> result;
-    std::string str(src);
-    std::string::size_type indx=str.find_first_not_of(delim);
-    if(indx==std::string::npos) {
-        return result;
-    }
-    if(indx>0)  // remove unnecessary delimiters at the beginning
-        str=str.erase(0, indx);
-    while(!str.empty()) {
-        indx=str.find_first_of(delim);
+    std::string::size_type size=str.size(), start=str.find_first_not_of(delim), indx;
+    while(start<size && start!=std::string::npos) {
+        indx=str.find_first_of(delim, start);
         if(indx==std::string::npos)
-            indx=str.size();
-        assert(indx>0);   // each element in the result array should be non-empty
-        result.push_back(str.substr(0, indx));
-        str=str.erase(0, indx);
-        indx=str.find_first_not_of(delim);
-        if(indx==std::string::npos)
-            break;
-        str=str.erase(0, indx);
+            indx=size;
+        assert(indx>start);   // each element in the result array should be non-empty
+        result.push_back(str.substr(start, indx-start));
+        start=str.find_first_not_of(delim, indx);
     }
     return result;
 }

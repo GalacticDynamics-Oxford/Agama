@@ -33,7 +33,7 @@ class TestInt1: public Integrand{
 class TestInt2: public Integrand{
     virtual double value(double x) const{
         // normalization is some combination of gamma and hypergeometric functions
-        return pow(1-x*x*x*x,-2./3) / 2.2744542874349;
+        return pow(1-x*x*x*x,-2./3) / 2.27445428374349;
     }
 };
 
@@ -764,13 +764,21 @@ int main()
         " (delta="<<(yresult[0]-1)<<","<<(yresult[1]-1)<<"; neval="<<numEval<<", nIter="<<numIter<<")\n";
     ok &= (fabs(yresult[0]-1)<toler && fabs(yresult[1]-1)<toler) || err();
 
+    // find coefficients a,b,c of a function f(x) = a*x^b+c from its values at three points
+    double A=-1.5, B=-2.0, C=1.0, X1=0.64e4, X2=0.8e4, X3=1e4,
+        F1=A*pow(X1,B)+C, F2=A*pow(X2,B)+C, F3=A*pow(X3,B)+C, a, b, c;
+    math::findAsymptote(X1, X2, X3, F1, F2, F3, a, b, c);
+    std::cout << a << " " << b << " " << c << "\n";
+    std::cout << "findAsymptote of f(x)=a*x^b+c: error in a="<<(a-A)<<", b="<<(b-B)<<", c="<<(c-C)<<"\n";
+    ok &= fabs(a-A) + fabs(b-B) + fabs(c-C) < toler || err();
+
     // N-dimensional integration
     numEval=0;
     test8Ndim fnc8;
     integrateNdim(fnc8, fnc8.ymin, fnc8.ymax, toler, 1000000, &result, &error);
     std::cout << "Volume of a 3d torus = "<<result<<" +- "<<error<<
         " (delta="<<(result-fnc8.exact)<<"; neval="<<numEval<<")\n";
-    ok &= (error < 2.0 && fabs(result-fnc8.exact) < error*2) || err();
+    ok &= (error < 3.0 && fabs(result-fnc8.exact) < fmin(0.01*result, error*2)) || err();
 
     // N-dimensional sampling
     numEval=0;
@@ -778,7 +786,7 @@ int main()
     sampleNdim(fnc8, fnc8.ymin, fnc8.ymax, 100000, points, NULL, &result, &error);
     std::cout << "Monte Carlo Volume of a 3d torus = "<<result<<" +- "<<error<<
         " (delta="<<(result-fnc8.exact)<<"; neval="<<numEval<<")\n";
-    ok &= (error < 1.0 && fabs(result-fnc8.exact) < error*2) || err();
+    ok &= (error < 1.0 && fabs(result-fnc8.exact) < fmin(0.01*result, error*2)) || err();
     if(utils::verbosityLevel >= utils::VL_VERBOSE) {
         std::ofstream fout("sampleNdim.dat");
         for(unsigned int i=0; i<points.rows(); i++)

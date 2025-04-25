@@ -10,9 +10,29 @@
 
 namespace math{
 
-/* ----------------- ODE integrators ------------- */
+void IOdeSystem2ndOrder::eval(const double t, const double w[], double dwdt[], double* af) const
+{
+    const unsigned int N = size() / 2;  // dimension of position or velocity
+    for(unsigned int i=0; i<N; i++)
+        dwdt[i] = w[i + N];
+    eval2(t, w, dwdt + N, NULL, af);
+}
 
-double initTimeStep(const IOdeSystem& odeSystem, double time, const double x[], double accAbs, double accRel)
+void IOdeSystem2ndOrderLinear::eval(const double t, const double w[], double dwdt[], double*) const
+{
+    // temp storage for matrices a, b
+    unsigned int N = size() / 2;  // length of x and dx/dt vectors
+    double *A = static_cast<double*>(alloca(N*N * sizeof(double) * 2)), *B = A + N*N;
+    evalMat(t, A, B);
+    for(unsigned int i=0; i<N; i++) {
+        dwdt[i] = w[i+N];
+        dwdt[i+N] = 0;
+        for(unsigned int k=0; k<N; k++)
+            dwdt[i+N] += A[i*N+k] * w[k] + B[i*N+k] * w[k+N];
+    }
+}
+
+double initTimeStep(const IOdeSystem& odeSystem, const double x[], double accAbs, double accRel)
 {
     const int NDIM = odeSystem.size();
 
@@ -26,7 +46,7 @@ double initTimeStep(const IOdeSystem& odeSystem, double time, const double x[], 
     *k3 = k2 + NDIM;
 
     // compute the derivatives at the initial point
-    odeSystem.eval(time, x, k1);
+    odeSystem.eval(/*time offset*/ 0, x, k1);
 
     // compute the L2-norm of x and dx/dt (use the sum of all components for the crude estimate)
     double normx0 = 0, normd0 = 0;
@@ -41,12 +61,12 @@ double initTimeStep(const IOdeSystem& odeSystem, double time, const double x[], 
     // perform an explicit Euler step with a length h1 estimated from the 1st derivative
     for(int i=0; i<NDIM; i++)
         xt[i] = x[i] + h1 * k1[i];
-    odeSystem.eval(time + h1, xt, k2);
+    odeSystem.eval(/*time offset*/ h1, xt, k2);
 
     // Heun's method (corrector step using xt estimated during the predictor step)
     for(int i=0; i<NDIM; i++)
         xt[i] = x[i] + 0.5 * h1 * (k1[i] + k2[i]);
-    odeSystem.eval(time + h1, xt, k3);
+    odeSystem.eval(/*time offset*/ h1, xt, k3);
 
     // estimate the second and third derivatives of the solution (separately for each component),
     // and use them to choose the timestep (take the shortest one among all components);
@@ -69,23 +89,25 @@ double initTimeStep(const IOdeSystem& odeSystem, double time, const double x[], 
     return h;
 }
 
-/* --- DOP853 high-accuracy Runge-Kutta integrator --- */
+/** --- DOP853 high-accuracy Runge-Kutta integrator --- **/
 
-void OdeSolverDOP853::init(const double stateNew[], double timeNew)
+void OdeStepperDOP853::init(const double stateNew[])
 {
     // copy the vector x
     for(int d=0; d<NDIM; d++)
         state[d] = stateNew[d];
-    if(timeNew == timeNew)
-        time = timeNew;
-    // obtain the derivatives dx/dt
-    odeSystem.eval(time, stateNew, /*where to store the derivs*/ &state[NDIM]);
-    if(nextTimeStep == 0)
-        nextTimeStep = initTimeStep(odeSystem, time, stateNew, accAbs, accRel);
+    // obtain the derivatives dx/dt and the accuracy factor
+    double accFac = 1;
+    odeSystem.eval(0, stateNew, /*where to store the derivs*/ &state[NDIM],
+        nextTimeStep==0 ? &accFac : NULL);
+    if(nextTimeStep == 0)  // first call to init() at the beginning of integration, step is not known
+        nextTimeStep = initTimeStep(odeSystem, stateNew, accAbs, accRel) * accFac;
 }
 
-double OdeSolverDOP853::doStep(double dt)
+double OdeStepperDOP853::doStep(double maxTimeStep)
 {
+    if(maxTimeStep == 0)
+        return 0;  // something must be wrong, no progress made
     static const double
     // fractions of timestep at each RK stage
     c2   =  0.05260015195876773187856,
@@ -232,10 +254,11 @@ double OdeSolverDOP853::doStep(double dt)
     *k10= k9 + NDIM,
     *k11= k2,  // last stages reuse the memory from earlier stages
     *k12= k3,
-    *k13= k4;
-    // use the previously estimated timestep if no overriding value is provided
-    double sign = std::signbit(dt) ? -1 : +1;
-    double timeStep = dt!=0 ? dt : nextTimeStep*sign;
+    *k13= k4,
+    *k1b= k5;
+    // use the previously estimated timestep or the requested max step, whichever is shorter
+    double sign = maxTimeStep >= 0 ? +1 : -1;
+    double timeStep = fmin(maxTimeStep * sign, nextTimeStep) * sign;
     // track the number of rejected attempts and the progress in error reduction
     int nbad = 0;
     double preverr = INFINITY;
@@ -249,63 +272,66 @@ double OdeSolverDOP853::doStep(double dt)
         for(int i=0; i<NDIM; i++)
             xt[i] = x[i] + timeStep *
                 a21 * k1[i];
-        odeSystem.eval(time + c2*timeStep, xt, k2);
+        odeSystem.eval(c2*timeStep, xt, k2);
         for(int i=0; i<NDIM; i++)
             xt[i] = x[i] + timeStep *
                 (a31*k1[i] + a32*k2[i]);
-        odeSystem.eval(time + c3*timeStep, xt, k3);
+        odeSystem.eval(c3*timeStep, xt, k3);
         for(int i=0; i<NDIM; i++)
             xt[i] = x[i] + timeStep *
                 (a41*k1[i] + a43*k3[i]);
-        odeSystem.eval(time + c4*timeStep, xt, k4);
+        odeSystem.eval(c4*timeStep, xt, k4);
         for(int i=0; i<NDIM; i++)
             xt[i] = x[i] + timeStep *
                 (a51*k1[i] + a53*k3[i] + a54*k4[i]);
-        odeSystem.eval(time + c5*timeStep, xt, k5);
+        odeSystem.eval(c5*timeStep, xt, k5);
         for(int i=0; i<NDIM; i++)
             xt[i] = x[i] + timeStep *
                 (a61*k1[i] + a64*k4[i] + a65*k5[i]);
-        odeSystem.eval(time + c6*timeStep, xt, k6);
+        odeSystem.eval(c6*timeStep, xt, k6);
         for(int i=0; i<NDIM; i++)
             xt[i] = x[i] + timeStep *
                 (a71*k1[i] + a74*k4[i] + a75*k5[i] + a76*k6[i]);
-        odeSystem.eval(time + c7*timeStep, xt, k7);
+        odeSystem.eval(c7*timeStep, xt, k7);
         for(int i=0; i<NDIM; i++)
             xt[i] = x[i] + timeStep *
                 (a81*k1[i] + a84*k4[i] + a85*k5[i] + a86*k6[i] + a87*k7[i]);
-        odeSystem.eval(time + c8*timeStep, xt, k8);
+        odeSystem.eval(c8*timeStep, xt, k8);
         for(int i=0; i<NDIM; i++)
             xt[i] = x[i] + timeStep *
                 (a91*k1[i] + a94*k4[i] + a95*k5[i] + a96*k6[i] + a97*k7[i] + a98*k8[i]);
-        odeSystem.eval(time + c9*timeStep, xt, k9);
+        odeSystem.eval(c9*timeStep, xt, k9);
         for(int i=0; i<NDIM; i++)
             xt[i] = x[i] + timeStep *
                 (a101*k1[i] + a104*k4[i] + a105*k5[i] + a106*k6[i] + a107*k7[i] +
                  a108*k8[i] + a109*k9[i]);
-        odeSystem.eval(time + c10*timeStep, xt, k10);
+        odeSystem.eval(c10*timeStep, xt, k10);
         for(int i=0; i<NDIM; i++)
             xt[i] = x[i] + timeStep *
                 (a111*k1[i] + a114*k4[i] + a115 *k5 [i] + a116*k6[i] + a117*k7[i] +
                  a118*k8[i] + a119*k9[i] + a1110*k10[i]);
-        odeSystem.eval(time + c11*timeStep, xt, k11);
+        odeSystem.eval(c11*timeStep, xt, k11);
         for(int i=0; i<NDIM; i++)
             xt[i] = x[i] + timeStep *
                 (a121*k1[i] + a124*k4[i] + a125 *k5 [i] + a126 *k6 [i] + a127*k7[i] +
                  a128*k8[i] + a129*k9[i] + a1210*k10[i] + a1211*k11[i]);
-        odeSystem.eval(time + c12*timeStep, xt, k12);
+        odeSystem.eval(c12*timeStep, xt, k12);
         for(int i=0; i<NDIM; i++) {
-            k13[i] = b1*k1 [i] + b6 *k6 [i] + b7 *k7 [i] + b8*k8[i] + b9*k9[i] +
+            k1b[i] = b1*k1 [i] + b6 *k6 [i] + b7 *k7 [i] + b8*k8[i] + b9*k9[i] +
                     b10*k10[i] + b11*k11[i] + b12*k12[i];
-            xt[i] = x[i] + timeStep * k13[i];
+            xt[i] = x[i] + timeStep * k1b[i];
         }
+
+        // compute the solution at the end of the timestep and the accuracy factor
+        double accFac = 1.0;
+        odeSystem.eval(timeStep, xt, k13, &accFac);
 
         // error estimation
         double err5 = 0.0, err3 = 0.0;
-        double accFac = odeSystem.getAccuracyFactor(time + timeStep, xt);
         for(int i=0; i<NDIM; i++) {
             double sk = (accAbs + accRel * fmax(fabs(x[i]), fabs(xt[i]))) * accFac;
             if(sk==0) continue;
-            err3 += pow_2( (   k13[i] - bhh1*k1 [i] - bhh2*k9 [i] - bhh3*k12[i]) / sk);
+            err3 += pow_2( (   k1b[i] - bhh1*k1 [i] - bhh2*k9 [i] - bhh3*k12[i]) / sk);
             err5 += pow_2( (er1*k1[i] + er6 *k6 [i] + er7 *k7 [i] + er8 *k8 [i]  +
                             er9*k9[i] + er10*k10[i] + er11*k11[i] + er12*k12[i]) / sk);
         }
@@ -318,9 +344,8 @@ double OdeSolverDOP853::doStep(double dt)
         // computation of nextTimeStep
         double fac = sqrt(sqrt(sqrt(err)));  // = pow(err, 1./8);
 
-        // step accepted if the internal error estimate is small enough,
-        // or if the length of the timestep was provided to the routine externally
-        if(dt!=0 || err <= 1) {
+        // step accepted if the internal error estimate is small enough
+        if(err <= 1) {
             // adjust the prediction for the next timestep
             nextTimeStep = fabs(timeStep) * fmin(finc, safe/fac);
             break;
@@ -346,10 +371,6 @@ double OdeSolverDOP853::doStep(double dt)
             timeStep *= fmax(fdec, safe/fac);
         }
     }
-
-    // make the full step, finally:
-    // xt and k13 contain the solution x and its derivative at the end of the current timestep
-    odeSystem.eval(time + timeStep, xt, k13);
 
     // preparation of interpolation coefficients for dense output
     double  // the interpolation coefficients are stored in 'state' at different offsets
@@ -380,47 +401,329 @@ double OdeSolverDOP853::doStep(double dt)
         x [i] = xt [i];
         k1[i] = k13[i];
     }
-    timePrev  = time;
-    time     += timeStep;
+    prevTimeStep = timeStep;
     return timeStep;
 }
 
 // dense output function
-double OdeSolverDOP853::getSol(double t, unsigned int i) const
+double OdeStepperDOP853::getSol(double timeOffset, unsigned int i) const
 {
     if(i >= (unsigned int)NDIM)
-        throw std::out_of_range("OdeSolver: element index out of range");
-    if(t==time)
-        return state[i];
-    if(t==timePrev)
-        return state[i+2*NDIM];  // = rcont1[i]
-    double p = (t - timePrev) / (time-timePrev), q = 1.0 - p;
+        throw std::out_of_range("OdeStepperDOP853: element index out of range");
+    if(timeOffset == prevTimeStep)
+        return state[i];  // state vector at the end of the last timestep
+    if(timeOffset == 0)
+        return state[i+2*NDIM];  // = rcont1[i], state vector at the beginning of the last timestep
+    double p = timeOffset / prevTimeStep, q = 1.0 - p;  // both p & q should be between 0 and 1
+    if(!(q>=0 && p>=0))
+        throw std::out_of_range("OdeStepperDOP853: requested time is outside the last completed timestep");
     // interpolation coefs rcont1..rcont8 are stored in the 'state' array at various offsets
     return   state[i+2*NDIM] + p * (state[i+3*NDIM] + q * (state[i+4*NDIM] + p * (state[i+5*NDIM] +
         q * (state[i+6*NDIM] + p * (state[i+7*NDIM] + q * (state[i+8*NDIM] + p *  state[i+9*NDIM]))))));
 }
 
-OdeSolverHermite::OdeSolverHermite(const IOdeSystemHermite& _odeSystem, double _accRel) :
-    BaseOdeSolver(_odeSystem),
+
+/** --- 8th order Runge-Kutta-Nystrom integrator for second-order ODEs --- **/
+
+OdeStepperDPRKN8::OdeStepperDPRKN8(const IOdeSystem2ndOrder& _odeSystem, double _accRel) :
+    odeSystem(_odeSystem),
+    NDIM(odeSystem.size()),
+    accRel(10 * pow(_accRel, 0.9)),  // empirical approximate match to dop853's accuracy parameter
+    nextTimeStep(0),
+    state(NDIM * 3)
+{}
+
+void OdeStepperDPRKN8::init(const double stateNew[])
+{
+    for(int d=0; d<NDIM; d++)  // copy the vector x
+        state[d] = stateNew[d];
+    // obtain the derivative d2x/dt2 and the accuracy factor
+    double accFac = 1;
+    odeSystem.eval2(0, stateNew, /*output*/ &state[NDIM], NULL,
+        nextTimeStep==0 ? &accFac : NULL);
+    if(nextTimeStep == 0)  // initial timestep assignment
+        nextTimeStep = initTimeStep(odeSystem, stateNew, 0, accRel) * accFac;
+    qold = 0.0001;
+}
+
+double OdeStepperDPRKN8::doStep(double maxTimeStep)
+{
+    if(maxTimeStep == 0)
+        return 0;
+    int numVar = NDIM/2;
+    static const double
+    c1  = 1.0 / 20,
+    c2  = 1.0 / 10,
+    c3  = 3.0 / 10,
+    c4  = 1.0 / 2,
+    c5  = 7.0 / 10,
+    c6  = 9.0 / 10,
+    c7  = 1.0,
+    c8  = 1.0,
+    a21 = 1.0 / 800,
+    a31 = 1.0 / 600,
+    a32 = 1.0 / 300,
+    a41 = 9.0 / 200,
+    a42 =-9.0 / 100,
+    a43 = 9.0 / 100,
+    a51 =-66701.0 / 197352,
+    a52 = 28325.0 / 32892,
+    a53 =-2665.0  / 5482,
+    a54 = 2170.0  / 24669,
+    a61 = 227015747.0 / 304251000,
+    a62 =-54897451.0 / 30425100,
+    a63 = 12942349.0 / 10141700,
+    a64 =-9499.0 / 304251,
+    a65 = 539.0 / 9250,
+    a71 =-1131891597.0 / 901789000,
+    a72 = 41964921.0 / 12882700,
+    a73 =-6663147.0 / 3220675,
+    a74 = 270954.0 / 644135,
+    a75 =-108.0 / 5875,
+    a76 = 114.0 / 1645,
+    a81 = 13836959.0 / 3667458,
+    a82 =-17731450.0 / 1833729,
+    a83 = 1063919505.0 / 156478208,
+    a84 =-33213845.0 / 39119552,
+    a85 = 13335.0 / 28544,
+    a86 =-705.0  / 14272,
+    a87 = 1645.0 / 57088,
+    a91 = 223.0  / 7938,
+    a93 = 1175.0 / 8064,
+    a94 = 925.0  / 6048,
+    a95 = 41.0   / 448,
+    a96 = 925.0  / 14112,
+    a97 = 1175.0 / 72576,
+    b1  = 223.0  / 7938,
+    b3  = 1175.0 / 8064,
+    b4  = 925.0  / 6048,
+    b5  = 41.0   / 448,
+    b6  = 925.0  / 14112,
+    b7  = 1175.0 / 72576,
+    bp1 = 223.0  / 7938,
+    bp3 = 5875.0 / 36288,
+    bp4 = 4625.0 / 21168,
+    bp5 = 41.0   / 224,
+    bp6 = 4625.0 / 21168,
+    bp7 = 5875.0 / 36288,
+    bp8 = 223.0  / 7938,
+    btilde1  = 223.0  / 7938  - 7987313.0  / 109941300,
+    btilde3  = 1175.0 / 8064  - 1610737.0  / 44674560,
+    btilde4  = 925.0  / 6048  - 10023263.0 / 33505920,
+    btilde5  = 41.0   / 448   + 497221.0   / 12409600,
+    btilde6  = 925.0  / 14112 - 10023263.0 / 78180480,
+    btilde7  = 1175.0 / 72576 - 1610737.0  / 402071040,
+    bptilde1 = 223.0  / 7938  - 7987313.0  / 109941300,
+    bptilde3 = 5875.0 / 36288 - 1610737.0  / 40207104,
+    bptilde4 = 4625.0 / 21168 - 10023263.0 / 23454144,
+    bptilde5 = 41.0   / 224   + 497221.0   / 6204800,
+    bptilde6 = 4625.0 / 21168 - 10023263.0 / 23454144,
+    bptilde7 = 5875.0 / 36288 - 1610737.0  / 40207104,
+    bptilde8 = 223.0  / 7938  + 4251941.0  / 54970650,
+    bptilde9 = -3.0   /  20;
+
+    // temporary storage for intermediate Runge-Kutta steps
+    const int tempSize = numVar * 13;
+    double *xt = static_cast<double*>(alloca(tempSize * sizeof(double)));
+    double
+    // persistent data (conserved between timesteps)
+    *x  = &state[0],   // x       at the beginning of the timestep
+    *v  = x  + numVar, // dx/dt   at the beginning of the timestep
+    *k1 = v  + numVar, // d2x/dt2 at the beginning of the step
+    *j1 = k1 + numVar, // d3x/dt3 at the beginning of the timestep
+    // temporary data (used only inside this routine)
+    *k2 = xt + numVar,
+    *k3 = k2 + numVar,
+    *k4 = k3 + numVar,
+    *k5 = k4 + numVar,
+    *k6 = k5 + numVar,
+    *k7 = k6 + numVar,
+    *k8 = k7 + numVar,
+    *k9 = k8 + numVar,
+    // final x and v at the end of the timestep
+    *xn = k9 + numVar,
+    *vn = xn + numVar,
+    *kn = vn + numVar,
+    *jn = kn + numVar;
+    // use the previously estimated timestep or the requested max step, whichever is shorter
+    double sign = maxTimeStep >= 0 ? +1 : -1;
+    double timeStep = fmin(maxTimeStep * sign, nextTimeStep) * sign;
+
+    // track the number of rejected attempts and the progress in error reduction
+    int nbad = 0, niter = 0;
+    double preverr = INFINITY;
+
+    // repeat until the step is accepted
+    while(true) {
+        if(timeStep==0 || !isFinite(timeStep))
+            return 0;   // error, integration must be terminated
+
+        // nine Runge-Kutta stages
+        for(int i=0; i<numVar; i++)
+            xt[i] = x[i] + timeStep * (c1 * v[i] + timeStep *
+                (a21 * k1[i]));
+        odeSystem.eval2(c1 * timeStep, xt, k2);
+        for(int i=0; i<numVar; i++)
+            xt[i] = x[i] + timeStep * (c2 * v[i] + timeStep *
+                (a31 * k1[i] + a32 * k2[i]));
+        odeSystem.eval2(c2 * timeStep, xt, k3);
+        for(int i=0; i<numVar; i++)
+            xt[i] = x[i] + timeStep * (c3 * v[i] + timeStep *
+                (a41 * k1[i] + a42 * k2[i] + a43 * k3[i]));
+        odeSystem.eval2(c3 * timeStep, xt, k4);
+        for(int i=0; i<numVar; i++)
+            xt[i] = x[i] + timeStep * (c4 * v[i] + timeStep *
+                (a51 * k1[i] + a52 * k2[i] + a53 * k3[i] + a54 * k4[i]));
+        odeSystem.eval2(c4 * timeStep, xt, k5);
+        for(int i=0; i<numVar; i++)
+            xt[i] = x[i] + timeStep * (c5 * v[i] + timeStep *
+                (a61 * k1[i] + a62 * k2[i] + a63 * k3[i] + a64 * k4[i] + a65 * k5[i]));
+        odeSystem.eval2(c5 * timeStep, xt, k6);
+        for(int i=0; i<numVar; i++)
+            xt[i] = x[i] + timeStep * (c6 * v[i] + timeStep *
+                (a71 * k1[i] + a72 * k2[i] + a73 * k3[i] + a74 * k4[i] + a75 * k5[i] + a76 * k6[i]));
+        odeSystem.eval2(c6 * timeStep, xt, k7);
+        for(int i=0; i<numVar; i++)
+            xt[i] = x[i] + timeStep * (c7 * v[i] + timeStep *
+                (a81 * k1[i] + a82 * k2[i] + a83 * k3[i] + a84 * k4[i] + a85 * k5[i] + a86 * k6[i] +
+                 a87 * k7[i]));
+        odeSystem.eval2(c7 * timeStep, xt, k8);
+        for(int i=0; i<numVar; i++)
+            xt[i] = x[i] + timeStep * (c8 * v[i] + timeStep *  // no a92 and a98
+                (a91 * k1[i] + a93 * k3[i] + a94 * k4[i] + a95 * k5[i] + a96 * k6[i] + a97 * k7[i]));
+        odeSystem.eval2(c8 * timeStep, xt, k9);
+
+        // compute variables at the end of the timestep
+        for(int i=0; i<numVar; i++) {
+            xn[i] = x[i] + timeStep * (v[i] + timeStep *  // no b2 and b8
+                (b1 * k1[i] + b3 * k3[i] + b4 * k4[i] + b5 * k5[i] + b6 * k6[i] + b7 * k7[i]));
+            vn[i] = v[i] + timeStep *  // no bp2
+                (bp1* k1[i] + bp3* k3[i] + bp4* k4[i] + bp5* k5[i] + bp6* k6[i] + bp7* k7[i] + bp8* k8[i]);
+        }
+
+        // final evaluation of ODE at the end of the timestep and the computation of accuracy factor
+        double accFac = 1.0;
+        odeSystem.eval2(timeStep, xn, /*output*/kn, /*no 3rd deriv*/NULL, &accFac);
+
+        // error estimation
+        double err = 0.0;
+        for(int i=0; i<numVar; i++) {
+            double denom = (/*accAbs +*/ accRel * fmax(fabs(x[i]), fabs(xn[i]))) * accFac;
+            if(denom!=0) {
+                double xtilde = pow_2(timeStep) * (  // no btilde2,8,9
+                    btilde1 * k1[i] + btilde3 * k3[i] + btilde4 * k4[i] + btilde5 * k5[i] +
+                    btilde6 * k6[i] + btilde7 * k7[i]);
+                err += pow_2(xtilde / denom);
+            }
+            denom = (/*accAbs +*/ accRel * fmax(fabs(v[i]), fabs(vn[i]))) * accFac;
+            if(denom!=0) {
+                double vtilde = timeStep * (  // no bptilde2
+                    bptilde1* k1[i] + bptilde3* k3[i] + bptilde4* k4[i] + bptilde5* k5[i] +
+                    bptilde6* k6[i] + bptilde7* k7[i] + bptilde8* k8[i] + bptilde9* k9[i]);
+                err += pow_2(vtilde / denom);
+            }
+        }
+        err = sqrt(err / NDIM);
+
+        // step estimation either by a proportional-integral (PI) controller
+        const double gamma = 0.9, qmax = 10.0, qmin = 0.2, beta1 = 7./80, beta2 = 4./80;
+        double q1 = pow(err, beta1);
+        if(err <= 1 || ++niter >= 12) {  // step accepted
+            double q = accRel * accFac==INFINITY /*ignore accuracy control*/ ? 0 :
+                fmin(1 / qmin, fmax(1 / qmax, q1 / pow(qold, beta2) / gamma));
+            // adjust the prediction for the next timestep
+            nextTimeStep = fabs(timeStep) / q;
+            qold = err;
+            break;
+        }
+
+        // same precautions as in dop853; more aggressive step reduction in case of persistent troubles
+        if(err > 0.5*preverr) {
+            // the error is supposed to improve as the timestep is reduced;
+            // if that's not happening, something might be wrong
+            if(++nbad >= 2)
+                q1 = 1/qmin;  // apply maximum reduction in timestep
+        } else
+            nbad = 0;  // reset the counter of badly failed steps which didn't reduce the error
+
+        // step rejected
+        preverr = err;
+        timeStep /= fmin(1 / qmin, q1 / gamma);
+    }
+
+    // preparation of interpolation coefficients for dense output
+    for(int i=0; i<numVar; i++) {
+        // compute coefficients of Taylor expansion d3x/dt3 .. d5x/dt5
+        jn[i]             = ((
+            -60 * (x[i] -       xn[i]) / timeStep +
+            -24 *  v[i] -  36 * vn[i]) / timeStep +
+            -3  * k1[i] +   9 * kn[i]) / timeStep;
+        state[4*numVar+i] = ((
+            -360 * (x[i] -       xn[i]) / timeStep +
+            -168 *  v[i] - 192 * vn[i]) / timeStep +
+            -24  * k1[i] +  36 * kn[i]) / pow_2(timeStep);
+        state[5*numVar+i] = ((
+            -720 * (x[i] -       xn[i]) / timeStep +
+            -360 *  v[i] - 360 * vn[i]) / timeStep +
+            -60  * k1[i] +  60 * kn[i]) / pow_3(timeStep);
+        x [i] = xn[i];
+        v [i] = vn[i];
+        k1[i] = kn[i];
+        j1[i] = jn[i];
+    }
+    prevTimeStep = timeStep;
+    return timeStep;
+}
+
+double OdeStepperDPRKN8::getSol(double timeOffset, unsigned int ind) const
+{
+    if(ind >= (unsigned int)NDIM)
+        throw std::out_of_range("OdeStepperDPRKN8: element index out of range");
+    double deltat = timeOffset - prevTimeStep;  // expected to be between -prevTimeStep and 0
+    if(deltat == 0)
+        return state[ind];
+    unsigned int numVar = NDIM/2;  // dimension of either coordinate or velocity vector
+    int i = ind % numVar;
+    if(ind < numVar) {  // interpolate position
+        return                 state[i+0*numVar] +
+            deltat *          (state[i+1*numVar] +
+            deltat * (1./2) * (state[i+2*numVar] +
+            deltat * (1./3) * (state[i+3*numVar] +
+            deltat * (1./4) * (state[i+4*numVar] +
+            deltat * (1./5) *  state[i+5*numVar] ))));
+    } else {  // interpolate velocity
+        return                 state[i+1*numVar] +
+            deltat *          (state[i+2*numVar] +
+            deltat * (1./2) * (state[i+3*numVar] +
+            deltat * (1./3) * (state[i+4*numVar] +
+            deltat * (1./4) *  state[i+5*numVar] )));
+    }
+}
+
+
+/** --- 4th order Hermite scheme --- **/
+
+OdeStepperHermite::OdeStepperHermite(const IOdeSystem2ndOrder& _odeSystem, double _accRel) :
     odeSystem(_odeSystem),
     NDIM(odeSystem.size()),
     accRel(1.5 * pow(_accRel, 0.2)),  // empirical approximate match to dop853's accuracy parameter
-    timePrev(time), nextTimeStep(0),
+    prevTimeStep(0),
+    nextTimeStep(0),
     state(NDIM * 5)
 {}
 
-void OdeSolverHermite::init(const double stateNew[], double timeNew)
+void OdeStepperHermite::init(const double stateNew[])
 {
     for(int d=0; d<NDIM; d++)  // copy the vector x
         state[d+NDIM*2] = stateNew[d];
-    if(timeNew == timeNew)
-        time = timeNew;
     if(nextTimeStep == 0)  // initial timestep assignment
-        nextTimeStep = initTimeStep(odeSystem, time, stateNew, 0, pow(accRel, 8));
+        nextTimeStep = initTimeStep(odeSystem, stateNew, 0, pow(accRel, 8));
 }
 
-double OdeSolverHermite::doStep(double dt)
+double OdeStepperHermite::doStep(double maxTimeStep)
 {
+    if(maxTimeStep == 0)
+        return 0;
     int numVar = NDIM/2;
     double
         *oldpos = &state[0],
@@ -436,22 +739,20 @@ double OdeSolverHermite::doStep(double dt)
     for(int i=0; i<NDIM; i++)
         state[i] = state[i+NDIM*2];
     // compute acceleration and jerk at the beginning of step
-    odeSystem.eval(time, oldpos, /*output*/ oldacc, oldjrk);
-    // use the previously estimated timestep if no overriding value is provided
-    double sign = std::signbit(dt) ? -1 : +1;
-    double timeStep = dt!=0 ? dt : nextTimeStep*sign;
-    nextTimeStep = timeStep;
-    int nreject = dt==0 ? 0 : 999;  // if dt is provided, do not attempt to reduce it
-
+    odeSystem.eval2(0, oldpos, /*output*/ oldacc, oldjrk);
+    // use the previously estimated timestep or the requested max step, whichever is shorter
+    double sign = maxTimeStep >= 0 ? +1 : -1, dt;
+    nextTimeStep = fmin(maxTimeStep * sign, nextTimeStep);
+    int nreject = 0;
     do {
-        dt = nextTimeStep;
+        dt = nextTimeStep * sign;
         // predict the coordinates/velocities at the end of timestep
         for(int i=0; i<numVar; i++) {
             newpos[i] = oldpos[i] + dt * (oldvel[i] + 0.5 * dt * (oldacc[i] + 1./3 * dt * oldjrk[i]));
             newvel[i] = oldvel[i] + dt * (oldacc[i] + 0.5 * dt *  oldjrk[i]);
         }
         // compute acceleration and jerk at the end of step, using predicted pos/vel
-        odeSystem.eval(time + dt, newpos, /*output*/ newacc, newjrk);
+        odeSystem.eval2(dt, newpos, /*output*/ newacc, newjrk);
         double sumasq=0, sumjsq=0, sumssq=0, sumcsq=0;
         for(int i=0; i<numVar; i++) {
             // store the estimated values of snap and crackle at the beginning of timestep
@@ -465,7 +766,7 @@ double OdeSolverHermite::doStep(double dt)
         // compute new timestep using Aarseth's magic criterion
         nextTimeStep = accRel * sqrt((sqrt(sumasq * sumssq) + sumjsq) / (sqrt(sumjsq * sumcsq) + sumssq));
         // repeat if new estimate of timestep was substantially less than the actually used one
-    } while(nextTimeStep < dt * 0.5 && ++nreject < 3);
+    } while(nextTimeStep < 0.5 * dt * sign && ++nreject < 3);
 
     // compute corrected positions/velocities at the end of timestep
     for(int i=0; i<numVar; i++) {
@@ -475,56 +776,73 @@ double OdeSolverHermite::doStep(double dt)
         newpos[i] = oldpos[i] + 0.5 * dt * (oldvel[i] + newvel[i] + 1./6 * dt * (oldacc[i] - newacc[i]));
     }
 
-    timePrev = time;
-    time += dt;
+    prevTimeStep = dt;
     return dt;
 }
 
-double OdeSolverHermite::getSol(double t, unsigned int ind) const
+double OdeStepperHermite::getSol(double timeOffset, unsigned int ind) const
 {
-    size_t numVar = NDIM/2;  // dimension of either coordinate or momentum vector
-    size_t i = ind % numVar;
-    double deltat = t - timePrev;
+    unsigned int numVar = NDIM/2;  // dimension of either coordinate or momentum vector
+    int i = ind % numVar;
+    if(i >= NDIM)
+        throw std::out_of_range("OdeStepperHermite: element index out of range");
+    double h = timeOffset / prevTimeStep;
+    if(h<0 || h>1 || (prevTimeStep==0 && h!=0))
+        throw std::out_of_range("OdeStepperHermite: requested time is outside the last completed timestep");
     if(ind < numVar) {  // interpolate position
-        return state[i+0*numVar] + deltat * (state[i+numVar] + deltat/2*(state[i+2*numVar] +
-            deltat/3*(state[i+3*numVar] + deltat/4*(state[i+8*numVar] + deltat/5*state[i+9*numVar]))));
+        return                     state[i         ] +
+            timeOffset *          (state[i+  numVar] +
+            timeOffset * (1./2) * (state[i+2*numVar] +
+            timeOffset * (1./3) * (state[i+3*numVar] +
+            timeOffset * (1./4) * (state[i+8*numVar] +
+            timeOffset * (1./5) *  state[i+9*numVar]))));
     } else {  // interpolate velocity
-        return state[i+1*numVar] + deltat*(state[i+2*numVar] + deltat/2*(state[i+3*numVar] +
-            deltat/3*(state[i+8*numVar] + deltat/4*state[i+9*numVar])));
+        return                     state[i+  numVar] +
+            timeOffset *          (state[i+2*numVar] +
+            timeOffset * (1./2) * (state[i+3*numVar] +
+            timeOffset * (1./3) * (state[i+8*numVar] +
+            timeOffset * (1./4) *  state[i+9*numVar])));
     }
 }
 
 
-/** Numerical solution of linear second-order ODE systems */
+/** --- Integrators for second-order linear ODE systems --- */
 
 template<int NDIM>
-Ode2SolverGL3<NDIM>::Ode2SolverGL3(const IOde2System& _odeSystem, unsigned int _numVectors) :
-    BaseOde2Solver(_odeSystem, _numVectors), state(5 * NDIM * numVectors), newstep(true)
+Ode2StepperGL3<NDIM>::Ode2StepperGL3(
+    const IOdeSystem2ndOrderLinear& _odeSystem, unsigned int _numVectors) :
+    odeSystem(_odeSystem),
+    numVectors(_numVectors),
+    prevTimeStep(0),
+    newstep(true),
+    state(5 * NDIM * numVectors)
 {
     if(numVectors <= 0)
-        throw std::invalid_argument("Ode2SolverGL3: invalid number of vectors");
+        throw std::invalid_argument("Ode2StepperGL3: invalid number of vectors");
     if(odeSystem.size() != NDIM * 2)
-        throw std::invalid_argument("Ode2SolverGL3: invalid size of the ODE system");
+        throw std::invalid_argument("Ode2StepperGL3: invalid size of the ODE system");
 }
 
 template<int NDIM>
-void Ode2SolverGL3<NDIM>::init(const double stateNew[], double timeNew)
+void Ode2StepperGL3<NDIM>::init(const double stateNew[])
 {
     state.assign(5*NDIM * numVectors, 0);
     for(unsigned int v=0; v<numVectors; v++)
         std::copy(stateNew + v * 2*NDIM, stateNew + (v+1) * 2*NDIM, state.begin() + v * 5*NDIM);
-    if(timeNew==timeNew)
-        time = timeNew;
     newstep = true;
 }
 
 template<int NDIM>
-double Ode2SolverGL3<NDIM>::getSol(double t, unsigned int i) const
+double Ode2StepperGL3<NDIM>::getSol(double timeOffset, unsigned int i) const
 {
-    double T = t - time;  // expected to be <=0, i.e. interpolating on the previous timestep
+    double T = timeOffset - prevTimeStep;
+    // T is expected to be between -prevTimeStep and 0, i.e. interpolating on the previous timestep
+    if(! ( (prevTimeStep>=0 && timeOffset>=0 && timeOffset<=prevTimeStep)
+        || (prevTimeStep<=0 && timeOffset<=0 && timeOffset>=prevTimeStep) ) )
+        throw std::out_of_range("Ode2StepperGL3: requested time is outside the last completed timestep");
     unsigned int vec = i / (2*NDIM);  // index of the requested vector
     if(vec >= numVectors)
-        throw std::out_of_range("Ode2SolverGL3: element index out of range");
+        throw std::out_of_range("Ode2StepperGL3: element index out of range");
     i -= vec * 2*NDIM;          // index of the requested element in the given vector
     if(T==0)  // fast track: no interpolation needed, just copy the element of the state vector
         return state[vec * 5*NDIM + i];
@@ -538,7 +856,7 @@ double Ode2SolverGL3<NDIM>::getSol(double t, unsigned int i) const
 }
 
 template<int NDIM>
-void Ode2SolverGL3<NDIM>::doStep(double dt)
+double Ode2StepperGL3<NDIM>::doStep(double dt)
 {
     double dt2 = dt*dt, idt = 1./dt, idt2 = idt*idt;
 
@@ -579,9 +897,9 @@ void Ode2SolverGL3<NDIM>::doStep(double dt)
     // values of A(h_k) and B(h_k) are stored as flattened arrays in row-major order
     double a0[NDIM * NDIM], a1[NDIM * NDIM], a2[NDIM * NDIM];
     double b0[NDIM * NDIM], b1[NDIM * NDIM], b2[NDIM * NDIM];
-    odeSystem.eval(time + dt * h0, a0, b0);
-    odeSystem.eval(time + dt * h1, a1, b1);
-    odeSystem.eval(time + dt * h2, a2, b2);
+    odeSystem.evalMat(dt * h0, a0, b0);
+    odeSystem.evalMat(dt * h1, a1, b1);
+    odeSystem.evalMat(dt * h2, a2, b2);
 
     // The second derivative of d-th component x_d is approximated by a quadratic polynomial in h,
     // with coefficients u_d, v_d, w_d to be determined:
@@ -689,38 +1007,47 @@ void Ode2SolverGL3<NDIM>::doStep(double dt)
             xdot[d] += (2 * P - 3 * Q + 4 * R) * dt;
         }
     }
-    time += dt;
+
+    prevTimeStep = dt;
     newstep = false;
+    return dt;
 }
 
 template<int NDIM>
-Ode2SolverGL4<NDIM>::Ode2SolverGL4(const IOde2System& _odeSystem, unsigned int _numVectors) :
-    BaseOde2Solver(_odeSystem, _numVectors), newstep(true)
+Ode2StepperGL4<NDIM>::Ode2StepperGL4(
+    const IOdeSystem2ndOrderLinear& _odeSystem, unsigned int _numVectors) :
+    odeSystem(_odeSystem),
+    numVectors(_numVectors),
+    prevTimeStep(0),
+    newstep(true),
+    state(6*NDIM * numVectors)
 {
     if(numVectors <= 0)
-        throw std::invalid_argument("Ode2SolverGL4: invalid number of vectors");
+        throw std::invalid_argument("Ode2StepperGL4: invalid number of vectors");
     if(odeSystem.size() != NDIM * 2)
-        throw std::invalid_argument("Ode2SolverGL4: invalid size of the ODE system");
+        throw std::invalid_argument("Ode2StepperGL4: invalid size of the ODE system");
 }
 
 template<int NDIM>
-void Ode2SolverGL4<NDIM>::init(const double stateNew[], double timeNew)
+void Ode2StepperGL4<NDIM>::init(const double stateNew[])
 {
     state.assign(6*NDIM * numVectors, 0);
     for(unsigned int v=0; v<numVectors; v++)
         std::copy(stateNew + v * 2*NDIM, stateNew + (v+1) * 2*NDIM, state.begin() + v * 6*NDIM);
-    if(timeNew==timeNew)
-        time = timeNew;
     newstep = true;
 }
 
 template<int NDIM>
-double Ode2SolverGL4<NDIM>::getSol(double t, unsigned int i) const
+double Ode2StepperGL4<NDIM>::getSol(double timeOffset, unsigned int i) const
 {
-    double T = t - time;  // expected to be <=0, i.e. interpolating on the previous timestep
+    double T = timeOffset - prevTimeStep;
+    // T is expected to be between -prevTimeStep and 0, i.e. interpolating on the previous timestep
+    if(! ( (prevTimeStep>=0 && timeOffset>=0 && timeOffset<=prevTimeStep)
+        || (prevTimeStep<=0 && timeOffset<=0 && timeOffset>=prevTimeStep) ) )
+        throw std::out_of_range("Ode2StepperGL4: requested time is outside the last completed timestep");
     unsigned int vec = i / (2*NDIM);  // index of the requested vector
     if(vec >= numVectors)
-        throw std::out_of_range("Ode2SolverGL4: element index out of range");
+        throw std::out_of_range("Ode2StepperGL4: element index out of range");
     i -= vec * 2*NDIM;          // index of the requested element in the given vector
     if(T==0)  // fast track: no interpolation needed, just copy the element of the state vector
         return state[vec * 6*NDIM + i];
@@ -734,7 +1061,7 @@ double Ode2SolverGL4<NDIM>::getSol(double t, unsigned int i) const
 }
 
 template<int NDIM>
-void Ode2SolverGL4<NDIM>::doStep(double dt)
+double Ode2StepperGL4<NDIM>::doStep(double dt)
 {
     double dt2 = dt*dt, dt3 = dt2*dt, idt = 1./dt, idt2 = idt*idt, idt3 = idt2*idt;
 
@@ -796,10 +1123,10 @@ void Ode2SolverGL4<NDIM>::doStep(double dt)
     // values of A(h_k) and B(h_k) are stored as flattened arrays in row-major order
     double a0[NDIM * NDIM], a1[NDIM * NDIM], a2[NDIM * NDIM], a3[NDIM * NDIM];
     double b0[NDIM * NDIM], b1[NDIM * NDIM], b2[NDIM * NDIM], b3[NDIM * NDIM];
-    odeSystem.eval(time + dt * h0, a0, b0);
-    odeSystem.eval(time + dt * h1, a1, b1);
-    odeSystem.eval(time + dt * h2, a2, b2);
-    odeSystem.eval(time + dt * h3, a3, b3);
+    odeSystem.evalMat(dt * h0, a0, b0);
+    odeSystem.evalMat(dt * h1, a1, b1);
+    odeSystem.evalMat(dt * h2, a2, b2);
+    odeSystem.evalMat(dt * h3, a3, b3);
 
     // The second derivative of d-th component x_d is approximated by a cubic polynomial in h,
     // with coefficients u_d, v_d, w_d, z_d to be determined:
@@ -837,7 +1164,7 @@ void Ode2SolverGL4<NDIM>::doStep(double dt)
 
         // iteratively find the coefficients u_d, v_d, w_d, z_d for each component of vector x
         const int NUMITER = newstep ? 8 : 4;
-        for(int i=0; i<NUMITER; i++) {
+        for(int iter=0; iter<NUMITER; iter++) {
             // consider each collocation point h_k in turn, and use it to update u, v, w, z (one by one)
 
             // h_0 is used for calculating u
@@ -911,16 +1238,17 @@ void Ode2SolverGL4<NDIM>::doStep(double dt)
         }
     }
 
-    time += dt;
+    prevTimeStep = dt;
     newstep = false;
+    return dt;
 }
 
 // compile the template instantiation for 1d,2d and 3d systems only
-template class Ode2SolverGL3<1>;
-template class Ode2SolverGL3<2>;
-template class Ode2SolverGL3<3>;
-template class Ode2SolverGL4<1>;
-template class Ode2SolverGL4<2>;
-template class Ode2SolverGL4<3>;
+template class Ode2StepperGL3<1>;
+template class Ode2StepperGL3<2>;
+template class Ode2StepperGL3<3>;
+template class Ode2StepperGL4<1>;
+template class Ode2StepperGL4<2>;
+template class Ode2StepperGL4<3>;
 
 }  // namespace

@@ -109,8 +109,8 @@ $(AMUSE_WORKER): py/interface_amuse.py $(SRCDIR)/interface_amuse.cpp $(OBJECTS) 
 	cp py/interface_amuse.py $(AMUSE_INTERFACE)
 	cp py/example_amuse.py   $(AMUSE_WORKER_DIR)
 	cp py/test_amuse.py      $(AMUSE_WORKER_DIR)
-	-$(AMUSE_DIR)/build.py --type=H $(AMUSE_INTERFACE) AgamaInterface -o "$(AMUSE_WORKER_DIR)/worker_code.h"
-	-$(AMUSE_DIR)/build.py --type=c $(AMUSE_INTERFACE) AgamaInterface -o "$(AMUSE_WORKER_DIR)/worker_code.cpp"
+	-$(AMUSE_DIR)/bin/amusifier --type=H $(AMUSE_INTERFACE) AgamaInterface -o "$(AMUSE_WORKER_DIR)/worker_code.h"
+	-$(AMUSE_DIR)/bin/amusifier --type=c $(AMUSE_INTERFACE) AgamaInterface -o "$(AMUSE_WORKER_DIR)/worker_code.cpp"
 	-$(MPICXX) -o "$@" "$(AMUSE_WORKER_DIR)/worker_code.cpp" $(SRCDIR)/interface_amuse.cpp $(COMPILE_FLAGS_ALL) $(LIBNAME_STATIC) $(LINK_FLAGS_ALL) $(LINK_FLAGS_LIB_AND_EXE_STATIC) $(MUSE_LD_FLAGS)
 
 else

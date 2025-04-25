@@ -1,6 +1,11 @@
 This file lists the most important updates in Agama (in reverse chronological order);
 breaking changes in API are listed at the end.
 
+April 2025:
+Added another method for orbit integration (DPRKN8), improved the accuracy of
+integration of the variational equation and estimation of the Lyapunov exponent,
+and augmented the output of the latter with a second quantity (chaos onset time).
+
 June 2024:
 Added a Hermite method for orbit integration;
 implemented computation of projected potential, acceleration and its derivatives;
@@ -139,6 +144,16 @@ Some of this functionality is not yet ported to Agama.
 
 -----------
 API Changes
+
+April 2025:
+[C++] redesigned the interface for ODE solvers and associated orbit integration module.
+The dense output methods now accept the time offset within the last completed timestep,
+rather than the total time since the beginning of integration; this avoids loss of precision
+especially for the associated variational equation integration (orbit::RuntimeVariational).
+The ODE solvers now only deal with relative time offsets within one timestep, and the
+responsibility for tracking the overall time evolution now falls onto the calling code
+(e.g. orbit::OrbitIntegrator). Therefore, math::Ode*Solver*** classes have been renamed to
+Ode*Stepper*** to better reflect their scope of operation.
 
 October 2024:
 [C++] redesigned the treatment of symmetry in potential expansions: now it can be specified

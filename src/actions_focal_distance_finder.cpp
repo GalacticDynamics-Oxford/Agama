@@ -92,8 +92,9 @@ public:
         R here can have a negative sign (this happens for Lz=0, when the orbit flips to x<0
         and crosses the z=0 plane at negative 'R', but we compute the potential derivatives at |R|,
         and multiply by sign(R) when necessary.
+        Note: potential is assumed to be time-independent, so the t variable is ignored
     */
-    virtual void eval(const double /*t*/, const double x[], double dxdt[]) const
+    virtual void eval(const double /*t*/, const double x[], double dxdt[], double* /*ignored*/) const
     {
         coord::GradCyl grad;
         coord::HessCyl hess;
@@ -120,19 +121,19 @@ private:
 /// function to use in locating the exact time of the x-y plane crossing
 class FindCrossingPointZequal0: public math::IFunction {
 public:
-    FindCrossingPointZequal0(const math::BaseOdeSolver& _solver) :
-        solver(_solver) {};
+    FindCrossingPointZequal0(const math::BaseOdeStepper& _stepper) :
+        stepper(_stepper) {};
     /** used in root-finder to locate the root z(t)=0 */
-    virtual void evalDeriv(const double time, double* val, double* der, double*) const
+    virtual void evalDeriv(const double timeOffset, double* val, double* der, double*) const
     {
         if(val)
-            *val = solver.getSol(time, 1);  // z
+            *val = stepper.getSol(timeOffset, 1);  // z
         if(der)
-            *der = solver.getSol(time, 3);  // vz
+            *der = stepper.getSol(timeOffset, 3);  // vz
     }
     virtual unsigned int numDerivs() const { return 1; }
 private:
-    const math::BaseOdeSolver& solver;
+    const math::BaseOdeStepper& stepper;
 };
 
 /** launch an orbit perpendicularly to x-y plane from radius R0 with vz>0,
@@ -161,16 +162,19 @@ void findCrossingPointR(
     double dvz0= vz0>0 ? ((Lz>0 ? pow_2(Lz) / pow_3(R0) : 0) - grad.dR) / vz0 * dR0 : 0;
     double vars[8] = {R0, 0, 0, vz0, dR0, 0, 0, dvz0};
     OrbitIntegratorMeridionalPlane odeSystem(poten, Lz);
-    math::OdeSolverDOP853 solver(odeSystem, ACCURACY_INTEGR);
-    solver.init(vars);
-    bool finished = false;
+    math::OdeStepperDOP853 stepper(odeSystem, ACCURACY_INTEGR);
+    stepper.init(vars);
     unsigned int numStepsODE = 0;
-    double timeCurr = 0;
-    double timeTraj = 0;
+    // time at the beginning of the current timestep
+    double timeBegin = 0;
+    // time offset of the next point on the stored trajectory from the beginning of the completed timestep
+    double timeOffsetTraj = 0;
+    // time interval between storing points on the trajectory
     const double timeStepTraj = timeCross*0.5/(NUM_STEPS_TRAJ-1);
     traj.clear();
-    while(!finished) {
-        if(solver.doStep() <= 0 || numStepsODE >= MAX_NUM_STEPS_ODE) { // signal of error
+    while(true) {
+        double timeStep = stepper.doStep(INFINITY);
+        if(timeStep <= 0 || numStepsODE >= MAX_NUM_STEPS_ODE) {  // signal of error
             FILTERMSG(utils::VL_WARNING, "estimateFocalDistanceShellOrbit",
                 "Failed to compute orbit for E="+utils::toString(E,16)+
                 ", Lz="+utils::toString(Lz,16)+", R="+utils::toString(R0,16));
@@ -178,37 +182,39 @@ void findCrossingPointR(
             Rcross     = R0;   // this would terminate the root-finder, but we have no better option..
             dRcrossdR0 = NAN;
             return;
-        } else {
-            numStepsODE++;
-            double timePrev = timeCurr;
-            timeCurr = solver.getTime();
-            if(timeStepTraj!=INFINITY)
-            {   // store trajectory
-                while(timeTraj <= timeCurr && traj.size() < NUM_STEPS_TRAJ) {
-                    // store R and z at equal intervals of time
-                    double R = solver.getSol(timeTraj, 0);
-                    double z = solver.getSol(timeTraj, 1);
-                    traj.push_back(coord::PosCyl(fabs(R), z, 0));
-                    timeTraj += timeStepTraj;
-                }
-            }
-            if(solver.getSol(timeCurr, 1) <= 0) {  // z<=0 - we're done
-                finished = true;
-                timeCurr = math::findRoot(FindCrossingPointZequal0(solver),
-                    timePrev, timeCurr, ACCURACY_RSHELL);
-            }
         }
-    }
-    timeCross = timeCurr;    // the moment of crossing of the equatorial plane
-    Rcross    = solver.getSol(timeCurr, 0);
-    double vR = solver.getSol(timeCurr, 2);
-    double vz = solver.getSol(timeCurr, 3);
-    double dR = solver.getSol(timeCurr, 4);  // component of the deviation vector dR at the crossing
-    double dz = solver.getSol(timeCurr, 5);  // -"- dz
-    dRcrossdR0= dR - dz * vR / vz;
-    if(Rcross < 0) {  // this happens for Lz=0, when the orbit crosses the x axis at negative x
-        Rcross     = -Rcross;
-        dRcrossdR0 = -dRcrossdR0;
+        numStepsODE++;
+        if(timeStepTraj!=INFINITY) {  // store trajectory
+            while(timeOffsetTraj <= timeStep && traj.size() < NUM_STEPS_TRAJ) {
+                // store R and z at equal intervals of time
+                double R = stepper.getSol(timeOffsetTraj, 0);
+                double z = stepper.getSol(timeOffsetTraj, 1);
+                traj.push_back(coord::PosCyl(fabs(R), z, 0));
+                timeOffsetTraj += timeStepTraj;
+            }
+            timeOffsetTraj -= timeStep;  // prepare for the next timestep
+        }
+        if(stepper.getSol(/*end of current timestep*/ timeStep, /*index of z-coordinate*/ 1) <= 0)
+        {   // z<=0 - we're done
+            // time offset of the z=0 crossing point from the beginning of the last timestep
+            double timeOffsetCross = math::findRoot(FindCrossingPointZequal0(stepper),
+                0, timeStep, ACCURACY_RSHELL);
+            // the time of crossing of the equatorial plane, measured from the beginning of orbit
+            timeCross = timeBegin + timeOffsetCross;
+            Rcross    = stepper.getSol(timeOffsetCross, 0);
+            double vR = stepper.getSol(timeOffsetCross, 2);
+            double vz = stepper.getSol(timeOffsetCross, 3);
+            // components of the deviation vector (dR,dz) at the crossing point
+            double dR = stepper.getSol(timeOffsetCross, 4);
+            double dz = stepper.getSol(timeOffsetCross, 5);
+            dRcrossdR0= dR - dz * vR / vz;
+            if(Rcross < 0) {  // this happens for Lz=0, when the orbit crosses the x axis at negative x
+                Rcross     = -Rcross;
+                dRcrossdR0 = -dRcrossdR0;
+            }
+            return;
+        }
+        timeBegin += timeStep;
     }
 }
 

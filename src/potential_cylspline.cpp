@@ -267,9 +267,8 @@ void computePotentialHarmonicAtPoint(int m, double R, double z, double R0, doubl
             values[1] += -sq * mass * (dQ/R - (Q/2 + u*dQ)/R0);
             values[2] += -sq * mass * dQ * (z0-z) / (R*R0);
         }
-    } else      // degenerate case
-    if(m==0) {  // here only m=0 harmonic survives;
-        double s = 1 / sqrt(t + EPS2_SOFTENING); // actually the integration never reaches R=0 anyway
+    } else if(m==0) {  // degenerate case (R or R0 are zero) - here only m=0 harmonic survives
+        double s = 1 / sqrt(t);
         values[0] += -mass * s;
         if(useDerivs)
             values[2] += mass * s * (z0-z) / t;
@@ -447,6 +446,10 @@ void computeAzimuthalHarmonicsFromParticles(
         const coord::PosCyl& pc = particles.point(b);
         Rz[b].first = pc.R;
         Rz[b].second= pc.z;
+        if(pc.R == 0 && pc.z == 0 && particles.mass(b) != 0)
+            // this check is only relevant for CylSpline, not for DensityAzimuthalHarmonic,
+            // but currently there is no method for constructing the latter directly from a snapshot
+            throw std::runtime_error("CylSpline: no massive particles at r=0 allowed");
         math::trigMultiAngle(pc.phi, mmax, needSine, trig);
         for(unsigned int i=0; i<nind; i++) {
             int m = indices[i];

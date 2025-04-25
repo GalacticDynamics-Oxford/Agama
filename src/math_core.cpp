@@ -1063,6 +1063,37 @@ double findMin(const IFunction& fnc, double xlower, double xupper, double xinit,
     return xroot;
 }
 
+namespace {  // internal
+
+/** helper function for finding the slope of asymptotic power-law behaviour of a certain function:
+    if  f(x) ~ f0 + a * x^b  as  x --> 0  or  x --> infinity,  then the slope b is given by
+    solving the equation  [x1^b - x2^b] / [x2^b - x3^b] = [f(x1) - f(x2)] / [f(x2) - f(x3)],
+    where x1, x2 and x3 are three consecutive points near the end of the interval.
+    The arrays of x and corresponding f(x) are passed as parameters to this function,
+    and its value() method is used in the root-finding routine.
+*/
+class SlopeFinder: public math::IFunctionNoDeriv {
+    const double r12, r32, ratio;
+public:
+    SlopeFinder(double logx1, double logx2, double logx3, double f1, double f2, double f3) :
+        r12(logx1-logx2), r32(logx3-logx2), ratio( (f1-f2) / (f2-f3) ) {}
+
+    virtual double value(const double b) const {
+        if(b==0)
+            return -r12 / r32 - ratio;
+        return (exp(b * r12) - 1) / (1 - exp(b * r32)) - ratio;
+    }
+};
+
+}  // internal ns
+
+void findAsymptote(double x1, double x2, double x3, double f1, double f2, double f3,
+    double& a, double& b, double& c)
+{
+    b = findRoot(SlopeFinder(log(x1), log(x2), log(x3), f1, f2, f3),  -100, 100, /*tolerance*/1e-6);
+    a = (f1 - f2) / (pow(x1, b) - pow(x2, b));
+    c = f1 - a * pow(x1, b);
+}
 
 // ------- integration routines ------- //
 

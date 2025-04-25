@@ -57,19 +57,22 @@ void NFW::evalDeriv(double r,
 {
     double rrel = r / scaleRadius;
     double ln_over_r = r==INFINITY ? 0 :
-        rrel > 7e-4 ? log(1 + rrel) / r :
-        // accurate asymptotic expansion at r->0
-        (1 + rrel * (-1./2 + rrel * (1./3 + rrel * (-1./4)))) / scaleRadius;
+        rrel > 0.016 ? log(1 + rrel) / r :
+        // accurate (14 digits) asymptotic Pade(2,3) expansion at r->0
+        (1 + rrel * (1 + 11./60 * rrel)) / (1 + rrel * (1.5 + rrel * (0.6 + rrel * 0.05))) / scaleRadius;
     if(potential)
         *potential = -mass * ln_over_r;
     if(deriv)
-        *deriv = mass * (rrel > 7e-4 ?
+        *deriv = mass * (rrel > 0.013 ?
             (ln_over_r - 1/(r+scaleRadius)) / r :
-            (1./2 + rrel * (-2./3 + rrel * 3./4)) / pow_2(scaleRadius));
+            // accurate (12 digits) asymptotic Pade(1,3) expansion at r->0
+            (0.5 + 17./96 * rrel) / (1 + rrel * (27./16 + rrel * (0.75 + 11./160 * rrel))) /
+            pow_2(scaleRadius));
     if(deriv2)
-        *deriv2 = -mass * (rrel > 7e-4 ?
+        *deriv2 = -mass * (rrel > 0.010 ?
             (2*ln_over_r - (2*scaleRadius + 3*r) / pow_2(scaleRadius+r) ) / pow_2(r) :
-            (2./3 - rrel * 3./2) / pow_3(scaleRadius) );
+            // accurate (10 digits) asymptotic Pade(2,3) expansion at r->0
+            1 / (1.5 + rrel * (27./8 + rrel * (351./160 + 183./640 * rrel))) / pow_3(scaleRadius) );
 }
 
 void MiyamotoNagai::evalCyl(const coord::PosCyl &pos,

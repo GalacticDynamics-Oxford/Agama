@@ -85,7 +85,7 @@ public:
         captureRadius[1] = _captureRadius[1];
     }
 
-    virtual bool processTimestep(double tbegin, double tend);
+    virtual bool processTimestep(double tbegin, double timestep);
 };
 
 /** Fixed global parameters of the loss-cone module */

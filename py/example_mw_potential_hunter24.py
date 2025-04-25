@@ -10,7 +10,7 @@ to the region outside the central 5 kpc.
 The left panel shows the circular-velocity curve (in the axisymmetrized potential),
 and the right panel shows examples of a few orbits in this potential.
 
-References: Sormani et al. 2022 (MNRAS Letters/514/L5); Hunter et al. 2024 (arXiv:2403.18000)
+References: Sormani et al. 2022 (MNRAS Letters/514/L5); Hunter et al. 2024 (A&A/642/216)
 
 Authors: Mattia Sormani, Glen Hunter, Eugene Vasiliev
 """
@@ -135,22 +135,31 @@ def makePotentialModel():
 
     # the remaining two files with rotation are created "manually", since the Potential.export() method
     # currently cannot store the information about potential modifiers (including rotation)
+    rotation_bar = '''file=%s
+# The line below specifies both the orientation of the bar and the its pattern speed as follows:
+# the first pair of numbers [0,phi0] sets the angle of CCW rotation of the bar (in radians)
+# at present time (t=0);
+# the second pair [1,phi0+Omega*1] sets its angle at time t=1.
+# Given that there are only two numbers, the angle is linearly interpolated between them,
+# and always extrapolated linearly beyond the endpoints of the interval, corresponding to
+# a constant pattern speed Omega (here it is negative, i.e. CW rotation).
+# Units are: length=1 kpc, velocity=1 km/s (hence pattern speed is km/s/kpc);
+# there are no potential parameters with the dimension of mass, so the mass unit is unspecified.
+rotation=[[0,%.2f],[1,%.2f]]
+''' % (filename_full, angle_bar, angle_bar + Omega_bar)
     with open(filename_rotating, 'w') as f:
         f.write('''# Milky Way potential from Hunter+ 2024 with added rotation
 [Potential]
-file=%s
-rotation=[[0,%.2f],[1,%.2f]]
-''' % (filename_full, angle_bar, angle_bar + Omega_bar))
+''' + rotation_bar)
     with open(filename_rotspiral, 'w') as f:
         f.write('''# Milky Way potential from Hunter+ 2024 with added rotation and spiral arms
 [Potential main]
-file=%s
-rotation=[[0,%.2f],[1,%.2f]]
-
+%s
 [Potential spiral]
 file=%s
+# same principle as above, but for a different pattern speed of the spiral arms
 rotation=[[0,%.2f],[1,%.2f]]
-''' % (filename_full, angle_bar, angle_bar + Omega_bar, filename_spiral, angle_bar, angle_bar + Omega_spiral))
+''' % (rotation_bar, filename_spiral, angle_bar, angle_bar + Omega_spiral))
 
 try:
     pot_axi = agama.Potential(filename_axi)

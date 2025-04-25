@@ -19,17 +19,18 @@ class PericenterFinder: public math::IFunctionNoDeriv {
     const potential::KeplerBinaryParams& bh;
     const orbit::BaseOrbitIntegrator& orbint;
     const int bhindex;
+    const double tbegin;
 public:
     PericenterFinder(const potential::KeplerBinaryParams& _bh,
-        const orbit::BaseOrbitIntegrator& _orbint, const int _bhindex) :
-        bh(_bh), orbint(_orbint), bhindex(_bhindex)  {}
+        const orbit::BaseOrbitIntegrator& _orbint, int _bhindex, double _tbegin) :
+        bh(_bh), orbint(_orbint), bhindex(_bhindex), tbegin(_tbegin)  {}
 
     /// return the time derivative of the squared distance to the given black hole
-    virtual double value(const double time) const
+    virtual double value(const double timeOffset) const
     {
         double bhX[2], bhY[2], bhVX[2], bhVY[2];
-        bh.keplerOrbit(time, bhX, bhY, bhVX, bhVY);
-        coord::PosVelCar pv = orbint.getSol(time);
+        bh.keplerOrbit(tbegin+timeOffset, bhX, bhY, bhVX, bhVY);
+        coord::PosVelCar pv = orbint.getSol(timeOffset);
         return
             (pv.x - bhX[bhindex]) * (pv.vx - bhVX[bhindex]) +
             (pv.y - bhY[bhindex]) * (pv.vy - bhVY[bhindex]) +
@@ -39,7 +40,7 @@ public:
 
 } // anonymous namespace
 
-bool RuntimeLosscone::processTimestep(double tbegin, double tend)
+bool RuntimeLosscone::processTimestep(double tbegin, double timestep)
 {
     // first check if this particle has already been captured
     // (actually then the orbit integration should have been terminated, so this check is redundant)
@@ -48,15 +49,15 @@ bool RuntimeLosscone::processTimestep(double tbegin, double tend)
 
     int numBH = bh.sma>0 ? 2 : 1;
     for(int b=0; b<numBH; b++) {
-        const PericenterFinder pf(bh, orbint, b);
+        const PericenterFinder pf(bh, orbint, b, tbegin);
 
         // if this is the first timestep, need to compute d(r^2)/dt at the beginning
         // of the timestep, otherwise copy the stored value from the previous timestep
         // w.r.t the central black hole(s) at the beginning of the timestep
-        double prevdrdt = tbegin == 0 ? pf(tbegin) : drdt[b];
+        double prevdrdt = tbegin == 0 ? pf(0) : drdt[b];
 
         // now compute the same quantity at the end of the current timestep
-        drdt[b] = pf(tend);
+        drdt[b] = pf(timestep);
 
         // check if we just passed a pericenter w.r.t. one of the black hole(s),
         // i.e. r^2 was decreasing at the beginning of this timestep,
@@ -64,19 +65,19 @@ bool RuntimeLosscone::processTimestep(double tbegin, double tend)
         if(! (prevdrdt <= 0 && drdt[b] > 0))
             continue;
 
-        // if we did, then find the exact time of pericenter passage
-        double tperi = math::findRoot(pf, tbegin, tend, 1e-4);
-        if(!isFinite(tperi))  // the root-finder failed:
+        // if we did, then find the exact time of pericenter passage (offset relative to tbegin)
+        double tperiOffset = math::findRoot(pf, 0, timestep, 1e-4);
+        if(!isFinite(tperiOffset))  // the root-finder failed:
             // this may happen if the velocity has changed unfavourably between
             // the end of the previous timestep and the beginning of the current one,
             // due to two-body perturbation applied between the timesteps;
             // in this case set assume the pericenter passage happened at the timestep boundary.
-            tperi = tbegin;
+            tperiOffset = 0;
 
         // compute the pericenter distance
         double bhX[2], bhY[2], bhVX[2], bhVY[2];
-        bh.keplerOrbit(tperi, bhX, bhY, bhVX, bhVY);
-        coord::PosVelCar posvel = orbint.getSol(tperi);
+        bh.keplerOrbit(tperiOffset + tbegin, bhX, bhY, bhVX, bhVY);
+        coord::PosVelCar posvel = orbint.getSol(tperiOffset);
         double rperi = sqrt(pow_2(posvel.x-bhX[b]) + pow_2(posvel.y-bhY[b]) + pow_2(posvel.z));
 
         // compare it with the capture radius
@@ -84,7 +85,7 @@ bool RuntimeLosscone::processTimestep(double tbegin, double tend)
             continue;
 
         // record the capture event
-        output->tcapt   = tperi;
+        output->tcapt   = tperiOffset + tbegin;
         double Mbh      = bh.mass * (numBH==1 ? 1 : (b==0 ? 1 : bh.q) / (1 + bh.q));
         output->E       = -Mbh / rperi +
             0.5 * (pow_2(posvel.vx-bhVX[b]) + pow_2(posvel.vy-bhVY[b]) + pow_2(posvel.vz));
@@ -93,7 +94,7 @@ bool RuntimeLosscone::processTimestep(double tbegin, double tend)
         output->indexBH = b;
 
         // store the position/velocity at the moment of capture
-        orbint.init(posvel, tperi);
+        orbint.init(posvel, tperiOffset + tbegin);
 
         // inform the ODE integrator that this particle is no more...
         return false;

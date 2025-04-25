@@ -34,36 +34,29 @@ const char* err = " \033[1;31m**\033[0m";
     and the IOde2System interface, allowing to use it in the specialized solvers for this type of ODEs.
 */
 template<int NDIM>
-class RHS: public math::IOdeSystem, public math::IOde2System {
-    void rhs(const double t, double a[], double b[]) const;
+class RHS: public math::IOdeSystem2ndOrderLinear {
+    const double& tbegin;  // reference to the current moment of time at the beginning of this timestep
 public:
-    // IOdeSystem interface
-    virtual void eval(const double t, const double x[], double dxdt[]) const;
-    // IOde2System interface
-    virtual void eval(const double t, double a[], double b[]) const { rhs(t, a, b); }
+    RHS(const double& _tbegin) : tbegin(_tbegin) {}
+    virtual void evalMat(const double deltat, double a[], double b[]) const;
     virtual unsigned int size() const { return NDIM*2; }
     // the analytic solution
     static void trueSolution(const double t, double sol[]);
 };
 
-// NDIM=1: trivial system x'' = -3*x + x', analytic solution in terms of trig and exp
-template<> void RHS<1>::rhs(const double, double a[], double b[]) const {
+// NDIM=1: trivial system x'' = -3.25*x + x', analytic solution in terms of trig and exp
+template<> void RHS<1>::evalMat(const double, double a[], double b[]) const {
     a[0] = -3.25;
     b[0] = 1.0;
 }
-template<> void RHS<1>::eval(const double t, const double x[], double dxdt[]) const {
-    double a, b;
-    rhs(t, &a, &b);
-    dxdt[0] = x[1];
-    dxdt[1] = a * x[0] + b * x[1];
-}
+
 template<> void RHS<1>::trueSolution(const double t, double sol[]) {
     sol[0] = (cos(M_SQRT3*t) - 0.5/M_SQRT3 * sin(M_SQRT3*t)) * exp(0.5*t);
 }
 
 // NDIM=2: more complicated system with time-dependent coefs, analytical solution in terms of trig fncs
-template<> void RHS<2>::rhs(const double t, double a[], double b[]) const {
-    double t2=t*t, t3=t*t2, t4=t*t3, den=1 / (t4 + 4*t + 4);
+template<> void RHS<2>::evalMat(const double deltat, double a[], double b[]) const {
+    double t=tbegin+deltat, t2=t*t, t3=t*t2, t4=t*t3, den=1 / (t4 + 4*t + 4);
     a[0] = den * (-0.25*t4 - 2*t2 - 8*t - 4);
     a[1] = den * (2.75*t2 + 1.5*t - 2);
     a[2] = den * (1.5*t3 + 8*t + 8);
@@ -73,28 +66,21 @@ template<> void RHS<2>::rhs(const double t, double a[], double b[]) const {
     b[2] = den * (-4*t2 + 3*t);
     b[3] = den * (2*t3 - 1.5*t2);
 }
-template<> void RHS<2>::eval(const double t, const double x[], double dxdt[]) const {
-    double a[4], b[4];
-    rhs(t, a, b);
-    dxdt[0] = x[2];
-    dxdt[1] = x[3];
-    dxdt[2] = a[0] * x[0] + a[1] * x[1] + b[0] * x[2] + b[1] * x[3];
-    dxdt[3] = a[2] * x[0] + a[3] * x[1] + b[2] * x[2] + b[3] * x[3];
-}
+
 template<> void RHS<2>::trueSolution(const double t, double sol[]) {
     sol[0] =   cos(t) + t*sin(t/2);
     sol[1] = t*sin(t) + 2*sin(t/2);
 }
 
 
-template<class Solver, int NDIM>
-void testSolver(double dt, double& errStep, double& errInt)
+template<class Stepper, int NDIM, typename Param>
+bool testStepper(double dt, double& errStep, double& errInt, Param param)
 {
-    RHS<NDIM> rhs;
     double t = 0.;
     double x[] = {1., 0., 0., 1.};
-    Solver solver(rhs);
-    solver.init(x);
+    RHS<NDIM> rhs(/*reference to the time variable, modified as the integration progresses*/ t);
+    Stepper stepper(rhs, param);
+    stepper.init(x);
     int ind=0;
     errStep = 0, errInt = 0;
     const int numPoints = 65;  // points where to compare the numerical solution with the analytic one
@@ -102,14 +88,18 @@ void testSolver(double dt, double& errStep, double& errInt)
     for(int i=0; i<numPoints; i++)
         testTimes[i] = 2 + 0.015625*i;
     while(t<testTimes[numPoints-1]) {
-        solver.doStep(dt);
+        double stepTaken = stepper.doStep(dt);
+        if(stepTaken != dt) {
+            std::cout << "Prescribed stepsize not respected: " << dt << "!=" << stepTaken << err << "\n";
+            return false;
+        }
         t+=dt;
         while(ind<numPoints && testTimes[ind] <= t) {
             double tcheck = testTimes[ind], err = 0;
             double trueSolution[NDIM];
             rhs.trueSolution(tcheck, trueSolution);
             for(int d=0; d<NDIM; d++)
-                err = fmax(err, fabs(solver.getSol(tcheck, d) - trueSolution[d]));
+                err = fmax(err, fabs(stepper.getSol(tcheck-t+dt, d) - trueSolution[d]));
             if(t == tcheck)
                 errStep = fmax(errStep, err);
             else
@@ -117,6 +107,7 @@ void testSolver(double dt, double& errStep, double& errInt)
             ind++;
         }
     }
+    return true;
 }
 
 // test the accuracy of ODE solvers for systems with known analytic solutions:
@@ -129,12 +120,12 @@ bool testOde()
     "(i) evaluated at some points inside the step (the accuracy of interpolation / dense output).\n"
     "timestep GL3(s)  GL3(i)  GL4(s)  GL4(i)  DOP(s)  DOP(i)\n";
     bool ok = true;
+    double err3s, err3i, err4s, err4i, err8s, err8i;
     std::cout << "1d system\n";
     for(double dt=1; dt>=0.0625; dt*=0.5) {
-        double err3s, err3i, err4s, err4i, err8s, err8i;
-        testSolver<math::Ode2SolverGL3<1>, 1>(dt, err3s, err3i);
-        testSolver<math::Ode2SolverGL4<1>, 1>(dt, err4s, err4i);
-        testSolver<math::OdeSolverDOP853 , 1>(dt, err8s, err8i);
+        ok &= testStepper<math::Ode2StepperGL3<1>, 1>(dt, err3s, err3i, /*num vectors*/ 1);
+        ok &= testStepper<math::Ode2StepperGL4<1>, 1>(dt, err4s, err4i, /*num vectors*/ 1);
+        ok &= testStepper<math::OdeStepperDOP853 , 1>(dt, err8s, err8i, /*accuracy*/ INFINITY);
         std::cout << utils::pp(dt,6) + "  " +
         utils::pp(err3s,7) + ' ' + utils::pp(err3i,7) + ' ' +
         utils::pp(err4s,7) + ' ' + utils::pp(err4i,7) + ' ' +
@@ -150,10 +141,9 @@ bool testOde()
     }
     std::cout << "2d system\n";
     for(double dt=1; dt>=0.0625; dt*=0.5) {
-        double err3s, err3i, err4s, err4i, err8s, err8i;
-        testSolver<math::Ode2SolverGL3<2>, 2>(dt, err3s, err3i);
-        testSolver<math::Ode2SolverGL4<2>, 2>(dt, err4s, err4i);
-        testSolver<math::OdeSolverDOP853 , 2>(dt, err8s, err8i);
+        ok &= testStepper<math::Ode2StepperGL3<2>, 2>(dt, err3s, err3i, 1);
+        ok &= testStepper<math::Ode2StepperGL4<2>, 2>(dt, err4s, err4i, 1);
+        ok &= testStepper<math::OdeStepperDOP853 , 2>(dt, err8s, err8i, INFINITY);
         std::cout << utils::pp(dt,6) + "  " +
         utils::pp(err3s,7) + ' ' + utils::pp(err3i,7) + ' ' +
         utils::pp(err4s,7) + ' ' + utils::pp(err4i,7) + ' ' +
@@ -194,22 +184,26 @@ public:
     
     /// angular frequency (pattern speed) of the rotating frame
     const double Omega;
-    
+
+    // reference to the current moment of time at the beginning of this timestep
+    const double& tbegin;
+
     /// initialize the object for the given potential
-    OrbitIntegratorVarEq(const potential::BasePotential& _potential, double _Omega=0) :
-        potential(_potential), Omega(_Omega) {}
+    OrbitIntegratorVarEq(const potential::BasePotential& _potential, double _Omega, double &_tbegin) :
+        potential(_potential), Omega(_Omega), tbegin(_tbegin) {}
 
     virtual unsigned int size() const { return 12; }
 
-    virtual void eval(const double time, const double x[], double dxdt[]) const;
+    virtual void eval(const double timeOffset, const double x[], double dxdt[], double*) const;
 };
 
 template<>
-void OrbitIntegratorVarEq<coord::Car>::eval(const double time, const double x[], double dxdt[]) const
+void OrbitIntegratorVarEq<coord::Car>::eval(const double timeOffset, const double x[], double dxdt[],
+    double* /*accFac - ignored*/) const
 {
     coord::GradCar grad;
     coord::HessCar hess;
-    potential.eval(coord::PosCar(x[0], x[1], x[2]), NULL, &grad, &hess, time);
+    potential.eval(coord::PosCar(x[0], x[1], x[2]), NULL, &grad, &hess, tbegin + timeOffset);
     // time derivative of position
     dxdt[0] = x[3] + Omega * x[1];
     dxdt[1] = x[4] - Omega * x[0];
@@ -230,7 +224,8 @@ void OrbitIntegratorVarEq<coord::Car>::eval(const double time, const double x[],
 }
 
 template<>
-void OrbitIntegratorVarEq<coord::Cyl>::eval(const double time, const double x[], double dxdt[]) const
+void OrbitIntegratorVarEq<coord::Cyl>::eval(const double timeOffset, const double x[], double dxdt[],
+    double* /*accFac - ignored*/) const
 {
     coord::PosVelCyl p(x);
     if(x[0]<0) {    // R<0
@@ -239,7 +234,7 @@ void OrbitIntegratorVarEq<coord::Cyl>::eval(const double time, const double x[],
     }
     coord::GradCyl grad;
     coord::HessCyl hess;
-    potential.eval(p, NULL, &grad, &hess, time);
+    potential.eval(p, NULL, &grad, &hess, tbegin + timeOffset);
     double Rinv = p.R!=0 ? 1/p.R : 0;  // avoid NAN in degenerate cases
     if(x[0]<0)
         grad.dR = -grad.dR;
@@ -276,33 +271,32 @@ void integrateOrbitVarEq(
     orbit::Trajectory& trajectory,
     std::vector< std::pair<double, double> >& logDevVec)
 {
-    OrbitIntegratorVarEq<CoordT> orbitIntegrator(potential, Omega);
-    math::OdeSolverDOP853 solver(orbitIntegrator/*, accuracy*/);
+    double timeCurr = 0;
+    OrbitIntegratorVarEq<CoordT> orbitIntegrator(potential, Omega, /*reference to*/ timeCurr);
+    math::OdeStepperDOP853 stepper(orbitIntegrator/*, accuracy*/);
     // first 6 variables are always position/velocity, the rest is the deviation vector
     double vars[12] = { 0, 0, 0, 0, 0, 0,
         sqrt(7./90), sqrt(11./90), sqrt(13./90), sqrt(17./90), sqrt(19./90), sqrt(23./90) };
     coord::toPosVel<coord::Car, CoordT>(initialConditions).unpack_to(vars);
-    solver.init(vars);
-    double timeCurr = 0;
+    stepper.init(vars);
     double addLogDevVec = 0;
     while(timeCurr < totalTime) {
-        solver.doStep();
-        double timePrev = timeCurr;
-        timeCurr = fmin(solver.getTime(), totalTime);
+        double timeStep = stepper.doStep(totalTime - timeCurr);
+        double timeNext = timeCurr + timeStep;  // time at the end of this timestep
         const double ROUNDOFF = 1e-15;
-        ptrdiff_t ibegin = static_cast<ptrdiff_t>(timePrev / samplingInterval);
-        ptrdiff_t iend   = static_cast<ptrdiff_t>(timeCurr / samplingInterval * (1 + ROUNDOFF));
-        double dtroundoff = ROUNDOFF * timeCurr;
+        ptrdiff_t ibegin = static_cast<ptrdiff_t>(timeCurr / samplingInterval);
+        ptrdiff_t iend   = static_cast<ptrdiff_t>(timeNext / samplingInterval * (1 + ROUNDOFF));
+        double dtroundoff = ROUNDOFF * timeNext;
         trajectory.resize(iend + 1);
         logDevVec. resize(iend + 1);
         bool needToRescale = false;
         for(ptrdiff_t iout=ibegin; iout<=iend; iout++) {
-            double tout = samplingInterval * iout;
-            if(tout >= timePrev - dtroundoff && tout <= timeCurr + dtroundoff) {
+            double tout = samplingInterval * iout, toffset = tout-timeCurr;
+            if(tout >= timeCurr && tout <= timeNext + dtroundoff) {
                 double devVec2 = 0;
                 for(int d=0; d<6; d++) {
-                    vars[d] = solver.getSol(tout, d);
-                    devVec2 += pow_2(solver.getSol(tout, d+6));
+                    vars[d] = stepper.getSol(toffset, d);
+                    devVec2 += pow_2(stepper.getSol(toffset, d+6));
                 }
                 trajectory[iout].first = toPosVelCar(coord::PosVelT<CoordT>(vars));
                 trajectory[iout].second= tout;
@@ -315,15 +309,16 @@ void integrateOrbitVarEq(
         if(needToRescale) {
             double devVec2 = 0;
             for(int d=0; d<12; d++) {
-                vars[d] = solver.getSol(timeCurr, d);
+                vars[d] = stepper.getSol(timeStep, d);
                 if(d>=6) devVec2 += pow_2(vars[d]);
             }
             double logDV = log(devVec2) * 0.5, mult = exp(-logDV);
             addLogDevVec += logDV;
             for(int d=0; d<6; d++)
                 vars[d+6] *= mult;
-            solver.init(vars);
+            stepper.init(vars);
         }
+        timeCurr = timeNext;
     }
 }
 
@@ -333,31 +328,52 @@ bool testLyapunov(const char* potParams, double Omega, bool expectChaotic)
     potential::PtrPotential pot = potential::createPotential(utils::KeyValueMap(potParams));
     coord::PosVelCar initCond(1., 1., 1., 0., 0., 0.);
     double orbitalPeriod = potential::T_circ(*pot, totalEnergy(*pot, initCond));  // characteristic time
-    double timeTotal = 2000. * orbitalPeriod;       // integration time in orbital periods
-    double samplingInterval = 0.1 * orbitalPeriod;  // store output with sufficient temporal resolution
+    unsigned int trajSize = 20001;  // number of points in recorded trajectory
+    double timeTotal = (trajSize/10) * orbitalPeriod;
+    double samplingInterval = timeTotal / (trajSize-1);
     orbit::Trajectory
-        trajectory6,                     // from standard 6-dimensional ODE integrator
-        trajectory12car,                 // from 12-dimensional ODE integrator (orbit+var.eq.)
-        trajectory12cyl,                 // same in cylindrical coords
-        deviationVectors[6];             // deviation vectors reported by the 6d var.eq.solver
+        trajectory6,              // from standard 6-dimensional ODE integrator
+        trajectory6rev,           // same but reversing the time direction
+        trajectory12car,          // from 12-dimensional ODE integrator (orbit+var.eq.)
+        trajectory12cyl,          // same in cylindrical coords
+        deviationVectors[6];      // deviation vectors reported by the 6d var.eq.solver
     std::vector< std::pair<double, double> >
-        logDeviationVector12car,         // from the var.eq. solved by the 12d orbit integrator
-        logDeviationVector12cyl;         // same in cylindrical coords
-    double lyap6, lyap12car, lyap12cyl;  // Lyapunov exp. estimated from these three arrays
-    orbit::OrbitIntParams par6(1e-9);    // accuracy requirements are different for 6d and 12d,
-    // chosen so that the number of timesteps taken by the ODE integrators are approximately equal
+        logDeviationVector12car,  // from the var.eq. solved by the 12d orbit integrator
+        logDeviationVector12cyl;  // same in cylindrical coords
+    // Lyapunov exponents and chaos onset times estimated from these arrays
+    double lyap6[2], lyap6rev[2], lyap12car[2], lyap12cyl[2];
+    // accuracy requirements are different for 6d and 12d, chosen so that the number of timesteps
+    // taken by the ODE integrators are approximately equal (hence 6d has a tighter tolerance)
+    orbit::OrbitIntParams par6(1e-9);
 
     // 6d ODE system with the variational equation solved by another specialized solver attached
     // to the RuntimeVariational function, which also outputs the evolution of all 6 deviation vectors
+    // (this is the standard way of computing orbit derivatives or the Lyapunov exponent)
     {
         orbit::OrbitIntegrator<coord::Car> orbint(*pot, Omega, par6);
         orbint.addRuntimeFnc(orbit::PtrRuntimeFnc(new orbit::RuntimeVariational(
-            orbint, samplingInterval, /*output*/ deviationVectors, &lyap6)));
+            orbint, samplingInterval, /*output*/ deviationVectors, lyap6)));
         orbint.addRuntimeFnc(orbit::PtrRuntimeFnc(new orbit::RuntimeTrajectory(
             orbint, samplingInterval, trajectory6)));
         orbint.init(initCond);
         orbint.run(timeTotal);
         // finalize the runtime functions (compute Lyapunov exponent from stored data) once they go out of scope
+    }
+
+    // same as above, but starting at nonzero initial time and integrating backward;
+    // the chaotic properties of the orbit should be the same regardless of the direction of time
+    {
+        orbit::OrbitIntegrator<coord::Car> orbint(*pot, Omega, par6);
+        orbint.addRuntimeFnc(orbit::PtrRuntimeFnc(new orbit::RuntimeVariational(
+            orbint, samplingInterval, /*no deviation vectors*/ NULL, lyap6rev)));
+        orbint.addRuntimeFnc(orbit::PtrRuntimeFnc(new orbit::RuntimeTrajectory(
+            orbint, samplingInterval, trajectory6rev)));
+        orbint.init(initCond, timeTotal * 0.3);
+        orbint.run(-timeTotal);
+    }
+    if(trajectory6.size() != trajSize || trajectory6rev.size() != trajSize) {
+        std::cout << "incorrect length of trajectory" << err << '\n';
+        return false;
     }
 
     // compare the evolution of deviation vectors (i.e. infinitesimally small perturbations
@@ -367,6 +383,10 @@ bool testLyapunov(const char* potParams, double Omega, bool expectChaotic)
     const double DEV_INIT = 1e-10, DEV_MAX = 1e-5, TOLERANCE = 1e-4;
     double timeFollow = timeTotal;
     for(int vec=0; vec<6; vec++) {
+        if(deviationVectors[vec].size() != trajSize) {
+            std::cout << "incorrect length of deviation vectors" << err << '\n';
+            return false;
+        }
         for(size_t s=0; s<deviationVectors[vec].size(); s++) {
             const coord::PosVelCar& pv = deviationVectors[vec][s].first;
             double mag = sqrt(pow_2(pv.x) + pow_2(pv.y) + pow_2(pv.z) +
@@ -403,18 +423,16 @@ bool testLyapunov(const char* potParams, double Omega, bool expectChaotic)
     // 12d ODE system with the variational equation solved directly by the ODE integrator
     integrateOrbitVarEq<coord::Car>(
         initCond, timeTotal, samplingInterval, *pot, Omega, trajectory12car, logDeviationVector12car);
-    lyap12car = orbit::calcLyapunovExponent(logDeviationVector12car, orbitalPeriod);
+    orbit::calcLyapunovExponent(logDeviationVector12car, orbitalPeriod, /*output*/ lyap12car);
     integrateOrbitVarEq<coord::Cyl>(
         initCond, timeTotal, samplingInterval, *pot, Omega, trajectory12cyl, logDeviationVector12cyl);
-    lyap12cyl = orbit::calcLyapunovExponent(logDeviationVector12cyl, orbitalPeriod);
+    orbit::calcLyapunovExponent(logDeviationVector12cyl, orbitalPeriod, /*output*/ lyap12cyl);
 
     // print out log(devvec) as a function of time
-    size_t size = trajectory6.size();
-    if( size != trajectory12car.size() || size != trajectory12cyl.size() ||
-        size != deviationVectors[0].size() ||
-        size != logDeviationVector12car.size() || size != logDeviationVector12cyl.size() )
+    if( trajSize != trajectory12car.size() || trajSize != trajectory12cyl.size() ||
+        trajSize != logDeviationVector12car.size() || trajSize != logDeviationVector12cyl.size() )
     {
-        std::cout << "unequal sizes of output arrays" << err << '\n';
+        std::cout << "incorrect length of output arrays" << err << '\n';
         return false;
     }
     if(utils::verbosityLevel >= utils::VL_VERBOSE) {
@@ -422,7 +440,7 @@ bool testLyapunov(const char* potParams, double Omega, bool expectChaotic)
         std::ofstream strm(("test_orbit_lyapunov"+utils::toString(testIndex++)+".dat").c_str());
         strm << "#time\tx(6) y(6) z(6)\txcar(12) ycar(12) zcar(12)\txcyl(12) ycyl(12) zcyl(12)\t"
             "lnw6 lnw12car lnw12cyl\n";
-        for(size_t i=0; i<size; i++) {
+        for(size_t i=0; i<trajSize; i++) {
             double logDeviationVector6 = -INFINITY;
             for(int vec=0; vec<6; vec++) {
                 const coord::PosVelCar& p = deviationVectors[vec][i].first;
@@ -459,14 +477,13 @@ bool testLyapunov(const char* potParams, double Omega, bool expectChaotic)
         ";  energy error: 6d=" << Eend6-Einit <<
         " 12d(car)=" << Eend12car-Einit << " 12d(cyl)=" << Eend12cyl-Einit <<
         ";  max.deviation from linearized orbit during time " << timeFollow << " is " << maxDifference <<
-        ";  Lyapunov exponent:  6d=" << lyap6 << " 12d(car)=" << lyap12car << " 12d(cyl)=" << lyap12cyl;
+        ";  Lyapunov exponent:  6d=" << lyap6[0] << " 6d(reverse)=" << lyap6rev[0] <<
+        " 12d(car)=" << lyap12car[0] << " 12d(cyl)=" << lyap12cyl[0];
 
     // check if various estimators of the Lyapunov exponent are in agreement
-    // (the ones based on the internally evolved var.eq. are not expected to work in rotating frame,
-    // so are ignored if Omega!=0)
     bool ok = expectChaotic ?
-        (lyap6 >  0 && lyap12car >  0 && lyap12cyl >  0) :
-        (lyap6 == 0 && lyap12car == 0 && lyap12cyl == 0);
+        (lyap6[0] >  0 && lyap6rev[0] >  0 && lyap12car[0] >  0 && lyap12cyl[0] >  0) :
+        (lyap6[0] == 0 && lyap6rev[0] == 0 && lyap12car[0] == 0 && lyap12cyl[0] == 0);
     ok &= maxDifference < TOLERANCE;
     if(ok)
         std::cout << '\n';

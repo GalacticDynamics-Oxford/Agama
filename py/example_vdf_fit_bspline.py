@@ -9,7 +9,7 @@ then launch a MCMC fit and show the results.
 The fitted VDF is represented by a B-spline of degree 2 or 3 with nonnegative amplitudes.
 """
 import sys, agama, numpy, matplotlib.pyplot as plt
-numpy.random.seed(6)
+numpy.random.seed(2)
 addErrors = len(sys.argv)>1
 
 print('Creating mock kinematic dataset...')
@@ -41,6 +41,7 @@ else:
     vlos_err = numpy.zeros(N)
     print('Assuming no measurement errors; run the script with a non-empty command-line argument '
         'to add noise and run the fits with deconvolution (a few times slower)')
+    assert all((vlos >= vmin) & (vlos <= vmax))  # if this fails, will need to extend the range of vmin..vmax
 # add Gaussian noise to simulate measurement errors
 vlos += numpy.random.normal(size=N) * vlos_err
 
@@ -135,7 +136,7 @@ plt.close()
 
 # plot the posterior distributions of parameters
 import corner, scipy.special
-corner.corner(lastchain, quantiles=[0.16, 0.5, 0.84], show_titles=True)
+corner.corner(lastchain, quantiles=(0.16, 0.5, 0.84), show_titles=True)
 # overplot the distribution of values of log-likelihood and compare it with the expected chi^2 distribution
 plt.axes([0.7,0.7,0.25,0.25])
 gridll = numpy.linspace(-14,2,33)

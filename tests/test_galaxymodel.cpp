@@ -25,7 +25,7 @@
 #include <iostream>
 #include <fstream>
 
-bool test(double a, double b, double eps, const char* label)
+void check(double a, double b, double eps, const char* label, bool &global_ok)
 {
     double err = fabs(a-b) / fmax(fabs(a), fabs(b));
     bool ok = err < eps;
@@ -34,7 +34,7 @@ bool test(double a, double b, double eps, const char* label)
         if(ok) std::cout << " < " << eps << "\n";
         else   std::cout << " > " << eps << " \033[1;31m**\033[0m\n";
     }
-    return ok;
+    global_ok &= ok;
 }
 
 ///---- analytic expressions for the Plummer model ----///
@@ -168,58 +168,58 @@ bool test(const galaxymodel::GalaxyModel& model, const std::string& name,
     if(havetruedens) {
         // first compare just the density, which is supposed to be cheaper but less accurate
         galaxymodel::computeMoments(model, pos, &densmom, NULL, NULL);
-        ok &= test(densmom, denstrue, 1e-3, "moments() density-only vs. analytic");
+        check(densmom, denstrue, 1e-3, "moments() density-only vs. analytic", ok);
     }
     // then compute density and two velocity moments, which use more points but are more accurate
     galaxymodel::computeMoments(model, pos, &densmom, &velmom, &vel2mom);
     if(havetruedens)
-        ok &= test(densmom, denstrue, 2e-4, "moments() density vs. analytic");
+        check(densmom, denstrue, 2e-4, "moments() density vs. analytic", ok);
     if(havetruevel) {
-        ok &= test(vel2mom.vx2, vel2true, 1e-4, "moments() velocity vx^2 vs. analytic");
-        ok &= test(vel2mom.vy2, vel2true, 1e-4, "moments() velocity vy^2 vs. analytic");
-        ok &= test(vel2mom.vz2, vel2true, 1e-4, "moments() velocity vz^2 vs. analytic");
+        check(vel2mom.vx2, vel2true, 1e-4, "moments() velocity vx^2 vs. analytic", ok);
+        check(vel2mom.vy2, vel2true, 1e-4, "moments() velocity vy^2 vs. analytic", ok);
+        check(vel2mom.vz2, vel2true, 1e-4, "moments() velocity vz^2 vs. analytic", ok);
     }
     if(isotropic) {
         // mixed moments should be zero in the isotropic case (add a constant value to comparison)
-        ok &= test(vel2mom.vxvy + vel2true, vel2true, 1e-4, "moments() velocity vx vy = 0");
-        ok &= test(vel2mom.vxvz + vel2true, vel2true, 1e-4, "moments() velocity vx vz = 0");
-        ok &= test(vel2mom.vyvz + vel2true, vel2true, 1e-4, "moments() velocity vy vz = 0");
+        check(vel2mom.vxvy + vel2true, vel2true, 1e-4, "moments() velocity vx vy = 0", ok);
+        check(vel2mom.vxvz + vel2true, vel2true, 1e-4, "moments() velocity vx vz = 0", ok);
+        check(vel2mom.vyvz + vel2true, vel2true, 1e-4, "moments() velocity vy vz = 0", ok);
     }
     if(!rotating) {
         // mean velocity should be zero in the spherical non-rotating case
-        ok &= test(velmom.vx + velmom.vy + velmom.vz + velnorm, velnorm, 1e-4, "moments() mean velocity = 0");
+        check(velmom.vx + velmom.vy + velmom.vz + velnorm, velnorm, 1e-4, "moments() mean velocity = 0", ok);
     }
 
     // in the spherical case, rotating the observed reference frame should have no effect
     if(spherical) {
         galaxymodel::computeMoments(model, pos, &densrot, NULL, &vel2rot, false, ori);
-        ok &= test(densmom, densrot, 2e-4, "moments() density in rotated vs. non-rotated frame");
-        ok &= test(vel2mom.vx2, vel2rot.vx2, 1e-4, "moments() velocity vx^2 in rotated vs. non-rotated frame");
-        ok &= test(vel2mom.vy2, vel2rot.vy2, 1e-4, "moments() velocity vy^2 in rotated vs. non-rotated frame");
-        ok &= test(vel2mom.vz2, vel2rot.vz2, 1e-4, "moments() velocity vz^2 in rotated vs. non-rotated frame");
+        check(densmom, densrot, 2e-4, "moments() density in rotated vs. non-rotated frame", ok);
+        check(vel2mom.vx2, vel2rot.vx2, 1e-4, "moments() velocity vx^2 in rotated vs. non-rotated frame", ok);
+        check(vel2mom.vy2, vel2rot.vy2, 1e-4, "moments() velocity vy^2 in rotated vs. non-rotated frame", ok);
+        check(vel2mom.vz2, vel2rot.vz2, 1e-4, "moments() velocity vz^2 in rotated vs. non-rotated frame", ok);
         // mixed moments - all together for simplicity
-        ok &= test(vel2mom.vxvy + vel2mom.vxvz + vel2mom.vyvz + vel2true,
+        check(vel2mom.vxvy + vel2mom.vxvz + vel2mom.vyvz + vel2true,
                    vel2rot.vxvy + vel2rot.vxvz + vel2rot.vyvz + vel2true,
-                   1e-3, "moments() mixed velocity moments are zero in rotated vs. non-rotated frame");
+                   1e-3, "moments() mixed velocity moments are zero in rotated vs. non-rotated frame", ok);
     }
 
     // now rotate BOTH the point at which the moments are computed AND the observed reference frame:
     // the density should not change, while 1st and 2nd moments transform according to known rules
     galaxymodel::computeMoments(model, ori.toRotated(pos), &densrot, &velrot, &vel2rot, false, ori);
-    ok &= test(densmom, densrot, 1e-4, "moments() density in rotated vs. original frame");
+    check(densmom, densrot, 1e-4, "moments() density in rotated vs. original frame", ok);
     // for velocity comparison, we add a constant value to avoid comparing zero to zero in non-rotating models
     coord::VelCar  velnonrot  = ori.fromRotated(velrot);   // transform back to the initial point
-    ok &= test(velmom.vx + velnorm, velnonrot.vx + velnorm, 1e-4, "moments() velocity vx in rotated vs. original frame");
-    ok &= test(velmom.vy + velnorm, velnonrot.vy + velnorm, 1e-4, "moments() velocity vy in rotated vs. original frame");
-    ok &= test(velmom.vz + velnorm, velnonrot.vz + velnorm, 1e-4, "moments() velocity vz in rotated vs. original frame");
+    check(velmom.vx + velnorm, velnonrot.vx + velnorm, 1e-4, "moments() velocity vx in rotated vs. original frame", ok);
+    check(velmom.vy + velnorm, velnonrot.vy + velnorm, 1e-4, "moments() velocity vy in rotated vs. original frame", ok);
+    check(velmom.vz + velnorm, velnonrot.vz + velnorm, 1e-4, "moments() velocity vz in rotated vs. original frame", ok);
     // second moments (again add a constant offset to mixed moments, which may be close to zero)
     coord::Vel2Car vel2nonrot = ori.fromRotated(vel2rot);
-    ok &= test(vel2mom.vx2, vel2nonrot.vx2, 1e-4, "moments() velocity vx^2 in rotated vs. original frame");
-    ok &= test(vel2mom.vy2, vel2nonrot.vy2, 1e-4, "moments() velocity vy^2 in rotated vs. original frame");
-    ok &= test(vel2mom.vz2, vel2nonrot.vz2, 1e-4, "moments() velocity vz^2 in rotated vs. original frame");
-    ok &= test(vel2mom.vxvy + vel2true, vel2nonrot.vxvy + vel2true, 1e-4, "moments() velocity vx vy in rotated vs. original frame");
-    ok &= test(vel2mom.vxvz + vel2true, vel2nonrot.vxvz + vel2true, 1e-4, "moments() velocity vx vz in rotated vs. original frame");
-    ok &= test(vel2mom.vyvz + vel2true, vel2nonrot.vyvz + vel2true, 1e-4, "moments() velocity vy vz in rotated vs. original frame");
+    check(vel2mom.vx2, vel2nonrot.vx2, 1e-4, "moments() velocity vx^2 in rotated vs. original frame", ok);
+    check(vel2mom.vy2, vel2nonrot.vy2, 1e-4, "moments() velocity vy^2 in rotated vs. original frame", ok);
+    check(vel2mom.vz2, vel2nonrot.vz2, 1e-4, "moments() velocity vz^2 in rotated vs. original frame", ok);
+    check(vel2mom.vxvy + vel2true, vel2nonrot.vxvy + vel2true, 1e-4, "moments() velocity vx vy in rotated vs. original frame", ok);
+    check(vel2mom.vxvz + vel2true, vel2nonrot.vxvz + vel2true, 1e-4, "moments() velocity vx vz in rotated vs. original frame", ok);
+    check(vel2mom.vyvz + vel2true, vel2nonrot.vyvz + vel2true, 1e-4, "moments() velocity vy vz in rotated vs. original frame", ok);
 
 
     //-------------------------------//
@@ -228,37 +228,37 @@ bool test(const galaxymodel::GalaxyModel& model, const std::string& name,
     if(havetruedens) {
         // again first compare just the projected density, which is cheaper but less accurate
         galaxymodel::computeMoments(model, posproj, &densproj, NULL, NULL);
-        ok &= test(densproj, densprojtrue, 1e-3, "projected moments() density-only vs. analytic");
+        check(densproj, densprojtrue, 1e-3, "projected moments() density-only vs. analytic", ok);
     }
     galaxymodel::computeMoments(model, posproj, &densproj, &velproj, &vel2proj);
     if(havetruevel) {
-        ok &= test(vel2proj.vx2, vel2projtrue, 1e-4, "projected moments() velocity vx^2 vs. analytic");
-        ok &= test(vel2proj.vy2, vel2projtrue, 1e-4, "projected moments() velocity vy^2 vs. analytic");
-        ok &= test(vel2proj.vz2, vel2projtrue, 1e-4, "projected moments() velocity vz^2 vs. analytic");
+        check(vel2proj.vx2, vel2projtrue, 1e-4, "projected moments() velocity vx^2 vs. analytic", ok);
+        check(vel2proj.vy2, vel2projtrue, 1e-4, "projected moments() velocity vy^2 vs. analytic", ok);
+        check(vel2proj.vz2, vel2projtrue, 1e-4, "projected moments() velocity vz^2 vs. analytic", ok);
         // mixed moments should be zero in the isotropic case (add a constant value to comparison)
-        ok &= test(vel2proj.vxvy + vel2projtrue, vel2projtrue, 1e-4, "projected moments() velocity vx vy = 0");
+        check(vel2proj.vxvy + vel2projtrue, vel2projtrue, 1e-4, "projected moments() velocity vx vy = 0", ok);
     }
     if(true) {
         // mixed moments involving vz should be zero in projection even if the DF is not isotropic
-        ok &= test(vel2proj.vxvz + vel2projtrue, vel2projtrue, 1e-4, "projected moments() velocity vx vz = 0");
-        ok &= test(vel2proj.vyvz + vel2projtrue, vel2projtrue, 1e-4, "projected moments() velocity vy vz = 0");
+        check(vel2proj.vxvz + vel2projtrue, vel2projtrue, 1e-4, "projected moments() velocity vx vz = 0", ok);
+        check(vel2proj.vyvz + vel2projtrue, vel2projtrue, 1e-4, "projected moments() velocity vy vz = 0", ok);
     }
     if(!rotating) {
         // mean velocity should be zero in the spherical non-rotating case
-        ok &= test(velproj.vx + velproj.vy + velproj.vz + velnorm, velnorm, 1e-4, "projected moments() mean velocity = 0");
+        check(velproj.vx + velproj.vy + velproj.vz + velnorm, velnorm, 1e-4, "projected moments() mean velocity = 0", ok);
     }
 
     // in the spherical case, rotating the observed reference frame should have no effect
     galaxymodel::computeMoments(model, posproj, &densprojrot, &velprojrot, &vel2projrot, false, ori);
     if(spherical) {
-        ok &= test(densproj, densprojrot, 2e-4, "projected moments() density in rotated vs. non-rotated frame");
-        ok &= test(vel2proj.vx2, vel2projrot.vx2, 3e-4, "projected moments() velocity vx^2 in rotated vs. non-rotated frame");
-        ok &= test(vel2proj.vy2, vel2projrot.vy2, 3e-4, "projected moments() velocity vy^2 in rotated vs. non-rotated frame");
-        ok &= test(vel2proj.vz2, vel2projrot.vz2, 3e-4, "projected moments() velocity vz^2 in rotated vs. non-rotated frame");
+        check(densproj, densprojrot, 2e-4, "projected moments() density in rotated vs. non-rotated frame", ok);
+        check(vel2proj.vx2, vel2projrot.vx2, 3e-4, "projected moments() velocity vx^2 in rotated vs. non-rotated frame", ok);
+        check(vel2proj.vy2, vel2projrot.vy2, 3e-4, "projected moments() velocity vy^2 in rotated vs. non-rotated frame", ok);
+        check(vel2proj.vz2, vel2projrot.vz2, 3e-4, "projected moments() velocity vz^2 in rotated vs. non-rotated frame", ok);
         // mixed moments - all together for simplicity
-        ok &= test(vel2proj.vxvy + vel2proj.vxvz + vel2proj.vyvz + vel2true,
+        check(vel2proj.vxvy + vel2proj.vxvz + vel2proj.vyvz + vel2true,
                    vel2projrot.vxvy + vel2projrot.vxvz + vel2projrot.vyvz + vel2true,
-                   1e-3, "projected moments() mixed velocity moments are zero in rotated vs. non-rotated frame");
+                   1e-3, "projected moments() mixed velocity moments are zero in rotated vs. non-rotated frame", ok);
     }
 
 
@@ -273,10 +273,10 @@ bool test(const galaxymodel::GalaxyModel& model, const std::string& name,
         galaxymodel::computeProjectedDF(model, posproj, vel, noerr, &projdfface);  // face-on
         if(!rotating) {
             galaxymodel::computeProjectedDF(model, posproj, vel, noerr, &projdfrot, false, ori); // rotated
-            ok &= test(projdfface, projdfrot, 1e-6, "projected df(), no error, rotated vs. non-rotated");
+            check(projdfface, projdfrot, 1e-6, "projected df(), no error, rotated vs. non-rotated", ok);
         }
         if(havetruevel)
-            ok &= test(projdfface, projectedDF_Plummer(R, vel, noerr), 1e-6, "projected df(), no error, vs. analytic");
+            check(projdfface, projectedDF_Plummer(R, vel, noerr), 1e-6, "projected df(), no error, vs. analytic", ok);
     }
 
     // small errors
@@ -284,24 +284,24 @@ bool test(const galaxymodel::GalaxyModel& model, const std::string& name,
         galaxymodel::computeProjectedDF(model, posproj, vel, smallerr, &projdfface);
         if(!rotating) {
             galaxymodel::computeProjectedDF(model, posproj, vel, smallerr, &projdfrot, false, ori);
-            ok &= test(projdfface, projdfrot, 1e-4, "projected df(), small error, rotated vs. non-rotated");
+            check(projdfface, projdfrot, 1e-4, "projected df(), small error, rotated vs. non-rotated", ok);
         }
         // swapping the velocity components and their respective errors in the isotropic case has no difference
         if(isotropic) {
             double dfswap;
             galaxymodel::computeProjectedDF(model, posproj,
                 coord::VelCar(vel.vx, vel.vz, vel.vy), coord::VelCar(smallerr.vx, smallerr.vz, smallerr.vy), &dfswap);
-            ok &= test(projdfface, dfswap, 1e-4, "projected df(), small error, swapped x<->y axes");
+            check(projdfface, dfswap, 1e-4, "projected df(), small error, swapped x<->y axes", ok);
         }
         if(havetruevel)
-            ok &= test(projdfface, projectedDF_Plummer(R, vel, smallerr), 1e-3, "projected df(), small error, vs. analytic");
+            check(projdfface, projectedDF_Plummer(R, vel, smallerr), 1e-3, "projected df(), small error, vs. analytic", ok);
     }
 
     // large errors - this one seems to require a larger-than-default maxNumEval to reach the desired accuracy
     galaxymodel::computeProjectedDF(model, posproj, vel, largeerr, &projdf_largeerr,  false, coord::Orientation(), 1e-3, 2e5);
     if(spherical) {
-        galaxymodel::computeProjectedDF(model, posproj, vel, largeerr, &projdfrot, false, ori);
-        ok &= test(projdf_largeerr, projdfrot, 1e-4, "projected df(), large error, rotated vs. non-rotated");
+        galaxymodel::computeProjectedDF(model, posproj, vel, largeerr, &projdfrot, false, ori, 1e-3, 2e5);
+        check(projdf_largeerr, projdfrot, 1e-4, "projected df(), large error, rotated vs. non-rotated", ok);
     }
 
     // large errors in vX,vY and infinite in vz
@@ -311,32 +311,32 @@ bool test(const galaxymodel::GalaxyModel& model, const std::string& name,
     galaxymodel::computeProjectedDF(model, posproj, vel, largeerrz, &projdf_largeerrz);
     if(spherical) {
         galaxymodel::computeProjectedDF(model, posproj, vel, largeerrz, &projdfrot, false, ori);
-        ok &= test(projdf_largeerrz, projdfrot, 1e-3, "projected df(), large error in vz / infinite in vx,vy, rotated vs. non-rotated");
+        check(projdf_largeerrz, projdfrot, 1e-3, "projected df(), large error in vz / infinite in vx,vy, rotated vs. non-rotated", ok);
         if(havetruedens)
-             ok &= test(projdf_largeerrz, projectedDF_Plummer(R, vel, largeerrz), 1e-3,
-                "projected df(), large error in vz / infinite in vx,vy, vs. analytic");
+             check(projdf_largeerrz, projectedDF_Plummer(R, vel, largeerrz), 1e-3,
+                "projected df(), large error in vz / infinite in vx,vy, vs. analytic", ok);
     }
 
     // infinite errors in all velocity components - result is equivalent to projected density
     galaxymodel::computeProjectedDF(model, posproj, vel, inferr, &projdf_inferr);
     galaxymodel::computeProjectedDF(model, posproj, vel, inferr, &projdfrot, false, ori);
     if(spherical) {
-        ok &= test(projdf_inferr, projdfrot, 1e-3, "projected df(), infinite error, rotated vs. non-rotated");
+        check(projdf_inferr, projdfrot, 1e-3, "projected df(), infinite error, rotated vs. non-rotated", ok);
     }
     if(havetruedens)
-        ok &= test(projdf_inferr, projectedDF_Plummer(R, vel, inferr), 1e-3, "projected df(), infinite error, vs. analytic");
+        check(projdf_inferr, projectedDF_Plummer(R, vel, inferr), 1e-3, "projected df(), infinite error, vs. analytic", ok);
 
     // infinite errors in vX,vY and no error or a small error in vZ,
     // equivalent to projected VDF f_z(v_z) or a VDF convolved with a Gaussian
     galaxymodel::computeProjectedDF(model, posproj, vel, noerrz,    &projdf_noerrz);
     galaxymodel::computeProjectedDF(model, posproj, vel, smallerrz, &projdf_smallerrz);
     if(havetruevel) {
-        ok &= test(projdf_noerrz,    projectedDF_Plummer(R, vel, noerrz),    2e-4, "projected df() f_z(v), no error, vs. analytic");
-        ok &= test(projdf_smallerrz, projectedDF_Plummer(R, vel, smallerrz), 1e-3, "projected df() f_z(v), small error, vs. analytic");
+        check(projdf_noerrz,    projectedDF_Plummer(R, vel, noerrz),    2e-4, "projected df() f_z(v), no error, vs. analytic", ok);
+        check(projdf_smallerrz, projectedDF_Plummer(R, vel, smallerrz), 1e-3, "projected df() f_z(v), small error, vs. analytic", ok);
     }
 
     // no error in vX, infinite error in vZ, and very large (not infinite due to API limitations)
-    // error in vY (passed as noerrvx.vy); the result is then renormalized to approximate an infinite error in vY
+    // error in vY (passed as noerrx.vy); the result is then renormalized to approximate an infinite error in vY
     galaxymodel::computeProjectedDF(model, posproj, vel, noerrx, &projdf_noerrx);
 
     // large errors in some velocity components are almost identical to infinite errors after appropriate renormalization
@@ -348,13 +348,13 @@ bool test(const galaxymodel::GalaxyModel& model, const std::string& name,
         (2 * M_SQRT2 * M_PI * M_SQRTPI * largeerr.vx * largeerr.vy * largeerr.vz);
 
     // check that the renormalization works
-    ok &= test(projdf_largeerr,   projdf_inferr, 1e-3, "projected df() large error vs. infinite error");
-    ok &= test(projdf_largeerrxy, projdf_inferr, 1e-3, "projected df() large error in vx,vy vs. infinite error");
-    ok &= test(projdf_largeerrz,  projdf_inferr, 1e-3, "projected df() large error in vz vs. infinite error");
+    check(projdf_largeerr,   projdf_inferr, 1e-3, "projected df() large error vs. infinite error", ok);
+    check(projdf_largeerrxy, projdf_inferr, 1e-3, "projected df() large error in vx,vy vs. infinite error", ok);
+    check(projdf_largeerrz,  projdf_inferr, 1e-3, "projected df() large error in vz vs. infinite error", ok);
 
     // even if we don't have true surface density, the result should agree with projected moments
-    ok &= test(projdf_inferr, densproj, 1e-3, "projected df(), infinite error, vs. projected moments() density");
-    ok &= test(projdfrot,  densprojrot, 1e-3, "projected df(), infinite error, vs. projected moments() density, rotated");
+    check(projdf_inferr, densproj, 1e-3, "projected df(), infinite error, vs. projected moments() density", ok);
+    check(projdfrot,  densprojrot, 1e-3, "projected df(), infinite error, vs. projected moments() density, rotated", ok);
 
 
     //---------------------------//
@@ -372,49 +372,49 @@ bool test(const galaxymodel::GalaxyModel& model, const std::string& name,
     double vmin = gridv.front(), vmax = gridv.back();
 
     // the density should match the one returned by computeMoments()
-    ok &= test(densvdf, densmom, 2e-4, "vdf() density vs. moments() density");
+    check(densvdf, densmom, 2e-4, "vdf() density vs. moments() density", ok);
     if(havetruedens)
-        ok &= test(densvdf, denstrue, 1e-6, "vdf() density vs. analytic");
+        check(densvdf, denstrue, 1e-6, "vdf() density vs. analytic", ok);
 
     // the VDF should be normalized to unity
-    ok &= test(vdfi.integrate(vmin, vmax, amplvX), 1, 1e-13, "vdf() f_x(v) normalized to unity");
-    ok &= test(vdfi.integrate(vmin, vmax, amplvY), 1, 1e-13, "vdf() f_y(v) normalized to unity");
-    ok &= test(vdfi.integrate(vmin, vmax, amplvZ), 1, 1e-13, "vdf() f_z(v) normalized to unity");
+    check(vdfi.integrate(vmin, vmax, amplvX), 1, 1e-13, "vdf() f_x(v) normalized to unity", ok);
+    check(vdfi.integrate(vmin, vmax, amplvY), 1, 1e-13, "vdf() f_y(v) normalized to unity", ok);
+    check(vdfi.integrate(vmin, vmax, amplvZ), 1, 1e-13, "vdf() f_z(v) normalized to unity", ok);
 
     // the mean velocity in VDF matches the first moment returned by computeMoments()
-    ok &= test(vdfi.integrate(vmin, vmax, amplvX, 1) + velnorm, velmom.vx + velnorm, 1e-4, "vdf() mean vx vs. moments()");
-    ok &= test(vdfi.integrate(vmin, vmax, amplvY, 1) + velnorm, velmom.vy + velnorm, 1e-4, "vdf() mean vy vs. moments()");
-    ok &= test(vdfi.integrate(vmin, vmax, amplvZ, 1) + velnorm, velmom.vz + velnorm, 1e-4, "vdf() mean vz vs. moments()");
+    check(vdfi.integrate(vmin, vmax, amplvX, 1) + velnorm, velmom.vx + velnorm, 1e-4, "vdf() mean vx vs. moments()", ok);
+    check(vdfi.integrate(vmin, vmax, amplvY, 1) + velnorm, velmom.vy + velnorm, 1e-4, "vdf() mean vy vs. moments()", ok);
+    check(vdfi.integrate(vmin, vmax, amplvZ, 1) + velnorm, velmom.vz + velnorm, 1e-4, "vdf() mean vz vs. moments()", ok);
 
     // the dispersion of VDF matches the second moment returned by computeMoments()
-    ok &= test(vdfi.integrate(vmin, vmax, amplvX, 2), vel2mom.vx2, 2e-4, "vdf() mean vx^2 vs. moments()");
-    ok &= test(vdfi.integrate(vmin, vmax, amplvY, 2), vel2mom.vy2, 2e-4, "vdf() mean vy^2 vs. moments()");
-    ok &= test(vdfi.integrate(vmin, vmax, amplvZ, 2), vel2mom.vz2, 2e-4, "vdf() mean vz^2 vs. moments()");
+    check(vdfi.integrate(vmin, vmax, amplvX, 2), vel2mom.vx2, 2e-4, "vdf() mean vx^2 vs. moments()", ok);
+    check(vdfi.integrate(vmin, vmax, amplvY, 2), vel2mom.vy2, 2e-4, "vdf() mean vy^2 vs. moments()", ok);
+    check(vdfi.integrate(vmin, vmax, amplvZ, 2), vel2mom.vz2, 2e-4, "vdf() mean vz^2 vs. moments()", ok);
     // mixed moments are not compared, since VDF does not provide any information about them
 
     // in the non-rotating case, the x- and y-VDFs should be symmetric w.r.t. sign change
     if(!rotating) {
-        ok &= test(vdfi.interpolate(vel.vx, amplvX), vdfi.interpolate(-vel.vx, amplvX), 1e-5, "vdf() f_x(v)==f_x(-v)");
-        ok &= test(vdfi.interpolate(vel.vy, amplvY), vdfi.interpolate(-vel.vy, amplvY), 1e-5, "vdf() f_y(v)==f_y(-v)");
+        check(vdfi.interpolate(vel.vx, amplvX), vdfi.interpolate(-vel.vx, amplvX), 1e-5, "vdf() f_x(v)==f_x(-v)", ok);
+        check(vdfi.interpolate(vel.vy, amplvY), vdfi.interpolate(-vel.vy, amplvY), 1e-5, "vdf() f_y(v)==f_y(-v)", ok);
     }
     // and the z-VDF should be symmetric in any case (in the face-on orientation)
     if(true)
-        ok &= test(vdfi.interpolate(vel.vz, amplvZ), vdfi.interpolate(-vel.vz, amplvZ), 1e-13, "vdf() f_z(v)==f_z(-v)");
+        check(vdfi.interpolate(vel.vz, amplvZ), vdfi.interpolate(-vel.vz, amplvZ), 1e-13, "vdf() f_z(v)==f_z(-v)", ok);
 
     // compare the VDF in a rotated frame for a rotated point with the corresponding moments
     galaxymodel::computeVelocityDistribution<N>(model, ori.toRotated(pos), gridv, gridv, gridv,
         &densvdfrot, &amplvXrot, &amplvYrot, &amplvZrot,  false, ori);
-    ok &= test(densvdfrot, densrot, 1e-4, "vdf() density vs. moments() density, rotated");
+    check(densvdfrot, densrot, 1e-4, "vdf() density vs. moments() density, rotated", ok);
 
     // the mean velocity in VDF matches the first moment returned by computeMoments()
-    ok &= test(vdfi.integrate(vmin, vmax, amplvXrot, 1) + velnorm, velrot.vx + velnorm, 1e-4, "vdf() mean vx vs. moments(), rotated");
-    ok &= test(vdfi.integrate(vmin, vmax, amplvYrot, 1) + velnorm, velrot.vy + velnorm, 1e-4, "vdf() mean vy vs. moments(), rotated");
-    ok &= test(vdfi.integrate(vmin, vmax, amplvZrot, 1) + velnorm, velrot.vz + velnorm, 1e-4, "vdf() mean vz vs. moments(), rotated");
+    check(vdfi.integrate(vmin, vmax, amplvXrot, 1) + velnorm, velrot.vx + velnorm, 1e-4, "vdf() mean vx vs. moments(), rotated", ok);
+    check(vdfi.integrate(vmin, vmax, amplvYrot, 1) + velnorm, velrot.vy + velnorm, 1e-4, "vdf() mean vy vs. moments(), rotated", ok);
+    check(vdfi.integrate(vmin, vmax, amplvZrot, 1) + velnorm, velrot.vz + velnorm, 1e-4, "vdf() mean vz vs. moments(), rotated", ok);
 
     // the dispersion of VDF matches the second moment returned by computeMoments()
-    ok &= test(vdfi.integrate(vmin, vmax, amplvXrot, 2), vel2rot.vx2, 2e-4, "vdf() mean vx^2 vs. moments(), rotated");
-    ok &= test(vdfi.integrate(vmin, vmax, amplvYrot, 2), vel2rot.vy2, 2e-4, "vdf() mean vy^2 vs. moments(), rotated");
-    ok &= test(vdfi.integrate(vmin, vmax, amplvZrot, 2), vel2rot.vz2, 2e-4, "vdf() mean vz^2 vs. moments(), rotated");
+    check(vdfi.integrate(vmin, vmax, amplvXrot, 2), vel2rot.vx2, 2e-4, "vdf() mean vx^2 vs. moments(), rotated", ok);
+    check(vdfi.integrate(vmin, vmax, amplvYrot, 2), vel2rot.vy2, 2e-4, "vdf() mean vy^2 vs. moments(), rotated", ok);
+    check(vdfi.integrate(vmin, vmax, amplvZrot, 2), vel2rot.vz2, 2e-4, "vdf() mean vz^2 vs. moments(), rotated", ok);
 
     std::ofstream strm;
     if(utils::verbosityLevel >= utils::VL_VERBOSE) {
@@ -438,8 +438,8 @@ bool test(const galaxymodel::GalaxyModel& model, const std::string& name,
         math::blas_daxpy(-1, amplvY, amplvYrot);
         math::blas_daxpy(-1, amplvZ, amplvZrot);
         double ampldiff = sqrt((math::blas_dnrm2(amplvXrot) + math::blas_dnrm2(amplvYrot) + math::blas_dnrm2(amplvZrot))/3);
-        ok &= test(densvdfrot, densvdf, 1e-5, "vdf() density rotated vs. nonrotated");
-        ok &= test(1+ampldiff, 1, 1e-5, "vdf() f_{x,y,z} rotated vs. non-rotated");
+        check(densvdfrot, densvdf, 1e-5, "vdf() density rotated vs. nonrotated", ok);
+        check(1+ampldiff, 1, 1e-5, "vdf() f_{x,y,z} rotated vs. non-rotated", ok);
     }
 
     // in the spherical isotorpic case, all three VDFs should be identical,
@@ -448,7 +448,7 @@ bool test(const galaxymodel::GalaxyModel& model, const std::string& name,
         math::blas_daxpy(-1, amplvX, amplvY);
         math::blas_daxpy(-1, amplvX, amplvZ);
         double ampldiff = sqrt((math::blas_dnrm2(amplvY) + math::blas_dnrm2(amplvZ))/2);
-        ok &= test(1+ampldiff, 1, 1e-5, "vdf() isotropic f_x==f_y==f_z");
+        check(1+ampldiff, 1, 1e-5, "vdf() isotropic f_x==f_y==f_z", ok);
     }
 
 
@@ -461,53 +461,53 @@ bool test(const galaxymodel::GalaxyModel& model, const std::string& name,
     vmin = gridv.front(), vmax = gridv.back();
 
     // the density should match the one returned by computeMoments()
-    ok &= test(densvdfproj, densproj, 1e-4, "projected vdf() density vs. projected moments() density");
+    check(densvdfproj, densproj, 1e-4, "projected vdf() density vs. projected moments() density", ok);
     if(havetruedens)
-        ok &= test(densvdfproj, densprojtrue, 2e-5, "projected vdf() density vs. analytic");
+        check(densvdfproj, densprojtrue, 2e-5, "projected vdf() density vs. analytic", ok);
 
     // the VDF should be normalized to unity
-    ok &= test(vdfp.integrate(vmin, vmax, amplvX), 1, 1e-13, "projected vdf() f_x(v) normalized to unity");
-    ok &= test(vdfp.integrate(vmin, vmax, amplvY), 1, 1e-13, "projected vdf() f_y(v) normalized to unity");
-    ok &= test(vdfp.integrate(vmin, vmax, amplvZ), 1, 1e-13, "projected vdf() f_z(v) normalized to unity");
+    check(vdfp.integrate(vmin, vmax, amplvX), 1, 1e-13, "projected vdf() f_x(v) normalized to unity", ok);
+    check(vdfp.integrate(vmin, vmax, amplvY), 1, 1e-13, "projected vdf() f_y(v) normalized to unity", ok);
+    check(vdfp.integrate(vmin, vmax, amplvZ), 1, 1e-13, "projected vdf() f_z(v) normalized to unity", ok);
 
     // the mean velocity in VDF matches the first moment returned by computeMoments()
-    ok &= test(vdfp.integrate(vmin, vmax, amplvX, 1) + velnorm, velproj.vx + velnorm, 1e-4, "projected vdf() mean vx vs. projected moments()");
-    ok &= test(vdfp.integrate(vmin, vmax, amplvY, 1) + velnorm, velproj.vy + velnorm, 1e-4, "projected vdf() mean vy vs. projected moments()");
-    ok &= test(vdfp.integrate(vmin, vmax, amplvZ, 1) + velnorm, velproj.vz + velnorm, 1e-4, "projected vdf() mean vz vs. projected moments()");
+    check(vdfp.integrate(vmin, vmax, amplvX, 1) + velnorm, velproj.vx + velnorm, 1e-4, "projected vdf() mean vx vs. projected moments()", ok);
+    check(vdfp.integrate(vmin, vmax, amplvY, 1) + velnorm, velproj.vy + velnorm, 1e-4, "projected vdf() mean vy vs. projected moments()", ok);
+    check(vdfp.integrate(vmin, vmax, amplvZ, 1) + velnorm, velproj.vz + velnorm, 1e-4, "projected vdf() mean vz vs. projected moments()", ok);
 
     // the dispersion of VDF matches the second moment returned by computeMoments()
-    ok &= test(vdfp.integrate(vmin, vmax, amplvX, 2), vel2proj.vx2, 2e-4, "projected vdf() mean vx^2 vs. projected moments()");
-    ok &= test(vdfp.integrate(vmin, vmax, amplvY, 2), vel2proj.vy2, 2e-4, "projected vdf() mean vy^2 vs. projected moments()");
-    ok &= test(vdfp.integrate(vmin, vmax, amplvZ, 2), vel2proj.vz2, 2e-4, "projected vdf() mean vz^2 vs. projected moments()");
+    check(vdfp.integrate(vmin, vmax, amplvX, 2), vel2proj.vx2, 2e-4, "projected vdf() mean vx^2 vs. projected moments()", ok);
+    check(vdfp.integrate(vmin, vmax, amplvY, 2), vel2proj.vy2, 2e-4, "projected vdf() mean vy^2 vs. projected moments()", ok);
+    check(vdfp.integrate(vmin, vmax, amplvZ, 2), vel2proj.vz2, 2e-4, "projected vdf() mean vz^2 vs. projected moments()", ok);
 
     // in the non-rotating case, the x- and y-VDFs should be symmetric w.r.t. sign change
     if(!rotating) {
-        ok &= test(vdfp.interpolate(vel.vx, amplvX), vdfp.interpolate(-vel.vx, amplvX), 2e-5, "projected vdf() f_x(v)==f_x(-v)");
-        ok &= test(vdfp.interpolate(vel.vy, amplvY), vdfp.interpolate(-vel.vy, amplvY), 2e-5, "projected vdf() f_y(v)==f_y(-v)");
+        check(vdfp.interpolate(vel.vx, amplvX), vdfp.interpolate(-vel.vx, amplvX), 2e-5, "projected vdf() f_x(v)==f_x(-v)", ok);
+        check(vdfp.interpolate(vel.vy, amplvY), vdfp.interpolate(-vel.vy, amplvY), 2e-5, "projected vdf() f_y(v)==f_y(-v)", ok);
     }
     // and z-VDF is always symmetric in the face-on orientation
     if(true)
-        ok &= test(vdfp.interpolate(vel.vz, amplvZ), vdfp.interpolate(-vel.vz, amplvZ), 1e-13, "projected vdf() f_z(v)==f_z(-v)");
+        check(vdfp.interpolate(vel.vz, amplvZ), vdfp.interpolate(-vel.vz, amplvZ), 1e-13, "projected vdf() f_z(v)==f_z(-v)", ok);
 
     // compare the projected VDF in a rotated frame with the projected moments
     galaxymodel::computeVelocityDistribution<N>(model, posproj, gridv, gridv, gridv,
         &densvdfprojrot, &amplvXrot, &amplvYrot, &amplvZrot,  false, ori);
-    ok &= test(densvdfprojrot, densprojrot, 5e-4, "projected vdf() density vs. projected moments() density, rotated");
+    check(densvdfprojrot, densprojrot, 5e-4, "projected vdf() density vs. projected moments() density, rotated", ok);
 
     // the mean velocity in VDF matches the first moment returned by computeMoments()
-    ok &= test(vdfp.integrate(vmin, vmax, amplvXrot, 1) + velnorm, velprojrot.vx + velnorm, 1e-4, "projected vdf() mean vx vs. projected moments(), rotated");
-    ok &= test(vdfp.integrate(vmin, vmax, amplvYrot, 1) + velnorm, velprojrot.vy + velnorm, 1e-4, "projected vdf() mean vy vs. projected moments(), rotated");
-    ok &= test(vdfp.integrate(vmin, vmax, amplvZrot, 1) + velnorm, velprojrot.vz + velnorm, 1e-4, "projected vdf() mean vz vs. projected moments(), rotated");
+    check(vdfp.integrate(vmin, vmax, amplvXrot, 1) + velnorm, velprojrot.vx + velnorm, 1e-4, "projected vdf() mean vx vs. projected moments(), rotated", ok);
+    check(vdfp.integrate(vmin, vmax, amplvYrot, 1) + velnorm, velprojrot.vy + velnorm, 1e-4, "projected vdf() mean vy vs. projected moments(), rotated", ok);
+    check(vdfp.integrate(vmin, vmax, amplvZrot, 1) + velnorm, velprojrot.vz + velnorm, 1e-4, "projected vdf() mean vz vs. projected moments(), rotated", ok);
 
     // the dispersion of VDF matches the second moment returned by computeMoments()
-    ok &= test(vdfp.integrate(vmin, vmax, amplvXrot, 2), vel2projrot.vx2, 3e-4, "projected vdf() mean vx^2 vs. projected moments(), rotated");
-    ok &= test(vdfp.integrate(vmin, vmax, amplvYrot, 2), vel2projrot.vy2, 3e-4, "projected vdf() mean vy^2 vs. projected moments(), rotated");
-    ok &= test(vdfp.integrate(vmin, vmax, amplvZrot, 2), vel2projrot.vz2, 3e-4, "projected vdf() mean vz^2 vs. projected moments(), rotated");
+    check(vdfp.integrate(vmin, vmax, amplvXrot, 2), vel2projrot.vx2, 3e-4, "projected vdf() mean vx^2 vs. projected moments(), rotated", ok);
+    check(vdfp.integrate(vmin, vmax, amplvYrot, 2), vel2projrot.vy2, 3e-4, "projected vdf() mean vy^2 vs. projected moments(), rotated", ok);
+    check(vdfp.integrate(vmin, vmax, amplvZrot, 2), vel2projrot.vz2, 3e-4, "projected vdf() mean vz^2 vs. projected moments(), rotated", ok);
 
     // values of interpolated VDF should match those computed by projectedDF
     // marginalized over vX,vY when considering f_z(v_Z), or over vY,vZ when considering f_x(v_X)
-    ok &= test(vdfp.interpolate(vel.vx, amplvX) * densvdfproj, projdf_noerrx, 1e-3, "projected vdf() f_x(v) vs. projected df(), no error");
-    ok &= test(vdfp.interpolate(vel.vz, amplvZ) * densvdfproj, projdf_noerrz, 1e-3, "projected vdf() f_z(v) vs. projected df(), no error");
+    check(vdfp.interpolate(vel.vx, amplvX) * densvdfproj, projdf_noerrx, 1e-3, "projected vdf() f_x(v) vs. projected df(), no error", ok);
+    check(vdfp.interpolate(vel.vz, amplvZ) * densvdfproj, projdf_noerrz, 1e-3, "projected vdf() f_z(v) vs. projected df(), no error", ok);
 
     // VDF convolved with a narrow Gaussian and re-interpolated back onto the same B-spline basis
     math::FiniteElement1d<N> fem((math::BsplineInterpolator1d<N>(gridv)));
@@ -516,7 +516,7 @@ bool test(const galaxymodel::GalaxyModel& model, const std::string& name,
     std::vector<double> vecconv(amplvZ.size());
     blas_dgemv(math::CblasNoTrans, 1, conv, amplvZ, 0, vecconv);
     std::vector<double> amplvZconv = solveBand(proj, vecconv);  // amplitudes of Gaussian-convolved B-spline representation of f_z(v_Z)
-    ok &= test(vdfp.interpolate(vel.vz, amplvZconv) * densvdfproj, projdf_smallerrz, 1e-3, "projected vdf() f_z(v) vs. projected df(), small error");
+    check(vdfp.interpolate(vel.vz, amplvZconv) * densvdfproj, projdf_smallerrz, 1e-3, "projected vdf() f_z(v) vs. projected df(), small error", ok);
 
     // write out the interpolated VDF
     if(utils::verbosityLevel >= utils::VL_VERBOSE) {
@@ -539,8 +539,8 @@ bool test(const galaxymodel::GalaxyModel& model, const std::string& name,
         math::blas_daxpy(-1, amplvY, amplvYrot);
         math::blas_daxpy(-1, amplvZ, amplvZrot);
         double ampldiff = sqrt((math::blas_dnrm2(amplvXrot) + math::blas_dnrm2(amplvYrot) + math::blas_dnrm2(amplvZrot))/3);
-        ok &= test(densvdfprojrot, densvdfproj, 1e-4, "projected vdf() density rotated vs. nonrotated");
-        ok &= test(1+ampldiff, 1, 1e-3, "projected vdf() f_{x,y,z} rotated vs. non-rotated");
+        check(densvdfprojrot, densvdfproj, 1e-4, "projected vdf() density rotated vs. nonrotated", ok);
+        check(1+ampldiff, 1, 1e-3, "projected vdf() f_{x,y,z} rotated vs. non-rotated", ok);
     }
 
     // in the spherical isotorpic case, the three projected VDFs should be identical
@@ -548,7 +548,7 @@ bool test(const galaxymodel::GalaxyModel& model, const std::string& name,
         math::blas_daxpy(-1, amplvX, amplvY);
         math::blas_daxpy(-1, amplvX, amplvZ);
         double ampldiff = sqrt((math::blas_dnrm2(amplvY) + math::blas_dnrm2(amplvZ))/2);
-        ok &= test(1+ampldiff, 1, 5e-4, "projected vdf() isotropic f_x==f_y");
+        check(1+ampldiff, 1, 5e-4, "projected vdf() isotropic f_x==f_y", ok);
     }
 
     return ok;

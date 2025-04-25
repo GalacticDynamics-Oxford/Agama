@@ -138,13 +138,14 @@ public:
     /// collect the data returned by the function for each point sub-sampled from the trajectory
     /// on the current timestep, and add it to the temporary storage array,
     /// weighted by the duration of the substep
-    virtual bool processTimestep(double tbegin, double tend)
+    virtual bool processTimestep(double tbegin, double timestep)
     {
-        time += tend-tbegin;
-        double substep = (tend-tbegin) / NUM_SAMPLES_PER_STEP;  // duration of each sub-step
+        time += timestep;
+        double substep = timestep / NUM_SAMPLES_PER_STEP;  // duration of each sub-step
         double *dataptr = datacube.data();
         for(int s=0; s<NUM_SAMPLES_PER_STEP; s++) {
-            double tsubstep = tbegin + substep * (s+0.5);  // equally-spaced samples in time
+            // equally-spaced samples in time, offsets from the beginning of the current timestep
+            double tsubstep = substep * (s+0.5);  
             double point[6];  // position and velocity in cartesian coordinates at the current sub-step
             orbint.getSol(tsubstep).unpack_to(point);
             target.addPoint(point, substep, dataptr);

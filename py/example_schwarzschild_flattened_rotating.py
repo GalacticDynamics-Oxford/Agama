@@ -45,7 +45,8 @@ initcond,_ = potstars.sample(10000, potential=pot, beta=beta, kappa=kappa)
 inttimes = 100*pot.Tcirc(initcond)
 
 # integrate all orbits, storing the recorded density data and trajectories represented by interpolator objects
-data, trajs = agama.orbit(potential=pot, ic=initcond, time=inttimes, dtype=object, targets=target)
+data, trajs = agama.orbit(potential=pot, ic=initcond, time=inttimes, dtype=object, targets=target,
+    method='dprkn8', accuracy=1e-6)  # use a more efficient orbit integrator and a lower (but still sufficient) accuracy
 
 # assemble the matrix equation which contains two blocks:
 # total mass, discretized density

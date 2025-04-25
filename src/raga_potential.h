@@ -54,7 +54,7 @@ public:
         outputLast (_outputLast),
         outputIter (_outputFirst)
     {}
-    virtual bool processTimestep(double tbegin, double tend);
+    virtual bool processTimestep(double tbegin, double timestep);
 private:
     /// interval between taking samples from the trajectory (counting from the beginning of the episode)
     const double outputTimestep;

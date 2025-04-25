@@ -5,13 +5,9 @@
     Test orbit integration in various potentials and coordinate systems.
 */
 #include "orbit.h"
-#include "potential_analytic.h"
-#include "potential_composite.h"
-#include "potential_dehnen.h"
+#include "orbit_variational.h"
 #include "potential_factory.h"
-#include "potential_ferrers.h"
 #include "potential_utils.h"
-#include "units.h"
 #include "utils.h"
 #include "debug_utils.h"
 #include "math_random.h"
@@ -100,22 +96,23 @@ double maxDistanceBetweenOrbits(
 template<typename CoordT>
 bool test_coordsys(const potential::BasePotential& potential,
     const coord::PosVelCar& initial_conditions, double total_time,
-    std::vector< std::pair<coord::PosVelCar, double> > &trajFull)
+    std::vector< std::pair<coord::PosVelCar, double> > &trajFull,
+    orbit::OrbitIntParams::Method method = orbit::OrbitIntParams::DOP853)
 {
     std::string name = CoordT::name();
     name.resize(12, ' ');
     std::cout << name;
     double timestep = 0.002 * total_time;
     double init_time = -0.25 * total_time;
-    std::vector< std::pair<coord::PosVelCar, double> > traj, trajRot;
-    orbit::OrbitIntParams params(/*accuracy*/ 1e-8, /*maxNumSteps*/10000);
+    std::vector< std::pair<coord::PosVelCar, double> > trajReg, trajRot;
+    orbit::OrbitIntParams params(/*accuracy*/ 1e-8, /*maxNumSteps*/10000, method);
     orbit::OrbitIntegrator<CoordT> orbint(potential, /*Omega*/0, params);
     // record the orbit at regular intervals of time
     orbint.addRuntimeFnc(orbit::PtrRuntimeFnc(new orbit::RuntimeTrajectory(
-        orbint, timestep, /*output*/ traj)));
+        orbint, timestep, /*output*/ trajReg)));
     // record the orbit at each timestep of the ODE integrator
     orbint.addRuntimeFnc(orbit::PtrRuntimeFnc(new orbit::RuntimeTrajectory(
-        orbint, 0, /*output*/ trajFull)));
+        orbint, /*sampling interval - every timestep*/ 0, /*output*/ trajFull)));
     // run the orbit
     orbint.init(initial_conditions, init_time);
     orbint.run(total_time);
@@ -127,27 +124,17 @@ bool test_coordsys(const potential::BasePotential& potential,
         orbrot.addRuntimeFnc(orbit::PtrRuntimeFnc(new orbit::RuntimeTrajectory(
             orbrot, timestep, trajRot)));
         orbrot.init(initial_conditions, init_time);
-        if(name.substr(0,3) != "Sph" || Lz(initial_conditions) != 0) {
-            // check that a continuation of the orbit integration gives the same result
-            // as a single run for a longer time; note that the first half of the integration
-            // has run up to a time >= requested end time of the first half, we need to reinitialize
-            // the internal state of the solver at this precise moment of time and then continue.
-            // However, this does not work well in the case of integration in a spherical system
-            // when Lz=0, because the reinitialization introduces a tiny but nonzero Lz, and
-            // the integration grinds to a halt near pericenter, that's why this check is skipped.
-            orbrot.run(total_time/2);
-            orbrot.init(trajRot.back().first, init_time+total_time/2);
-            orbrot.run(total_time/2);
-        } else {
-            orbrot.run(total_time);
-        }
-        if(trajRot.size() != traj.size()) {
+        // check that a continuation of the orbit integration gives the same result
+        // as a single run for a longer time
+        orbrot.run(total_time*0.6);
+        orbrot.run(total_time*0.4);
+        if(trajRot.size() != trajReg.size()) {
             std::cout << "\033[1;34mOrbit in the rotating frame has different length\033[0m\n";
             return false;
         } else {
             // convert the orbit back into non-rotating frame
-            for(size_t i=0; i<traj.size(); i++) {
-                double angle = (traj[i].second-init_time)*Omega, cosa = cos(angle), sina = sin(angle);
+            for(size_t i=0; i<trajReg.size(); i++) {
+                double angle = (trajReg[i].second-init_time)*Omega, cosa = cos(angle), sina = sin(angle);
                 coord::PosVelCar& xv = trajRot[i].first;  // cartesian coords in the rotating frame
                 xv = coord::PosVelCar(  // converted to the inertial frame
                     xv.x  * cosa - xv.y  * sina, xv.y  * cosa + xv.x  * sina, xv.z,
@@ -156,10 +143,9 @@ bool test_coordsys(const potential::BasePotential& potential,
         }
     }
     math::Averager avgE, avgL;
-    double difrot = checkRot ? maxDistanceBetweenOrbits(traj, trajRot) : 0;
-    for(size_t i=0; i<traj.size(); i++) {
-        avgE.add(totalEnergy(potential, traj[i].first));
-        avgL.add(Lz(traj[i].first));
+    for(size_t i=0; i<trajFull.size(); i++) {
+        avgE.add(totalEnergy(potential, trajFull[i].first));
+        avgL.add(Lz(trajFull[i].first));
     }
     if(output) {
         std::ofstream strm((std::string("Orbit_") + potential.name() + '_' + CoordT::name() + '_' +
@@ -175,7 +161,7 @@ bool test_coordsys(const potential::BasePotential& potential,
             utils::pp(totalEnergy(potential, xv), 18) << ' '<< utils::pp(Lz(xv), 18) << '\n';
         }
     }
-    bool ok = traj.back().second > 0.999999 * (total_time + init_time);
+    bool ok = trajReg.back().second > 0.999999 * (total_time + init_time);
     if(ok)
         std::cout << trajFull.size()-1 << " steps";
     else {
@@ -195,13 +181,14 @@ bool test_coordsys(const potential::BasePotential& potential,
         }
     }
     if(checkRot) {
+        double difrot = maxDistanceBetweenOrbits(trajReg, trajRot);
         std::cout << ", |rot-nonrot|=" << difrot;
         if(difrot > epsrot) {
             std::cout << " \033[1;34m**\033[0m";
             ok = false;
         }
     }
-    if(traj.size() != round(total_time / timestep) + 1) {
+    if(trajReg.size() != round(total_time / timestep) + 1) {
         std::cout << "\033[1;33m[incorrect length]\033[0m\n";
         ok = false;
     }
@@ -218,8 +205,10 @@ bool test_potential(const potential::BasePotential& potential,
     std::cout << "\033[1;37m" << potential.name() << "\033[0m, ic=(" << initial_conditions <<
         "), Torb=" << T_circ(potential, totalEnergy(potential, initial_conditions)) << "\n";
 
-    std::vector< std::pair<coord::PosVelCar, double> > trajCar, trajCyl, trajSph;
+    std::vector< std::pair<coord::PosVelCar, double> > trajCar, trajCyl, trajSph, trajRkn;
     bool ok = true;
+    ok &= test_coordsys<coord::Car>(potential, initial_conditions, total_time, trajRkn,
+        orbit::OrbitIntParams::DPRKN8);
     ok &= test_coordsys<coord::Car>(potential, initial_conditions, total_time, trajCar);
     ok &= test_coordsys<coord::Cyl>(potential, initial_conditions, total_time, trajCyl);
     ok &= test_coordsys<coord::Sph>(potential, initial_conditions, total_time, trajSph);
@@ -344,6 +333,38 @@ bool test_normalize_range()
     return ok;
 }
 
+bool test_zero_length_orbit(const potential::BasePotential& pot)
+{
+    const double timeStart = 1.23, Omega = 4.56;
+    const coord::PosVelCar ic(0.1, 0.2, 0.3, 0.4, 0.5, 0.6);
+    orbit::Trajectory traj, dev[6];
+    {   // sampling interval set to 0 - store two (identical) endpoints of the zero-length time interval
+        orbit::OrbitIntegrator<coord::Car> orbint(pot, Omega);
+        orbint.addRuntimeFnc(orbit::PtrRuntimeFnc(new orbit::RuntimeTrajectory(orbint, 0, traj)));
+        orbint.addRuntimeFnc(orbit::PtrRuntimeFnc(new orbit::RuntimeVariational(orbint, 0, dev)));
+        orbint.init(ic, timeStart);
+        orbint.run(0);
+    }
+    bool ok = traj.size() == 2 && dev[0].size() == 2 &&
+        equalPosVel(traj[0].first, ic, /*eps*/0) && traj[0].second == timeStart &&
+        equalPosVel(traj[1].first, ic, /*eps*/0) && traj[1].second == timeStart &&
+        equalPosVel(dev[0][0].first, coord::PosVelCar(1, 0, 0, 0, 0, 0), DBL_EPSILON) &&
+        equalPosVel(dev[0][1].first, dev[0][0].first, /*eps*/0);
+    {   // sampling interval set to INFINITY - store only the final point
+        orbit::OrbitIntegrator<coord::Car> orbint(pot, Omega);
+        orbint.addRuntimeFnc(orbit::PtrRuntimeFnc(new orbit::RuntimeTrajectory(orbint, INFINITY, traj)));
+        orbint.addRuntimeFnc(orbit::PtrRuntimeFnc(new orbit::RuntimeVariational(orbint, INFINITY, dev)));
+        orbint.init(ic, timeStart);
+        orbint.run(0);
+    }
+    ok = traj.size() == 1 && dev[0].size() == 1 &&
+        equalPosVel(traj[0].first, ic, /*eps*/0) && traj[0].second == timeStart &&
+        equalPosVel(dev[0][0].first, coord::PosVelCar(1, 0, 0, 0, 0, 0), DBL_EPSILON);
+    if(!ok)
+        std::cout << "test_zero_length_orbit \033[1;31mFAILED\033[0m\n";
+    return ok;
+}
+
 int main() {
     std::vector<potential::PtrPotential> pots;
     for(int p=0; p<NUMPOT; p++)
@@ -351,6 +372,7 @@ int main() {
     pots.push_back(make_galpot(galpot_params));
     bool allok = true;
     allok &= test_normalize_range();
+    allok &= test_zero_length_orbit(*pots[1]);
     for(unsigned int ip=0; ip<pots.size(); ip++) {
         for(int ic=0; ic<NUMPOINTS; ic++)
             allok &= test_potential(*pots[ip], coord::PosVelCar(posvel_car[ic]));

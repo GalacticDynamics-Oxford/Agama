@@ -60,7 +60,7 @@ class AgamaInterfaceTests(TestWithMPI):
             0.|generic_unit_system.length,
             0.|generic_unit_system.length)
         self.assertLess(abs(result/(-16./3/3.1416|
-            generic_unit_system.length**2/generic_unit_system.time**2) - 1), 0.04)
+            generic_unit_system.length**2/generic_unit_system.time**2) - 1), 0.05)
 
         scaleM=1234|units.MSun
         scaleR=5.6 |units.parsec

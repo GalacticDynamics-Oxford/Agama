@@ -1,7 +1,7 @@
 /** \file    potential_multipole.h
     \brief   density and potential approximations based on spherical-harmonic expansion
     \author  Eugene Vasiliev
-    \date    2010-2024
+    \date    2010-2025
 
     This module provides tools for representing arbitrary density and potential profiles
     in terms of spherical-harmonic (or multipole) expansion, with coefficients being
@@ -136,7 +136,8 @@ private:
     std::vector<math::PtrFunction> spl;
 
     /// logarithmic density slope at small and large radii (rho ~ r^s)
-    double innerSlope, outerSlope;
+    /// and the extrapolated value at origin
+    double innerSlope, outerSlope, centralValue;
 
     /// whether the l=0 term is interpolated using log-scaling
     bool logScaling;

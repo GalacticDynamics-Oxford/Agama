@@ -7,13 +7,13 @@
 
 namespace raga {
 
-bool RuntimePotential::processTimestep(double tbegin, double tend)
+bool RuntimePotential::processTimestep(double timeBegin, double timeStep)
 {
-    double t;
-    while(t = outputTimestep * (outputIter - outputFirst + 1),
-        t>tbegin && t<=tend && outputIter != outputLast)
+    double timeOffset;
+    while(timeOffset = outputTimestep * (outputIter - outputFirst + 1) - timeBegin,
+        timeOffset>0 && timeOffset<=timeStep && outputIter != outputLast)
     {
-        (outputIter++)->first = toPosCyl(orbint.getSol(t));
+        (outputIter++)->first = toPosCyl(orbint.getSol(timeOffset));
     }
     return true;
 }

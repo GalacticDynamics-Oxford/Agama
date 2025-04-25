@@ -111,7 +111,7 @@ gmsph = agama.GalaxyModel(potsph, df0)
 gridSize = 25
 gridMass = density.totalMass() * numpy.sin(numpy.linspace(0, numpy.pi/2, gridSize+2)[1:-1])**2
 gridRadius = 10**numpy.array([
-    scipy.optimize.brentq(lambda logr: density.enclosedMass(10**logr) - mass, -100, 100)
+    scipy.optimize.brentq(lambda logr: density.enclosedMass(10**logr) - mass, -50, 50)
     for mass in gridMass])
 gridMajor = numpy.column_stack((gridRadius, 0*gridRadius, 0*gridRadius))
 gridMinor = numpy.column_stack((gridRadius*0, gridRadius*0, gridRadius))

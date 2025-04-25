@@ -583,6 +583,7 @@ public:
         oldcwd.resize(bufsize);
         if(!getcwd(&oldcwd[0], bufsize))
             throw std::runtime_error("Failed to get the current working directory");  // unlikely
+        oldcwd.resize(oldcwd.find('\0'));
         std::string newcwd = filenameWithPath.substr(0, index+1);
         if(chdir(newcwd.c_str()) != 0)
             throw std::runtime_error("Failed to change the current working directory to "+newcwd);
@@ -1134,6 +1135,7 @@ static void readTimeDependentArray(
         throw std::runtime_error(errorTimeDependentArray(K, str));
     }
 
+    // otherwise the input string is interpreted as the name of the file with the said array
     std::ifstream strm(str.c_str(), std::ios::in);
     if(!strm)
         throw std::runtime_error(errorTimeDependentArray(K, str));
@@ -1169,26 +1171,6 @@ static void readTimeDependentArray(
             "file \"" + str + "\" should contain either " + utils::toString(K+1) + " or " +
             utils::toString(2*K+1) + " columns");
 }
-
-/** helper function for finding the slope of asymptotic power-law behaviour of a certain function:
-    if  f(x) ~ f0 + a * x^b  as  x --> 0  or  x --> infinity,  then the slope b is given by
-    solving the equation  [x1^b - x2^b] / [x2^b - x3^b] = [f(x1) - f(x2)] / [f(x2) - f(x3)],
-    where x1, x2 and x3 are three consecutive points near the end of the interval.
-    The arrays of x and corresponding f(x) are passed as parameters to this function,
-    and its value() method is used in the root-finding routine.
-*/
-class SlopeFinder: public math::IFunctionNoDeriv {
-    const double r12, r32, ratio;
-public:
-    SlopeFinder(double logx1, double logx2, double logx3, double f1, double f2, double f3) :
-    r12(logx1-logx2), r32(logx3-logx2), ratio( (f1-f2) / (f2-f3) ) {}
-
-    virtual double value(const double b) const {
-        if(b==0)
-            return -r12 / r32 - ratio;
-        return (exp(b * r12) - 1) / (1 - exp(b * r32)) - ratio;
-    }
-};
 
 ///@}
 /// \name Factory routines for creating instances of Density and Potential classes
@@ -1521,25 +1503,20 @@ std::vector<double> densityFromCumulativeMass(
     }
     // determine if the cumulative mass approaches a finite limit at large radii,
     // that is, M = Minf - A * r^B  with A>0, B<0
-    double B = math::findRoot(SlopeFinder(
-        gridlogr[size-1], gridlogr[size-2], gridlogr[size-3],
-        gridm   [size-1], gridm   [size-2], gridm   [size-3] ), -100, 0, /*tolerance*/1e-6);
-    double invMinf = 0;  // 1/Minf, or remain 0 if no finite limit is detected
-    if(B<0) {
-        double A =  (gridm[size-1] - gridm[size-2]) /
-        (exp(B * gridlogr[size-2]) - exp(B * gridlogr[size-1]));
-        if(A>0) {  // viable extrapolation
-            invMinf = 1 / (gridm[size-1] + A * exp(B * gridlogr[size-1]));
-            FILTERMSG(utils::VL_DEBUG, "densityFromCumulativeMass",
-                "Extrapolated total mass=" + utils::toString(1/invMinf) +
-                ", rho(r)~r^" + utils::toString(B-3) + " at large radii");
-        }
-    }
+    double A, B, Minf;
+    math::findAsymptote(gridr[size-1], gridr[size-2], gridr[size-3],
+        gridm[size-1], gridm[size-2], gridm[size-3], /*output*/ A, B, Minf);
+    if(B<0 && A<0) {  // viable extrapolation
+        FILTERMSG(utils::VL_DEBUG, "densityFromCumulativeMass",
+            "Extrapolated total mass=" + utils::toString(Minf) +
+            ", rho(r)~r^" + utils::toString(B-3) + " at large radii");
+    } else
+        Minf = INFINITY;  // no finite limit detected
     // scaled mass to interpolate:  log[ M / (1 - M/Minf) ] as a function of log(r),
     // which has a linear asymptotic behaviour with slope -B as log(r) --> infinity;
     // if Minf = infinity, this additional term has no effect
     for(unsigned int i=0; i<size; i++)
-        gridlogm[i] = log(gridm[i] / (1 - gridm[i]*invMinf));
+        gridlogm[i] = log(gridm[i] / (1 - gridm[i] / Minf));
     math::CubicSpline spl(gridlogr, gridlogm, true /*enforce monotonicity*/);
     if(spl.extrema().size() > 2)  // should be only two, at both endpoints
         throw std::runtime_error("densityFromCumulativeMass: interpolated mass is not monotonic");
@@ -1548,7 +1525,7 @@ std::vector<double> densityFromCumulativeMass(
         double val, der;
         spl.evalDeriv(gridlogr[i], &val, &der);
         val = exp(val);
-        gridrho[i] = der * val / (4*M_PI * pow_3(gridr[i]) * pow_2(1 + val * invMinf));
+        gridrho[i] = der * val / (4*M_PI * pow_3(gridr[i]) * pow_2(1 + val / Minf));
         if(gridrho[i] <= 0)   // shouldn't occur if the spline is (strictly) monotonic
             throw std::runtime_error("densityFromCumulativeMass: interpolated density is non-positive");
     }

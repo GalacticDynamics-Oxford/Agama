@@ -1,6 +1,6 @@
 /** \file   math_core.h
     \brief  essential math routines (e.g., root-finding, integration)
-    \date   2015-2017
+    \date   2015-2025
     \author Eugene Vasiliev
 */
 #pragma once
@@ -409,6 +409,15 @@ inline double findMin(const IFunction& F, const Scaling& scaling, double xinit, 
     return unscale(scaling,
         findMin(ScaledFnc<Scaling>(scaling, F), 0, 1, scale(scaling, xinit), relToler));
 }
+
+/** find the asymptotic behaviour of a certain function f(x), assuming that it has the form
+    f(x) = a x^b + c  as  x-->0 or x-->infinity.
+    \param[in]  x1, x2, x3:  three points, usually at small or large values of x.
+    \param[in]  f1, f2, f3:  values of the function at these points.
+    \param[out] a, b, c:  returned extrapolation coefficients.
+*/
+void findAsymptote(double x1, double x2, double x3, double f1, double f2, double f3,
+    /*output*/ double& a, double& b, double& c);
 
 ///@}
 /// \name ------ numerical derivatives -------

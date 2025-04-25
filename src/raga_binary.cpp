@@ -32,8 +32,8 @@ public:
         orbint(_orbint), r2crit(_r2crit)  {}
 
     /// return the difference between the radius at the given time and the critical radius (both squared)
-    virtual void evalDeriv(const double time, double* val, double* der, double*) const {
-        coord::PosVelCar pos = orbint.getSol(time);
+    virtual void evalDeriv(const double timeOffset, double* val, double* der, double*) const {
+        coord::PosVelCar pos = orbint.getSol(timeOffset);
         if(val)
             *val = pow_2(pos.x) + pow_2(pos.y) + pow_2(pos.z) - r2crit;
         if(der)
@@ -43,19 +43,20 @@ public:
 };
 
 /// compute the change in L_z due to the torque from the stellar potential for the orbit segment
-/// on the interval of time [t1:t2] provided by the ODE solver
+/// on the interval of time [t1:t2] provided by the ODE solver;
+/// tbegin is the beginning of the timestep, while t1 and t2 are time offsets from tbegin
 double computeLztorque(const potential::BasePotential& potential,
-    const orbit::BaseOrbitIntegrator& orbint, double t1, double t2)
+    const orbit::BaseOrbitIntegrator& orbint, double tbegin, double t1, double t2)
 {
     if(isZRotSymmetric(potential))
         return 0;
     // integrate the torque over the interval [t1:t2] using 2-point Gauss rule
-    static const double delta = 0.211324865; // (1-sqrt(1./3))/2
+    static const double delta = 0.211324865405187; // (1-sqrt(1./3))/2
     double ta = t1 * delta + t2 * (1-delta), tb = t2 * delta + t1 * (1-delta);
     coord::GradCar ga, gb;
     coord::PosCar pa = orbint.getSol(ta), pb = orbint.getSol(tb);
-    potential.eval(pa, NULL, &ga);
-    potential.eval(pb, NULL, &gb);
+    potential.eval(pa, NULL, &ga, NULL, tbegin+ta);
+    potential.eval(pb, NULL, &gb, NULL, tbegin+tb);
     double torque = 0.5 * (t2-t1) * (pa.x * ga.dy - pa.y * ga.dx  +  pb.x * gb.dy - pb.y * gb.dx);
     if(isFinite(torque))
         return torque;
@@ -66,11 +67,11 @@ double computeLztorque(const potential::BasePotential& potential,
 }
 }  // internal ns
 
-bool RuntimeBinary::processTimestep(double tbegin, double tend)
+bool RuntimeBinary::processTimestep(double tbegin, double timestep)
 {
     // position/velocity at the beginning and the end of encounter,
     // initially assigned to the beginning/end of timestep
-    coord::PosVelCar ptbegin = orbint.getSol(tbegin), ptend = orbint.getSol(tend);
+    coord::PosVelCar ptbegin = orbint.getSol(0), ptend = orbint.getSol(timestep);
 
     // first determine whether the particle experiences an encounter during this timestep
     double r2begin = pow_2(ptbegin.x) + pow_2(ptbegin.y) + pow_2(ptbegin.z);
@@ -81,20 +82,21 @@ bool RuntimeBinary::processTimestep(double tbegin, double tend)
 
     // if during the timestep the particle spends some time inside the critical radius,
     // we need to determine exactly the time when it enters and exits the sphere with this radius
-    // (it may well be the beginning or the end of the timestep)
-    double tbeginEnc = tbegin, tendEnc = tend;
+    // (it may well be the beginning or the end of the timestep).
+    // time variables with "offset" suffix are measured from the beginning of the timestep (tbegin)
+    double tbeginEncOffset = 0, tendEncOffset = timestep;
 
     // if the particle has crossed the critical radius during the timestep,
-    // we need to find the exact time this happened
+    // we need to find the exact time this happened (time offset from tbegin)
     if((r2end < r2crit) ^ (r2begin < r2crit)) {
-        double tcross = math::findRoot(EncounterFinder(orbint, r2crit), tbegin, tend, ACCURACY_ROOT);
-        assert(tcross >= tbegin && tcross <= tend);
+        double tcrossOffset = math::findRoot(EncounterFinder(orbint, r2crit), 0, timestep, ACCURACY_ROOT);
+        assert(tcrossOffset >= 0 && tcrossOffset <= timestep);
         if(r2begin >= r2crit) {
-            tbeginEnc = tcross;
-            ptbegin   = orbint.getSol(tcross);
+            tbeginEncOffset = tcrossOffset;
+            ptbegin = orbint.getSol(tcrossOffset);
         } else {
-            tendEnc   = tcross;
-            ptend     = orbint.getSol(tcross);
+            tendEncOffset = tcrossOffset;
+            ptend = orbint.getSol(tcrossOffset);
         }
     }
 
@@ -111,21 +113,23 @@ bool RuntimeBinary::processTimestep(double tbegin, double tend)
 
     // compute the changes in particle energy and z-component of angular momentum during the time
     // that it spends inside the critical radius (it may be the entire timestep or its fraction)
-    double Ebegin  = totalEnergy(potstars, ptbegin, tbeginEnc) + bh.potential(ptbegin, tbeginEnc);
-    double Eend    = totalEnergy(potstars, ptend,   tendEnc)   + bh.potential(ptend,   tendEnc);
+    double Ebegin  = totalEnergy(potstars, ptbegin, tbegin + tbeginEncOffset) +
+        bh.potential(ptbegin, tbegin + tbeginEncOffset);
+    double Eend    = totalEnergy(potstars, ptend,   tbegin + tendEncOffset) +
+        bh.potential(ptend,   tbegin + tendEncOffset);
     double Lzbegin = Lz(ptbegin);
     double Lzend   = Lz(ptend);
     // if the stellar potential itself is non-axisymmetric, the z-component of angular momentum
     // also changes due to the torque from the stellar potential, and we need to take this into account
-    double Lztorque = computeLztorque(potstars, orbint, tbeginEnc, tendEnc);
+    double Lztorque = computeLztorque(potstars, orbint, tbegin, tbeginEncOffset, tendEncOffset);
 
     // if the encounter started during the current timestep,
     // we add a new record to the list of encounters for this orbit,
     // otherwise we update the most recent encounter record
     if(newEncounter)
-        encountersList.push_back(BinaryEncounterData(tbeginEnc, Ebegin, Ltotal(ptbegin)));
+        encountersList.push_back(BinaryEncounterData(tbegin + tbeginEncOffset, Ebegin, Ltotal(ptbegin)));
     BinaryEncounterData& enc = encountersList.back();
-    enc.Tlength += tendEnc - tbeginEnc;
+    enc.Tlength += tendEncOffset - tbeginEncOffset;
     enc.deltaE  += Eend  - Ebegin;
     enc.deltaLz += Lzend - Lzbegin - Lztorque;
     enc.costheta = ptend.vz / sqrt(pow_2(ptend.vx) + pow_2(ptend.vy) + pow_2(ptend.vz));

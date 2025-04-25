@@ -65,7 +65,7 @@
 #include "utils.h"
 #include "utils_config.h"
 // text string embedded into the python module as the __version__ attribute (including Github commit number)
-#define AGAMA_VERSION "1.0.151 compiled on " __DATE__
+#define AGAMA_VERSION "1.0.152 compiled on " __DATE__
 
 // older versions of numpy have different macro names
 // (will need to expand this list if other similar macros are used in the code)
@@ -3230,7 +3230,7 @@ public:
     shared_ptr<const potential::Interpolator> interp;
     FncPotentialRcirc(PyObject* input, const potential::BasePotential& _pot) :
         BatchFunction(input, /*input length*/ 1), pot(_pot), axipot(pot),
-        interp(numPoints >= 256 ? new potential::Interpolator(pot) : NULL)
+        interp(numPoints >= 256 ? new potential::Interpolator(axipot) : NULL)
     {
         outputObject = allocateOutput<1>(numPoints, &outputBuffer);
     }
@@ -3297,7 +3297,7 @@ public:
     FncPotentialTcirc(PyObject* input, const potential::BasePotential& _pot) :
         BatchFunction(input, /*input length - two choices*/ 1, 6, /*custom error message*/
             "Input must be a 1d array of energy values or a 2d Nx6 array of position/velocity values"),
-        pot(_pot), axipot(pot), interp(numPoints >= 256 ? new potential::Interpolator(pot) : NULL)
+        pot(_pot), axipot(pot), interp(numPoints >= 256 ? new potential::Interpolator(axipot) : NULL)
     {
         outputObject = allocateOutput<1>(numPoints, &outputBuffer);
     }
@@ -3340,7 +3340,7 @@ public:
     shared_ptr<const potential::Interpolator> interp;
     FncPotentialRmax(PyObject* input, const potential::BasePotential& _pot) :
         BatchFunction(input, /*input length*/ 1), pot(_pot), axipot(pot),
-        interp(numPoints >= 256 ? new potential::Interpolator(pot) : NULL)
+        interp(numPoints >= 256 ? new potential::Interpolator(axipot) : NULL)
     {
         outputObject = allocateOutput<1>(numPoints, &outputBuffer);
     }
@@ -6194,6 +6194,8 @@ int Target_init(TargetObject* self, PyObject* args, PyObject* namedArgs)
                         params.apertures.push_back(poly);
                     }
                 } else {
+                    if(PyErr_Occurred())
+                        return -1;
                     Py_XDECREF(ap_arr);
                     throw std::invalid_argument(
                         "Each element of the list or tuple provided in the 'apertures=...' argument "
@@ -6941,6 +6943,34 @@ PyObject* Spline_value(SplineObject* self, PyObject* args, PyObject* namedArgs)
     return PyArray_Return(arr);
 }
 
+PyObject* Spline_integrate(SplineObject* self, PyObject* args, PyObject* namedArgs)
+{
+    if(!self->spl) {
+        PyErr_SetString(PyExc_RuntimeError, "Spline object is not properly initialized");
+        return NULL;
+    }
+    static const char* keywords[] = {"x1", "x2", "n", NULL};
+    double x1, x2;
+    PyObject* n_obj = NULL;
+    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "dd|O", const_cast<char **>(keywords),
+        &x1, &x2, &n_obj))
+        return NULL;
+    if(!n_obj)
+        return PyFloat_FromDouble(self->spl->integrate(x1, x2));
+    // `n` may be a nonnegative integer or another instance of Spline
+    if(PyInt_Check(n_obj)) {
+        long n = PyInt_AsLong(n_obj);
+        if(n>=0 && n<0x7fff)
+            return PyFloat_FromDouble(self->spl->integrate(x1, x2, n));
+    }
+    else if(PyObject_TypeCheck(n_obj, SplineTypePtr) && ((SplineObject*)n_obj)->spl) {
+        return PyFloat_FromDouble(self->spl->integrate(x1, x2, *((SplineObject*)n_obj)->spl));
+    }
+    PyErr_SetString(PyExc_RuntimeError,
+        "Argument 'n', if present, should be a nonnegative integer or another instance of Spline");
+    return NULL;
+}
+
 PyObject* Spline_roots(SplineObject* self, PyObject* args, PyObject* namedArgs)
 {
     if(!self->spl) {
@@ -7009,6 +7039,15 @@ static PySequenceMethods Spline_sequence_methods = {
 };
 
 static PyMethodDef Spline_methods[] = {
+    { "integrate", (PyCFunction)Spline_integrate, METH_VARARGS | METH_KEYWORDS,
+      "Compute the integral of the spline, optionally multiplied by x^n or by another spline, "
+      "over the given interval x1..x2; spline is set to zero outside its grid.\n"
+      "Arguments:\n"
+      "  x1 - left boundary of the interval;\n"
+      "  x2 - right boundary of the interval;\n"
+      "  n (default: 0) - additional weight function in integration; can be a positive integer "
+      "(meaning multiplying the spline by x^n) or another instance of Spline class.\n"
+      "Returns: the value of the integral.\n" },
     { "roots", (PyCFunction)Spline_roots, METH_VARARGS | METH_KEYWORDS,
       "Return all points on the given interval at which the spline attains the given value y.\n"
       "Arguments:\n"
@@ -7436,7 +7475,7 @@ static PyTypeObject OrbitType = {
 bool createOrbit(int dtype, const orbit::Trajectory &traj,
     double Omega, bool outputTime, double normFactor, /*output*/ PyObject* output[])
 {
-    npy_intp size = traj.size();
+    npy_intp size = traj.size(), sizespl = 0;
     if(dtype == NPY_OBJECT) {
         // create an Orbit object containing three spline interpolators
         OrbitObject* orbit = NULL;
@@ -7476,17 +7515,31 @@ bool createOrbit(int dtype, const orbit::Trajectory &traj,
         for(npy_intp index=0; index<size; index++) {
             double point[6];
             unconvertPosVel(traj[orbit->reversed ? size-1-index : index].first, point);
-            t [index] = traj[orbit->reversed ? size-1-index : index].second / conv->timeUnit;
+            double ti = traj[orbit->reversed ? size-1-index : index].second / conv->timeUnit;
+            // skip points with identical timestamps, since otherwise spline construction would fail
+            if(sizespl > 0 && ti == t[sizespl-1])
+                continue;
+            t [sizespl] = ti;
             // if the orbit was provided in the rotating frame, transform it to a non-rotating one
             // to construct the interpolators, and transform their output back to rotated frame
             double ca, sa;
-            math::sincos(orbit->Omega * t[index], sa, ca);
-            x [index] = normFactor * (point[0] * ca - point[1] * sa);
-            y [index] = normFactor * (point[1] * ca + point[0] * sa);
-            z [index] = normFactor *  point[2];
-            vx[index] = normFactor * (point[3] * ca - point[4] * sa);
-            vy[index] = normFactor * (point[4] * ca + point[3] * sa);
-            vz[index] = normFactor *  point[5];
+            math::sincos(orbit->Omega * ti, sa, ca);
+            x [sizespl] = normFactor * (point[0] * ca - point[1] * sa);
+            y [sizespl] = normFactor * (point[1] * ca + point[0] * sa);
+            z [sizespl] = normFactor *  point[2];
+            vx[sizespl] = normFactor * (point[3] * ca - point[4] * sa);
+            vy[sizespl] = normFactor * (point[4] * ca + point[3] * sa);
+            vz[sizespl] = normFactor *  point[5];
+            sizespl++;
+        }
+        if(sizespl != size) {
+            t .resize(sizespl);
+            x .resize(sizespl);
+            y .resize(sizespl);
+            z .resize(sizespl);
+            vx.resize(sizespl);
+            vy.resize(sizespl);
+            vz.resize(sizespl);
         }
         try{
             ((SplineObject*)orbit->x)->spl.reset(new math::QuinticSpline(t, x, vx));
@@ -7502,6 +7555,7 @@ bool createOrbit(int dtype, const orbit::Trajectory &traj,
                 ", "  +utils::toString(((SplineObject*)orbit->z)->spl.get()));
         }
         catch(std::exception& ex) {
+            PyAcquireGIL lock;
             Py_DECREF(orbit);
             raisePythonException(ex);
             return false;
@@ -7599,8 +7653,9 @@ static const char* docstringOrbit =
     "  maxNumSteps (optional, default 1e8):  upper limit on the number of steps in the ODE integrator.\n"
     "  dtype (optional, default 'float32'):  storage data type for trajectories (see below).\n"
     "  method (optional, string):  choice of the ODE integrator, available variants are "
-    "'dop853' (default; 8th order Runge-Kutta) or 'hermite' (4th order, may be more efficient "
-    "in the regime of low accuracy).\n"
+    "'dop853' (default; 8th order Runge-Kutta), 'dprkn8' (8th order Runge-Kutta-Nystrom method, "
+    "usually somewhat more efficient than dop853), or 'hermite' (4th order, might be more efficient "
+    "in the regime of low accuracy, but only works in static potentials).\n"
     "  verbose (optional, default True):  whether to display progress when integrating multiple orbits.\n"
     "Returns:\n"
     "  depending on the arguments, one or a tuple of several data containers (one for each target, "
@@ -7610,7 +7665,11 @@ static const char* docstringOrbit =
     "and C is the number of constraints in the target (varies between targets); "
     "if there was a single orbit, then this would be a 1d array of length C. "
     "These data storage arrays should be provided to the `solveOpt()` routine. \n"
-    "  Lyapunov exponent is a single number for one orbit, or a 1d array for several orbits.\n"
+    "  Turning on the Lyapunov exponent estimation produces two numbers per orbit: "
+    "the normalized Lyapunov exponent (lambda * Torb, where the orbital period is taken to be "
+    "potential.Tcirc(ic) - values of order unity indicate strongly chaotic orbits, much smaller "
+    "than unity - weakly chaotic ones), and the dimensionless timescale for the onset of chaos "
+    "(expressed in units of orbital period). In case of N orbits, this array has shape Nx2.\n"
     "  Trajectory output and deviation vectors can be requested in two alternative formats: "
     "arrays or Orbit objects.\n"
     "In the first case, the output of the trajectory is a Nx2 array (or, in case of a single orbit, "
@@ -7705,10 +7764,14 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
     if(method_obj != NULL) {
         std::string method_str = toString(method_obj);
         if(utils::stringsEqual(method_str, "hermite"))
-            params.useHermite = true;
-        else if(!utils::stringsEqual(method_str, "dop853")) {
+            params.method = orbit::OrbitIntParams::HERMITE;
+        else if(utils::stringsEqual(method_str, "dprkn8"))
+            params.method = orbit::OrbitIntParams::DPRKN8;
+        else if(utils::stringsEqual(method_str, "dop853"))
+            params.method = orbit::OrbitIntParams::DOP853;
+        else {
             PyErr_SetString(PyExc_ValueError,
-                "Unknown ODE integation method (valid values are 'dop853' or 'hermite')");
+                "Unknown ODE integation method (valid values are 'dop853', 'dprkn8' or 'hermite')");
             return NULL;
         }
     }
@@ -7830,19 +7893,20 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
         if(!trajsize_arr)
             return NULL;
         if(PyArray_NDIM(trajsize_arr) == 0) {
-            long val = PyInt_AsLong(trajsize_obj);
-            if(val >= 0)
-                trajSizes.assign(numOrbits, val);
+            trajSizes.assign(numOrbits, PyInt_AsLong(trajsize_obj));
         } else if(PyArray_NDIM(trajsize_arr) == 1 && (int)PyArray_DIM(trajsize_arr, 0) == numOrbits) {
             trajSizes.resize(numOrbits);
             for(npy_intp i=0; i<numOrbits; i++)
                 trajSizes[i] = pyArrayElem<int>(trajsize_arr, i);
         }
         Py_DECREF(trajsize_arr);
-        if((npy_intp)trajSizes.size() != numOrbits) {
+        bool nonneg = true;
+        for(npy_intp i=0; i<numOrbits; i++)
+            nonneg &= trajSizes[i] >= 0;
+        if((npy_intp)trajSizes.size() != numOrbits || !nonneg) {
             PyErr_SetString(PyExc_ValueError,
-                "Argument 'trajsize', if provided, must either be an integer or an array of integers "
-                "with the same length as the number of points in the initial conditions");
+                "Argument 'trajsize', if provided, must either be a nonnegative integer or an array "
+                "of integers with the same length as the number of points in the initial conditions");
             return NULL;
         }
     }
@@ -7896,8 +7960,8 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
             // 6 dev vectors per orbit, stored as arrays or Orbit objects
             numCols  = 6;
             datatype = NPY_OBJECT;
-        } else if(haveLyap && t == numTargets + haveTraj + haveDer) {  // Lyapunov exponent
-            numCols  = 1;
+        } else if(haveLyap && t == numTargets + haveTraj + haveDer) {  // Lyapunov exponent and Tchaos
+            numCols  = 2;
             datatype = NPY_DOUBLE;
         } else
             assert(!"Counting error in allocating output arrays");  // shouldn't happen
@@ -7949,18 +8013,21 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
                         new galaxymodel::RuntimeFncTarget(orbint, *targets[t], output)));
                 }
                 if(haveTraj) {
-                    double trajStep = trajSizes[orb]>0 ?
-                        // output at regular intervals of time, unless trajSize=1
-                        // (in that case, outputInterval=INFINITY, and we store only the last point)
-                        fabs(timetotal[orb]) / (trajSizes[orb]-1) :
-                        0;  // if trajSize==0, this means store trajectory at every integration timestep
+                    double trajStep = trajSizes[orb]>1 ?
+                        fabs(timetotal[orb]) / (trajSizes[orb]-1) :  // output at regular time intervals
+                        trajSizes[orb]==1 ? INFINITY :  // store only the last point
+                        /*trajSizes[orb]==0*/ 0;  // store trajectory at every integration timestep
                     orbint.addRuntimeFnc(orbit::PtrRuntimeFnc(
                         new orbit::RuntimeTrajectory(orbint, trajStep, traj)));
                 }
                 if(haveLyap || haveDer) {
-                    double trajStep = !trajSizes.empty() && trajSizes[orb]>0 ?
+                    double trajStep = 0;
+                    if(haveDer) {  // implies trajSizes is not empty
+                        trajStep = trajSizes[orb]>1 ?
                         fabs(timetotal[orb]) / (trajSizes[orb]-1) :  // same timestep as for the orbit
+                        trajSizes[orb]==1 ? INFINITY :  // store only the last point
                         0;  // store at every integration timestep
+                    }
                     double* outputLyap = haveLyap ?
                         static_cast<double*>(
                         PyArray_DATA(result_arrays[numTargets + haveTraj + haveDer])) +
@@ -8045,7 +8112,8 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
     if(fail) {
         for(size_t t=0; t<result_arrays.size(); t++)
             Py_XDECREF(result_arrays[t]);
-        raisePythonException(errorMessage, "Error in orbit(): ");
+        if(!PyErr_Occurred())   // set an error message if it hadn't been set previously
+            raisePythonException(errorMessage, "Error in orbit(): ");
         return NULL;
     }
 

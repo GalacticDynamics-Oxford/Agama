@@ -1,7 +1,7 @@
 /** \file    orbit.h
     \brief   Orbit integration
     \author  Eugene Vasiliev
-    \date    2009-2021
+    \date    2009-2025
 
     This module provides classes and routines for numerical computation of orbits in a given potential.
     This task is divided between three classes:
@@ -11,7 +11,7 @@
     - functions that perform useful data collection tasks on the orbit while it is being computed.
 
     The first part is implemented by one of the available methods from math_ode.h,
-    and the instance of an appropriate class derived from `math::BaseOdeSolver` is
+    and the instance of an appropriate class derived from `math::BaseOdeStepper` is
     constructed internally for each orbit.
     The second part is implemented by any class derived from `math::IOdeSystem`.
     The third part is realized through a generic system of 'runtime functions', which are attached
@@ -24,7 +24,7 @@
     the choice of its internal coordinate system), the runtime functions do not interact directly with
     the ODE solver, but rather with an interface provided by the class `orbit::BaseOrbitIntegrator`,
     which is the base class for the three variants of the class `orbit::OrbitIntegrator`
-    for different coordinate systems. This class, and in particular it method `run()`,
+    for different coordinate systems. This class, and in particular its method `run()`,
     is the actual entry point for computing an orbit in the given potential, optionally rotating
     about the z axis with some pattern speed Omega, while any number of attached runtime functions
     performing data collection tasks. Another convenience function `orbit::integrateTraj()`
@@ -68,11 +68,11 @@ public:
     virtual ~BaseRuntimeFnc() {}
 
     /** Prototype of the runtime function called after each timestep of the orbit integrator.
-        \param[in]  tbegin  is the start of the current timestep;
-        \param[in]  tend    is the end of the current timestep;
+        \param[in]  tbegin  is the start time of the current timestep.
+        \param[in]  timestep  is the length of the current timestep; can have either sign.
         \return  false if the integration must be terminated, or true if it may continue.
     */
-    virtual bool processTimestep(double tbegin, double tend) = 0;
+    virtual bool processTimestep(double tbegin, double timestep) = 0;
 };
 
 /** Shared pointer to a runtime function */
@@ -104,21 +104,28 @@ public:
         double _samplingInterval, Trajectory& _trajectory)
     :
         BaseRuntimeFnc(orbint), samplingInterval(_samplingInterval), trajectory(_trajectory), t0(NAN)
-    {}
+    {
+        trajectory.clear();
+    }
 
-    virtual bool processTimestep(double tbegin, double tend);
+    virtual bool processTimestep(double tbegin, double timestep);
 };
 
 
 /** Assorted parameters of orbit integration */
 struct OrbitIntParams {
+    enum Method {
+        DOP853,
+        DPRKN8,
+        HERMITE
+    };
     double accuracy;     ///< accuracy parameter for the ODE integrator
     size_t maxNumSteps;  ///< upper limit on the number of steps of the ODE integrator
-    bool useHermite;     ///< choice of the ODE integrator
+    Method method;       ///< choice of the ODE integrator
 
     /// assign default values
-    OrbitIntParams(double _accuracy=1e-8, size_t _maxNumSteps=1e8, bool _useHermite=false) :
-        accuracy(_accuracy), maxNumSteps(_maxNumSteps), useHermite(_useHermite) {}
+    OrbitIntParams(double _accuracy=1e-8, size_t _maxNumSteps=1e8, Method _method=DOP853) :
+        accuracy(_accuracy), maxNumSteps(_maxNumSteps), method(_method) {}
 };
 
 /** Interface for the orbit integrator in the given potential, optionally in a reference frame
@@ -155,11 +162,12 @@ struct OrbitIntParams {
     populate it with newly constructed runtime functions that do not have any external references,
     run the orbit, and then close the nested scope block to ensure correct finalization.
 */
-class BaseOrbitIntegrator: public math::IOdeSystemHermite {
+class BaseOrbitIntegrator: public math::IOdeSystem2ndOrder {
     const size_t maxNumSteps;        ///< maximum allowed number of integration steps
     std::vector<PtrRuntimeFnc> fncs; ///< list of runtime functions attached to the given orbit
 protected:
-    shared_ptr<math::BaseOdeSolver> solver; ///< the actual ODE integrator
+    shared_ptr<math::BaseOdeStepper> stepper;  ///< the actual ODE integrator
+    double timeBegin;  ///< time at the beginning of the current timestep
 public:
     /// gravitational potential in which the orbit is computed (accessible to runtime functions)
     const potential::BasePotential& potential;
@@ -172,12 +180,17 @@ public:
         const OrbitIntParams& params)
     :
         maxNumSteps(params.maxNumSteps),
+        timeBegin(0),
         potential(_potential), Omega(_Omega)
     {
-        if(params.useHermite)
-            solver.reset(new math::OdeSolverHermite(*this, params.accuracy));
-        else
-            solver.reset(new math::OdeSolverDOP853 (*this, params.accuracy));
+        switch(params.method) {
+            case OrbitIntParams::DOP853:
+                stepper.reset(new math::OdeStepperDOP853 (*this, params.accuracy)); break;
+            case OrbitIntParams::DPRKN8:
+                stepper.reset(new math::OdeStepperDPRKN8 (*this, params.accuracy)); break;
+            case OrbitIntParams::HERMITE:
+                stepper.reset(new math::OdeStepperHermite(*this, params.accuracy)); break;
+        }
     }
 
     virtual ~BaseOrbitIntegrator() {}
@@ -203,10 +216,11 @@ public:
 
     /// initialize or reset the current orbit state, and optionally set new time (if not NAN);
     /// this function should be called before run().
-    virtual void init(const coord::PosVelCar& ic, double time=NAN) = 0;
+    virtual void init(const coord::PosVelCar& ic, double newTime=NAN) = 0;
 
-    /// obtain the solution at the given time, which should lie within the just completed timestep
-    virtual coord::PosVelCar getSol(double time) const = 0;
+    /// obtain the interpolated solution within the last completed timestep;
+    /// the time offset is specified relative to the beginning of the last timestep
+    virtual coord::PosVelCar getSol(double timeOffset) const = 0;
 
     /// return the size of ODE system - three coordinates and three velocities
     virtual unsigned int size() const { return 6; }
@@ -239,27 +253,27 @@ public:
         const OrbitIntParams& params = OrbitIntParams()) :
         BaseOrbitIntegrator(potential, Omega, params) {}
 
-    /// IOdeSystem interface: equations of motion
-    virtual void eval(const double t, const double x[], double dxdt[]) const;
+    /// IOdeSystem interface: equations of motion for all coordinate systems and the DOP853 integrator;
+    /// optional output argument accFac will request tighter accuracy when |Epot| >> |Epot+Ekin|
+    virtual void eval(const double t, const double x[], double dxdt[], double* accFac=NULL) const;
 
-    /// IOdeSystemHermite interface: equations of motion for the Hermite integrator
+    /// IOdeSystem2ndOrder interface: equations of motion for the Hermite and DPRKN8 integrators
     /// (implemented only in Cartesian coordinates)
-    virtual void eval(const double t, const double x[], double d2xdt2[], double d3xdt3[]) const;
-
-    /// IOdeSystem: provide a tighter accuracy tolerance when |Epot| >> |Ekin+Epot|
-    /// to improve the total energy conservation
-    virtual double getAccuracyFactor(const double t, const double x[]) const;
+    virtual void eval2(const double t, const double x[], double d2xdt2[], double d3xdt3[]=NULL,
+        double* accFac=NULL) const;
 
     /// (re)initialize the orbit state; if time is non NAN, also update the current time
     virtual void init(const coord::PosVelCar& ic, double time=NAN);
 
-    /// obtain the solution (position and velocity in cartesian coordinates) at the given time,
-    /// which should lie within the just completed timestep - typically called from within
-    /// `processTimestep()` methods of associated runtime functions
-    virtual coord::PosVelCar getSol(double time) const { return toPosVelCar(getSolNative(time)); }
+    /// obtain the solution (position and velocity in cartesian coordinates) within the last
+    /// completed timestep; time is specified as an offset from the beginning of the last timestep.
+    /// Typically invoked from within `processTimestep()` methods of associated runtime functions
+    virtual coord::PosVelCar getSol(double timeOffset) const
+    { return toPosVelCar(getSolNative(timeOffset)); }
 
-    /// obtain the solution in the native coordinate system, in which the integration is performed
-    coord::PosVelT<CoordT> getSolNative(double time) const;
+    /// obtain the solution in the native coordinate system, in which the integration is performed;
+    /// time offset is specified relative to the beginning of the last completed timestep
+    coord::PosVelT<CoordT> getSolNative(double timeOffset) const;
 };
 
 // explicitly specified template declaration is needed for integrateTraj

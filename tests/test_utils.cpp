@@ -104,7 +104,7 @@ bool testSplitString()
         return false;
     fields = utils::splitString(" item1 item2 \t item3\t\t", "\t ");
     if(! (fields.size()==3 && fields[0]=="item1" && fields[1]=="item2" && fields[2]=="item3"))
-        return false;    
+        return false;
     return true;
 }
 

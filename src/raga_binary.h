@@ -66,7 +66,7 @@ public:
         encountersList(_encountersList)
     {}
 
-    virtual bool processTimestep(double tbegin, double tend);
+    virtual bool processTimestep(double tbegin, double timestep);
 };
 
 /** Fixed global parameters for handling the evolution of binary supermassive black hole */

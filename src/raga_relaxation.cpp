@@ -13,13 +13,13 @@
 
 namespace raga {
 
-bool RuntimeRelaxation::processTimestep(double tbegin, double tend)
+bool RuntimeRelaxation::processTimestep(double tbegin, double timestep)
 {
     // 1. collect samples of phase volume corresponding to particle energy
     // taken at regular intervals of time
-    double timestep = tend-tbegin, tsamp;
-    while(tsamp = outputTimestep * (outputIter - outputFirst + 1),
-        tsamp>tbegin && tsamp<=tend && outputIter != outputLast)
+    double tsamp;
+    while(tsamp = outputTimestep * (outputIter - outputFirst + 1) - tbegin,
+        tsamp>0 && tsamp<=timestep && outputIter != outputLast)
     {
         double E = totalEnergy(potentialSph, orbint.getSol(tsamp));
         *(outputIter++) = relaxationModel.phasevol(E);
@@ -28,7 +28,7 @@ bool RuntimeRelaxation::processTimestep(double tbegin, double tend)
     // 2. simulate the two-body relaxation
 
     // 2a. obtain the position, velocity and potential at the end of the timestep
-    coord::PosVelCar posvel = orbint.getSol(tend);
+    coord::PosVelCar posvel = orbint.getSol(timestep);
     double vel = sqrt(pow_2(posvel.vx) + pow_2(posvel.vy) + pow_2(posvel.vz));
     if(vel==0)  // can't do anything meaningful for a non-moving particle
         return true;
@@ -40,7 +40,7 @@ bool RuntimeRelaxation::processTimestep(double tbegin, double tend)
     relaxationModel.evalLocal(Phi, E, mass, dvpar, dv2par, dv2per);
     if(!isFinite(dvpar+dv2par+dv2per) || dv2par<0 || dv2per<0) {
         FILTERMSG(utils::VL_WARNING, "RagaTaskRelaxation",
-            "Cannot compute diffusion coefficients at t="+utils::toString(tend)+
+            "Cannot compute diffusion coefficients at t="+utils::toString(tbegin+timestep)+
             ", r="+utils::toString(sqrt(pow_2(posvel.x)+pow_2(posvel.y)+pow_2(posvel.z)))+
             ", Phi="+utils::toString(Phi,10)+", E="+utils::toString(E,10));
         return true;

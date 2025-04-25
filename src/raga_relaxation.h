@@ -105,7 +105,7 @@ public:
         outputIter (_outputFirst),
         seed(_seed)
     {}
-    virtual bool processTimestep(double tbegin, double tend);
+    virtual bool processTimestep(double tbegin, double timestep);
 private:
     /** The spherically-symmetric approximation to the actual total potential,
         including the central black hole (in case of a binary BH, it is represented by

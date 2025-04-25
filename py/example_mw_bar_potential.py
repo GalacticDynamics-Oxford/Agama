@@ -5,9 +5,10 @@ and constructs a corresponding CylSpline potential, which can be used to integra
 The density is represented by four components: an X-shaped inner bar, two instances of long bars,
 and an axisymmetric disk. In addition, there is a 'central mass concentration' (a triaxial disk)
 and a flattened axisymmetric dark halo, which is represented by a separate Multipole potential.
-This potential model is a good fit for the central region of the Galaxy (within ~5kpc),
+CAUTION: this potential model is a good fit for the central region of the Galaxy (within ~5kpc),
 but is not very realistic further out.
-A better variant of the entire Milky Way potential is provided by example_mw_potential_hunter24.py
+See example_mw_potential_hunter24.py for a better model that has the same bar, but is
+additionally tuned to reproduce various dynamical constraints across the entire Milky Way.
 The left panel shows the circular-velocity curve (in the axisymmetrized potential),
 and the right panel shows examples of a few orbits in this potential.
 
@@ -177,6 +178,8 @@ if __name__ == '__main__':
     agama.setUnits(length=1, mass=1, velocity=1)  # 1 kpc, 1 Msun, 1 km/s
     pot = makePotentialModel()
     pot.export('Portail17.ini')
+    print('This script provides a realistic model for the bar, but not for the rest of the Galaxy; '
+        'a better Milky Way potential with the same bar is constructed by example_mw_potential_hunter24.py')
     print('Created MW potential: total mass in stars=%.3g Msun, halo=%.3g Msun' %
         (pot[0].totalMass(), pot[1].totalMass()))
     # create an axisymmetrized version of the potential for plotting the true circular-velocity curve
