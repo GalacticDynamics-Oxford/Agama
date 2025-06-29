@@ -1,0 +1,94 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build_wheels:
+    name: Build wheels on ${{ matrix.os }}
+
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os:
+          - ubuntu-latest
+          # - ubuntu-24.04-arm
+          - windows-latest
+          - macos-13 # Intel
+          # - macos-latest # Apple Silicon
+
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "13.0"
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v3.0.0
+
+      - name: Upload wheels artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cibw-wheels-${{ matrix.os }}-${{ strategy.job-index }}
+          path: ./wheelhouse/*.whl
+
+  build_sdist:
+    name: Build source distribution
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies for sdist
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgsl-dev libeigen3-dev
+
+      - name: Install the latest version of uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Build sdist
+        run: uv build --sdist
+
+      - name: Upload sdist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cibw-sdist
+          path: dist/*.tar.gz
+
+  create_release:
+    name: Create release
+    needs:
+      - build_wheels
+      - build_sdist
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+
+    environment: pypi
+    permissions:
+      id-token: write
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: cibw-*
+          path: dist
+          merge-multiple: true
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+
+      - name: Upload to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/

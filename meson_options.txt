@@ -1,0 +1,6 @@
+option('examples', type: 'boolean', value: true, description: 'Install example files')
+option('openmp', type: 'boolean', value: true, description: 'Enable OpenMP support')
+option('eigen', type: 'boolean', value: true, description: 'Enable Eigen3 support')
+option('gsl', type: 'boolean', value: true, description: 'Enable GSL support')
+option('gsl_static', type: 'boolean', value: true, description: 'Statically link GSL library')
+option('cvxopt', type: 'boolean', value: true, description: 'Enable CVXOPT support')

@@ -12,6 +12,8 @@
 #include <cmath>
 #ifndef _MSC_VER
 #include <cstdio>
+#endif
+#ifndef _WIN32
 #include <alloca.h>
 #else
 #include <malloc.h>

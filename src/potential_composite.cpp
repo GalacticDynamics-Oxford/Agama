@@ -1,7 +1,7 @@
 #include "potential_composite.h"
 #include "math_core.h"
 #include <stdexcept>
-#ifndef _MSC_VER
+#ifndef _WIN32
 #include <alloca.h>
 #else
 #include <malloc.h>

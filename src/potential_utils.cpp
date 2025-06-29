@@ -6,7 +6,7 @@
 #include <cassert>
 #include <stdexcept>
 #include <fstream>   // for writing debug info
-#ifndef _MSC_VER
+#ifndef _WIN32
 #include <alloca.h>
 #else
 #include <malloc.h>

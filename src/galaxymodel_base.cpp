@@ -14,7 +14,7 @@
 #include <utility>
 #include <stdexcept>
 #include <cassert>
-#ifndef _MSC_VER
+#ifndef _WIN32
 #include <alloca.h>
 #else
 #include <malloc.h>
