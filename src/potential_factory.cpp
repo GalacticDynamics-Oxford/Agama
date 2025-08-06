@@ -1097,7 +1097,7 @@ static void readTimeDependentArray(
         fields.front() = fields.front().substr(1);
         fields.back () = fields.back ().substr(0, fields.back().size()-1);
         // check that each group of (K+1) or (K*2+1) items is enclosed in brackets
-        bool Kplus1 = true, K2plus1 = true;
+        bool Kplus1 = fields.size() % (K+1) == 0, K2plus1 = fields.size() % (2*K+1) == 0;
         for(size_t l=0; l<fields.size() / (K+1); l++)
             Kplus1  &= isPairOfBrackets(fields[l * (K+1)][0],
                 fields[(l+1) * (K+1) - 1][fields[(l+1) * (K+1) - 1].size() - 1]);

@@ -9,6 +9,9 @@ this variant rectifies some of the weaknesses of the original bar model that was
 to the region outside the central 5 kpc.
 The left panel shows the circular-velocity curve (in the axisymmetrized potential),
 and the right panel shows examples of a few orbits in this potential.
+After running this script, several potential variants are stored in .ini files,
+and can be reused later for doing orbit integrations and other purposes
+(see the docstring of makePotentialModel() for details).
 
 References: Sormani et al. 2022 (MNRAS Letters/514/L5); Hunter et al. 2024 (A&A/642/216)
 
@@ -23,9 +26,9 @@ filename_axi      = 'MWPotentialHunter24_axi.ini'
 filename_spiral   = 'MWPotentialHunter24_spiral.ini'
 filename_rotating = 'MWPotentialHunter24_rotating.ini'
 filename_rotspiral= 'MWPotentialHunter24_rotspiral.ini'
-Omega_bar         = -37.5
-Omega_spiral      = -22.5
-angle_bar         = -25.0 * numpy.pi/180
+Omega_bar         = -37.5  # bar pattern speed in units of km/s/kpc, negative since the bar rotates CW
+Omega_spiral      = -22.5  # spiral pattern speed
+angle_bar         = -0.44  # in radians; corresponds to approximately -25 degrees
 
 def makePotentialModel():
     """
@@ -161,16 +164,20 @@ file=%s
 rotation=[[0,%.2f],[1,%.2f]]
 ''' % (rotation_bar, filename_spiral, angle_bar, angle_bar + Omega_spiral))
 
+
+##### MAIN PROGRAM #####
+
+# load three versions of the potential
 try:
     pot_axi = agama.Potential(filename_axi)
 except RuntimeError:  # file does not exist - create on the first run
     makePotentialModel()
-    pot_axi = agama.Potential(filename_axi)
-pot_rotspiral = agama.Potential(filename_rotspiral)
-# for plotting the surface density, use only the cylspline component of the full potential plus the spirals
-pot_plot = agama.Potential(
-    agama.Potential(filename_full)[1],
-    agama.Potential(filename_spiral) )
+    pot_axi = agama.Potential(filename_axi)         # axisymmetrized version - for plotting the circular-velocity curve
+pot_full = agama.Potential(filename_full)           # full potential with a bar but no spirals - for orbit integration
+pot_rotating = agama.Potential(filename_rotating)   # same but already rotating - for another variant of orbit integration
+# for plotting the surface density, use only the cylspline component (i.e. stars) of the full potential
+pot_plot = pot_full[1]
+assert 'CylSpline' in str(pot_plot)  # make sure we didn't mix up indexing of components
 
 r=agama.nonuniformGrid(100, 0.001, 500)
 xyz=numpy.column_stack((r,r*0,r*0))
@@ -183,21 +190,67 @@ ax[0].set_xlabel('radius [kpc]')
 ax[0].set_ylabel('circular velocity [km/s]')
 ax[0].set_xlim(0,10)
 
-# integrate and show a few orbits
-numorbits=8
+# integrate and show a few orbits, using several approaches;
+# ICs are given in the Galactocentric frame, in which the Sun is located approximately at x=-8 kpc
+time = 10.0
+trajsize = 1001
+numorbits = 8
 numpy.random.seed(42)
 ic=numpy.random.normal(size=(numorbits,6)) * numpy.array([2.0, 0.0, 0.4, 50., 40., 30.])
 ic[:,0] += -6.
 ic[:,4] += 220
-#angle_bar = -25.0 * numpy.pi/180  # orientation of the bar w.r.t. the Sun
-#Omega = -39.0  # km/s/kpc - the value is negative since the potential rotates clockwise
-times, orbits = agama.orbit(potential=pot_rotspiral, ic=ic, time=10., trajsize=1001).T
-rmax = 10.0   # plotting range
-cmap = plt.get_cmap('mist')
+colors = plt.get_cmap('mist')(numpy.linspace(0, 1, numorbits+1)[:-1])
+rmax = 10.0  # plotting range
+
+# option 1: perform orbit integration in the rotating frame, in which the bar orientation is kept fixed,
+# using pot_full (a version of the potential with the bar oriented along the x axis).
+# Since in the real Milky Way the bar is actually rotated by some angle_bar w.r.t. x axis,
+# we have two further options: either rotate our ICs or change the orientation of the potential.
+
+# option 1a: rotate the ICs into the coordinate frame where the bar is oriented along the x axis (i.e. pot_full),
+# integrate the orbits in the rotating frame, then rotate the result back into the Galactocentric frame.
+sina, cosa = numpy.sin(angle_bar), numpy.cos(angle_bar)
+ic_rot = numpy.column_stack([
+    ic[:,0] * cosa + ic[:,1] * sina,  # coordinates in the frame rotated CCW by angle_bar
+    ic[:,1] * cosa - ic[:,0] * sina,  # (note that angle_bar is negative in our case)
+    ic[:,2],
+    ic[:,3] * cosa + ic[:,4] * sina,
+    ic[:,4] * cosa - ic[:,3] * sina,
+    ic[:,5],
+])
+times, orbits = agama.orbit(potential=pot_full, ic=ic_rot, time=time, trajsize=trajsize, Omega=Omega_bar).T
+for i in range(numorbits):
+    ax[1].plot(
+        orbits[i][:,0] * cosa - orbits[i][:,1] * sina,  # rotate back by the same angle
+        orbits[i][:,1] * cosa + orbits[i][:,0] * sina,
+        color=colors[i], lw=0.5, label=str(i))
+
+# option 1b: stick to the Galactocentric coordinate system for ICs and output trajectories,
+# but change the orientation of the potential (keeping it fixed at angle_bar, *not* rotating with time);
+# orbit integration is still carried out in the frame corotating with the bar.
+pot_rotated = agama.Potential(potential=pot_full, rotation=angle_bar)
+times, orbits = agama.orbit(potential=pot_rotated, ic=ic, time=time, trajsize=trajsize, Omega=Omega_bar).T
+for i in range(numorbits):
+    ax[1].plot(orbits[i][:,0], orbits[i][:,1], color=colors[i], lw=0.5, dashes=[4,2])
+
+# option 2: use the rotating potential and perform integration in the inertial frame,
+# then transform the resulting orbit into the frame corotating with the bar.
+# The difference from the previous one is that the potential is now rotating in time, not just rotated once,
+# and its orientation at t=0 is already set to angle_bar.
+# This option is more general than the first two, since it can be used with a more complicated potential
+# pot_spiral, which has two components rotating with different pattern speeds.
+times, orbits = agama.orbit(potential=pot_rotating, ic=ic, time=time, trajsize=trajsize).T
 for i in range(numorbits):
     sina, cosa = numpy.sin(times[i] * Omega_bar), numpy.cos(times[i] * Omega_bar)
-    ax[1].plot(orbits[i][:,0]*cosa+orbits[i][:,1]*sina, -orbits[i][:,0]*sina+orbits[i][:,1]*cosa,
-        color=cmap(i*1.0/numorbits), lw=0.5)
+    ax[1].plot(
+        orbits[i][:,0] * cosa + orbits[i][:,1] * sina,
+        orbits[i][:,1] * cosa - orbits[i][:,0] * sina,
+        color=colors[i], lw=1, dashes=[2,4])
+
+# all three sets of curves should be nearly identical, at least near the beginning of the orbit;
+# due to accumulation of roundoff errors, trajectories integrated in rotating and non-rotating frames
+# eventually diverge, linearly for regular orbits or exponentially for chaotic ones.
+ax[1].legend(frameon=True, fontsize=10)
 ax[1].plot(-8.2,0.0, 'ko', ms=5)  # Solar position
 ax[1].text(-8.0,0.0, 'Sun')
 ax[1].set_xlabel('x [kpc]')

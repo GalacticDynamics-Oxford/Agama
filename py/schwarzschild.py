@@ -98,33 +98,64 @@ def createModel(iniFileName):
             density = listdens[0]
         elif len(listdens) > 1:
             density = agama.Density(*listdens)
-        else: raise ValueError("No density components in "+name)
+        else:
+            raise ValueError("No density components in "+name)
         print("Creating density target for "+name)
         # pick up only the parameters corresponding to a Density*** target
         targetDensityParams = dict([param for param in value.items() if param[0].lower() in
             ('type', 'gridr', 'gridz', 'lmax', 'mmax', 'stripsperpane', 'axisratioy', 'axisratioz')])
         targets.append(agama.Target(**targetDensityParams))
         if 'kinemgrid' in value:
-            targetKinemParams = { "type": 'KinemShell',
-                "gridr":  value['kinemgrid'],
+            targetKinemParams = {
+                "type": 'KinemShell',
+                "gridr":  eval(value['kinemgrid']),  # an array or an expression, e.g. numpy.linspace(...)
                 "degree": int(value['kinemdegree']) }
             print("Creating kinematic target for "+name)
             targets.append(agama.Target(**targetKinemParams))
         if 'numorbits' in value:
             icoptions = { 'n': int(value['numorbits']), 'potential': model.potential }
-            if 'icbeta'  in value:  icoptions['beta' ] = float(value['icbeta'])
-            if 'ickappa' in value:  icoptions['kappa'] = float(value['ickappa'])
+            if 'icbeta'  in value:
+                icoptions['beta' ] = float(value['icbeta'])
+            if 'ickappa' in value:
+                icoptions['kappa'] = float(value['ickappa'])
             print("Creating initial conditions for %i orbits in %s" % (icoptions['n'], name))
-            ic,weightprior = density.sample(**icoptions)
-        else: raise ValueError("No orbits defined in "+name)
+            ic, weightprior = density.sample(**icoptions)
+        else:
+            raise ValueError("No orbits defined in "+name)
         if 'inttime' in value:
             inttime = float(value['inttime']) * model.potential.Tcirc(ic)
-        else: raise ValueError("No integration time defined in "+name)
+        else:
+            raise ValueError("No integration time defined in "+name)
         comp = type('Component', (),
-            {"density": density, "ic": ic, "weightprior": weightprior,
-             "inttime": inttime, "targets": targets, "Omega": Omega} )
-        if 'beta'     in value:  comp.beta     = float(value['beta'])
-        if 'nbody'    in value:  comp.nbody    = int(value['nbody'])
+            {"density": density,
+             "ic": ic,
+             "weightprior": weightprior,
+             "inttime": inttime,
+             "targets": targets,
+             "Omega": Omega} )
+        if 'beta' in value:
+            # beta can be a single number, an array, or a callable function
+            beta = eval(value['beta'])
+            if not 'kinemgrid' in value:
+                raise ValueError("Anisotropy parameter beta provided without a kinematic grid in "+name)
+            if callable(beta):
+                # replace a callable function with its result, namely the beta values at grid radii
+                if targetKinemParams['degree'] != 1:
+                    # otherwise the length of gridr does not match the number of B-spline basis functions
+                    raise ValueError("Specifying anisotropy profile beta(r) is only allowed when kinemdegree=1")
+                comp.beta = beta(targetKinemParams['gridr'])
+            else:  # otherwise it can be a single number or a list/array of appropriate length, which we check
+                beta = numpy.array(beta)
+                try:
+                    maxbeta = max(numpy.zeros(len(targets[-1]) // 2) + beta)
+                except Exception:  # likely incorrect length of the array
+                    raise ValueError("Anisotropy parameter beta should be a single number or an array of length %i" %
+                        (len(targets[-1]) // 2))
+                if maxbeta >= 1:
+                    raise ValueError("Anisotropy parameter beta must be less than 1")
+                comp.beta = beta
+        if 'nbody' in value:
+            comp.nbody = int(value['nbody'])
         model.components[name] = comp
     return model
 
@@ -155,7 +186,7 @@ def runComponent(comp, pot):
     # kinematic constraints
     if len(comp.targets) == 2 and hasattr(comp, 'beta'):
         numrow = len(comp.targets[1]) // 2
-        matrix.append(result[1].T[0:numrow] * 2*(1-comp.beta) - result[1].T[numrow:2*numrow])
+        matrix.append((result[1][:,0:numrow] * 2*(1-comp.beta) - result[1][:,numrow:2*numrow]).T)
         rhs.   append(numpy.zeros(numrow))
         rpenl. append(numpy.ones(numrow))
     # total mass constraint

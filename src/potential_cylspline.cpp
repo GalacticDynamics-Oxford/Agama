@@ -39,10 +39,6 @@ static const int LMAX_EXTRAPOLATION = 8;
 /// max number of function evaluations in multidimensional integration
 static const unsigned int MAX_NUM_EVAL = 10000;
 
-/// to avoid singularities in potential integration kernel, we add a small softening
-/// (intended to be much less than typical grid spacing) - perhaps need to make it grid-dependent
-static const double EPS2_SOFTENING = 1e-12;
-
 /// relative accuracy of potential computation (integration tolerance parameter)
 static const double EPSREL_POTENTIAL_INT = 1e-6;
 
@@ -260,10 +256,6 @@ void computePotentialHarmonicAtPoint(int m, double R, double z, double R0, doubl
         if(!isFinite(Q+dQ)) return;
         values[0] += -sq * mass * Q;
         if(useDerivs) {
-            // only soften the derivative, because it diverges as 1/|u-1|,
-            // but the infinite contributions from z>z0 and z<z0 should nearly cancel anyway
-            // when one approaches the singularity
-            dQ = math::sign(dQ) / sqrt( 1/pow_2(dQ) + EPS2_SOFTENING);
             values[1] += -sq * mass * (dQ/R - (Q/2 + u*dQ)/R0);
             values[2] += -sq * mass * dQ * (z0-z) / (R*R0);
         }
@@ -275,8 +267,18 @@ void computePotentialHarmonicAtPoint(int m, double R, double z, double R0, doubl
     }
 }
 
-// the N-dimensional integrand for computing the potential harmonics from density,
-// which is either an instance of DensitySphericalHarmonic or an arbitrary axisymmetric density model
+// multiply two numbers while avoiding a NAN indeterminacy in case of (weak INFINITY) * (strong 0)
+inline double prod(double a, double b) { return b==0 ? 0 : a*b; }
+
+// The N-dimensional integrand for computing the potential harmonics from density,
+// which is either an instance of DensitySphericalHarmonic or an arbitrary axisymmetric density model.
+// The integral over (R,z) is performed in scaled coordinates (xi,eta) in unit box,
+// separately for each node (R0,z0) of the meridional grid, and separately for each harmonic m.
+// To improve the accuracy of integrating the singular integrands for the potential derivatives,
+// which diverge as 1/r near the grid nodes and change the sign (thus the divergences cancel out),
+// we subtract the dominant singular terms and add back their analytic integrals.
+// The integrand for the potential itself also has an integrable singularity ln(r),
+// which does not present much difficulties (tried subtracting it, but this didn't have much effect).
 class AzimuthalHarmonicIntegrand: public math::IFunctionNdim {
 public:
     AzimuthalHarmonicIntegrand(const BaseDensity& _dens, int _m,
@@ -286,6 +288,51 @@ public:
         jac0(2*M_PI * log(1 + Rmax/Rmin) * Rmin * log(1 + zmax/zmin) * zmin)
     {
         assert(isZRotSymmetric(dens) || (bool)dynamic_cast<const DensityAzimuthalHarmonic*>(&dens));
+        if(!useDerivs)
+            return;
+        // scaled coordinates xi,eta corresponding to R0,z0 (the node of the meridional grid)
+        xi0    = log(1 + R0/Rmin) / log(1 + Rmax/Rmin);
+        eta0   = log(1 + fabs(z0)/zmin) / log(1 + zmax/zmin);
+        // derivatives of the real coordinates R,z w.r.t. the scaled ones xi,eta
+        dRdxi  = log(1 + Rmax/Rmin) * (Rmin + R0);
+        dzdeta = log(1 + zmax/zmin) * (zmin + fabs(z0));
+        coord::PosCyl p0(R0, z0, 0);
+        density_rho_m(dens, m, 1, &p0, &mul);
+        mul *= -2 * dRdxi * dzdeta;
+        // if the density at R0,z0 is infinite, the subtraction would not work and should be disabled
+        if(!isFinite(mul))
+            mul = 0;
+        // analytic integrals of the subtracted singular terms over the entire box 0<xi<1, 0<eta<1
+        dPhidR_add = mul * (
+            0.5 / dRdxi * (
+                + prod(log(pow_2(dRdxi * (0-xi0)) + pow_2(dzdeta * (0-eta0))), 0-eta0)
+                - prod(log(pow_2(dRdxi * (1-xi0)) + pow_2(dzdeta * (0-eta0))), 0-eta0)
+                - prod(log(pow_2(dRdxi * (0-xi0)) + pow_2(dzdeta * (1-eta0))), 1-eta0)
+                + prod(log(pow_2(dRdxi * (1-xi0)) + pow_2(dzdeta * (1-eta0))), 1-eta0) ) +
+            1.0 / dzdeta * (
+                + prod(atan(dzdeta * (0-eta0) / dRdxi / (0-xi0)), 0-xi0)
+                - prod(atan(dzdeta * (1-eta0) / dRdxi / (0-xi0)), 0-xi0)
+                - prod(atan(dzdeta * (0-eta0) / dRdxi / (1-xi0)), 1-xi0)
+                + prod(atan(dzdeta * (1-eta0) / dRdxi / (1-xi0)), 1-xi0) ) );
+        dPhidz_add = mul * (
+            0.5 / dzdeta * (
+                + prod(log(pow_2(dRdxi * (0-xi0)) + pow_2(dzdeta * (0-eta0))), 0-xi0)
+                - prod(log(pow_2(dRdxi * (0-xi0)) + pow_2(dzdeta * (1-eta0))), 0-xi0)
+                - prod(log(pow_2(dRdxi * (1-xi0)) + pow_2(dzdeta * (0-eta0))), 1-xi0)
+                + prod(log(pow_2(dRdxi * (1-xi0)) + pow_2(dzdeta * (1-eta0))), 1-xi0) ) +
+            1.0 / dRdxi * (
+                + prod(atan(dRdxi * (0-xi0) / dzdeta / (0-eta0)), 0-eta0)
+                - prod(atan(dRdxi * (1-xi0) / dzdeta / (0-eta0)), 0-eta0)
+                - prod(atan(dRdxi * (0-xi0) / dzdeta / (1-eta0)), 1-eta0)
+                + prod(atan(dRdxi * (1-xi0) / dzdeta / (1-eta0)), 1-eta0) ) );
+        if(R0==0) {  // the integral of the z-derivative has a different functional form on the z axis
+            dPhidR_add = 0;  // and the R-derivative term is zero
+            dPhidz_add = M_PI * mul / (dRdxi * dzdeta) * (
+                + sqrt(pow_2(dRdxi) + pow_2(dzdeta * (0-eta0)))
+                - sqrt(pow_2(dRdxi) + pow_2(dzdeta * (1-eta0)))
+                + (1 - 2 * eta0) * dzdeta
+            );
+        }
     }
 
     // evaluate the integrand at a single input point
@@ -300,8 +347,8 @@ public:
         coord::PosCyl* pos = static_cast<coord::PosCyl*>(alloca(npoints * sizeof(coord::PosCyl)));
         double* jac = static_cast<double*>(alloca(npoints * sizeof(double)));
         for(size_t p=0; p<npoints; p++) {
-            const double pR = pow(1 + Rmax/Rmin, vars[p*2+0]), R = Rmin * (pR - 1);
-            const double pz = pow(1 + zmax/zmin, vars[p*2+1]), z = zmin * (pz - 1);
+            const double xi  = vars[p*2  ], pR = pow(1 + Rmax/Rmin, xi ), R = Rmin * (pR - 1);
+            const double eta = vars[p*2+1], pz = pow(1 + zmax/zmin, eta), z = zmin * (pz - 1);
             jac[p] = jac0 * R * pR * pz;
             pos[p] = coord::PosCyl(R, z, /*phi*/0);
         }
@@ -314,7 +361,7 @@ public:
         // in the typical case of z-reflection symmetry we save effort by reusing
         // the same values of density at (R,z) and (R,-z)
         double* rhominus = rhoplus;
-        if(!isZReflSymmetric(dens)) {
+        if(!isZReflSymmetric(dens)) {  // otherwise also need to collect the density values at (R,-z)
             rhominus = static_cast<double*>(alloca(npoints * sizeof(double)));
             density_rho_m(dens, m, npoints, pos, /*output*/ rhominus);
         }
@@ -327,28 +374,46 @@ public:
                 rhoplus [p] * jac[p], useDerivs, /*output*/values + p * nvalues);
             computePotentialHarmonicAtPoint(m, pos[p].R, /*z was reflected*/ +pos[p].z, R0, z0,
                 rhominus[p] * jac[p], useDerivs, /*output*/values + p * nvalues);
+            if(useDerivs) {
+                // offsets from the grid node in scaled coordinates (xi,eta)
+                double dxi = vars[p*2+0] - xi0, deta = vars[p*2+1] - eta0;
+                // u2 is an approximation for the singular term in the denominator, (R-R0)^2 + (z-z0)^2
+                double u2 = pow_2(dRdxi * dxi) + pow_2(dzdeta * deta);
+                // the derivatives have the following asymptotic form as u2 -> 0:
+                // dPhi_m/dR ~ (R-R0) / ((R-R0)^2 + (z-z0)^2),
+                // dPhi_m/dz ~ (z-z0) / ((R-R0)^2 + (z-z0)^2),
+                // and we approximate them by linearizing the mapping R <-> xi, z <-> eta around R0,z0
+                double dPhidR_sub = prod(mul * dRdxi  / u2, dxi);
+                double dPhidz_sub = prod(mul * dzdeta / u2, deta);
+                // double Phi_sub = mul * -0.5 * log(u2);   // unused - no improvement in accuracy
+                if(R0==0) {  // the subtracted singular term is different for nodes on the z axis
+                    dPhidR_sub = 0;
+                    dPhidz_sub *= M_PI * dRdxi * dxi / sqrt(u2);
+                }
+                // subtract the coordinate-dependent singular terms (dPhi_sub), and add back their
+                // analytic integrals (dPhi_add) of these terms over the entire domain [xi,eta].
+                // since the integration is performed over a unit box, adding these constant
+                // contributions to the integrand at each point is equivalent to adding them only
+                // once to the resulting integral after it is computed (simplifies bookkeeping).
+                // One also needs to take into account the sign of z0 for dPhi/dz, 
+                // and double the contribution to dPhi/dR in the equatorial plane (z0=0).
+                values[p * nvalues + 1] += (dPhidR_add - dPhidR_sub) * (z0==0 ? 2 : 1);
+                values[p * nvalues + 2] += (dPhidz_add - dPhidz_sub) * (z0>0 ? 1 : z0<0 ? -1 : 0);
+            }
         }
-
-        // workaround for the n-dimensional quadrature routine: it seems to be unable
-        // to properly handle cases when one of components of the integrand is identically zero,
-        // that's why we output 1 instead, and zero it out later
-        if(useDerivs && R0==0)
-            for(size_t p=0; p<npoints; p++)
-                values[p * nvalues + 1] = 1;
-        if(useDerivs && isZReflSymmetric(dens) && z0==0)
-            for(size_t p=0; p<npoints; p++)
-                values[p * nvalues + 2] = 1;
     }
     virtual unsigned int numVars() const { return 2; }
     virtual unsigned int numValues() const { return useDerivs ? 3 : 1; }
 private:
     const BaseDensity& dens;  ///< the density profile in the Poisson eqn
     const int m;              ///< azimuthal harmonic number
-    const double R0, z0;      ///< the point at which the integral is computed
+    const double R0, z0;      ///< the node in the meridional grid at which the integral is computed
     const double Rmin, zmin;  ///< smallest grid segment
     const double Rmax, zmax;  ///< extent of the integration domain
     const bool useDerivs;     ///< whether to compute only the potential or also its partial derivs by R,z
     const double jac0;        ///< constant prefactor for the jacobian
+    // coefs for subtracting the singular part of the integrand and adding back its analytic integral
+    double mul, xi0, eta0, dRdxi, dzdeta, dPhidR_add, dPhidz_add;
 };
 
 /** Compute the coefficients of azimuthal Fourier expansion of potential and optionally
@@ -405,10 +470,6 @@ void computePotentialCoefsFromDensity(const BaseDensity &dens,
                 math::integrateNdim(fnc, boxmin, boxmax,
                     EPSREL_POTENTIAL_INT, MAX_NUM_EVAL,
                     result, error, &numEval);
-                if(gridz[iz]==0 && isZReflSymmetric(dens))
-                    result[2] = 0;
-                if(gridR[iR]==0)
-                    result[1] = 0;
                 for(unsigned int q=0; q<numQuantitiesOutput; q++)
                     output[q].at(m+mmax)(iR,iz) += result[q];
             }
@@ -983,7 +1044,11 @@ shared_ptr<const CylSpline> CylSpline::create(
 
     std::vector< math::Matrix<double> > coefs[3]; // Phi, dPhidR, dPhidz
     computePotentialCoefsFromDensity(*dens, mmax, gridR, gridz, useDerivs, /*output*/coefs);
-    restrictFourierCoefs<3>(mmax, symExp, coefs, gridz);  // enforce z-reflection symmetry if needed
+    // eliminate m-terms that are identically zero, and enforce z-reflection symmetry if needed
+    if(useDerivs)
+        restrictFourierCoefs<3>(mmax, symExp, coefs, gridz);
+    else
+        restrictFourierCoefs<1>(mmax, symExp, coefs, gridz);
     return shared_ptr<const CylSpline>(new CylSpline(gridR, gridz, coefs[0], coefs[1], coefs[2]));
 }
 

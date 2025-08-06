@@ -324,11 +324,7 @@ void createSphericalDF(
         slope -= derivOrder;
         for(unsigned int j=gridsize-3; j<gridsize; j++) {
             double factor = j==gridsize-1 ?
-                math::gamma(1-fracpow) * (slope < 100 ?
-                    // the exact expression with gamma functions overflows at large slope
-                    math::gamma(1+slope) / math::gamma(2+slope-fracpow) :
-                    // approximation to better than 1%
-                    pow(slope, fracpow-1) * (1 + (1-fracpow) * (fracpow-2) / slope) ) :
+                math::gamma(1-fracpow) * exp(math::lngamma(1+slope) - math::lngamma(2+slope-fracpow)) :
                 // all other grid nodes except the last one will have contributions from other segments,
                 // which are anyway much larger than this last segment, so it doesn't hurt even if it
                 // cannot be computed accurately (e.g. for extreme values of slope);

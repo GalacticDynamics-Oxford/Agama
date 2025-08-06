@@ -4,9 +4,9 @@ Example of construction of a three-component disk-bulge-halo equilibrium model o
 The approach is explained in example_self_consistent_model.py;
 this example differs in that it has a somewhat simpler structure (only a single stellar disk
 component, no stellar halo or gas disk) and adds a central supermassive black hole.
-Another modification is that the halo and the bulge are represented by 'quasi-isotropic' DF:
-it is a spherical isotropic DF that is constructed using the Eddington inversion formula
-for the given density profile in the spherically-symmetric approximation of the total potential.
+Another modification is that the halo and the bulge are represented by 'QuasiSpherical' DFs,
+which are constructed using the Eddington inversion formula for the given density profile
+in the sphericalized version of the total potential.
 This DF is then expressed in terms of actions and embedded into the 'real', non-spherical
 potential, giving rise to a somewhat different density profile; however, it is close enough
 to the input one. Then a few more iterations are needed to converge towards a self-consistent

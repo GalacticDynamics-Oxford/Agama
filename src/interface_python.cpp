@@ -65,7 +65,7 @@
 #include "utils.h"
 #include "utils_config.h"
 // text string embedded into the python module as the __version__ attribute (including Github commit number)
-#define AGAMA_VERSION "1.0.152 compiled on " __DATE__
+#define AGAMA_VERSION "1.0.153 compiled on " __DATE__
 
 // older versions of numpy have different macro names
 // (will need to expand this list if other similar macros are used in the code)
@@ -1218,10 +1218,21 @@ public:
         if(inputLength2 == 0)
             inputLength2 = inputLength1;
 
-        // inputObject is usually (but not always) the entire tuple of function arguments;
-        // if it only has one element, use this element and not the whole tuple
-        if(PyTuple_Check(inputObject) && PyTuple_Size(inputObject)==1)
-            inputObject = PyTuple_GET_ITEM(inputObject, 0);
+        if(PyTuple_Check(inputObject)) {
+            switch(PyTuple_Size(inputObject)) {
+                case 1:
+                    // inputObject is usually (but not always) the entire tuple of function arguments;
+                    // if it only has one element, use this element and not the whole tuple
+                    inputObject = PyTuple_GET_ITEM(inputObject, 0);
+                    break;
+                case 0:
+                    // this happens when the function is called without arguments (not allowed);
+                    // however, an input array of zero length is allowed and produces zero-length output
+                    PyErr_SetString(PyExc_TypeError, "No input data provided");
+                    return;
+                default: ;
+            }
+        }
 
         // check if the input is a single number, if yest then just take it literally
         if(std::min(inputLength1, inputLength2) == 1 && PyNumber_Check(inputObject)) {
@@ -5879,755 +5890,6 @@ static PyTypeObject SelfConsistentModelType = {
 
 
 ///@}
-//  ----------------------------------------
-/// \name  Target class for additive models
-//  ----------------------------------------
-///@{
-
-
-static const char* docstringTarget =
-    "Target objects represent various targets that need to be satisfied by an additive model.\n"
-    "The type of target is specified by the  type='...' argument, and other available arguments "
-    "depend on it. "
-    "Below follows the list of possible target types and their parameters (all case-insensitive).\n\n"
-    "Density discretization models:\n\n"
-    "  DensityClassicTopHat\n"
-    "Classical approach for spheroidal Schwarzschild models: "
-    "radial shells divided into three panes, each pane - into several strips, "
-    "and the density inside each resulting cell is approximated as a constant.\n\n"
-    "  DensityClassicLinear\n"
-    "Same as classical, but the density is specified at the grid nodes and interpolated "
-    "tri-linearly within each cell.\n"
-    "Parameters for both of these models:\n"
-    "gridr - array of radial grid nodes;\n"
-    "stripsPerPane - number of strips in each of three panes in each shell "
-    "(hence the number of cells in each pane is stripsPerPane^2);\n"
-    "axisRatioY, axisRatioZ - (optional) coefficients for squeezing the grid in each dimension.\n\n"
-    "  DensitySphHarm\n"
-    "Radial grid is the same as in the classic approach, but the angular dependence "
-    "of the density is represented in terms of spherical-harmonic expansion, "
-    "and the radial dependence of each term is a linearly-interpolated function.\n"
-    "Parameters:\n"
-    "gridr - array of radial grid nodes;\n"
-    "lmax, mmax - order of angular expansion in theta and phi, respectively.\n\n"
-    "  DensityCylindricalTopHat\n"
-    "A grid in meridional plane (R,z) aligned with cylindrical coordinates, "
-    "with the azimuthal dependence of the density represented by a Fourier expansion; "
-    "the density is attributed to each cell (implicitly assumed to be constant within a cell).\n\n"
-    "  DensityCylindricalLinear\n"
-    "Same as the previous one, but each azimuthal Fourier term in the meridional plane (R,z) "
-    "is bi-linearly interpolated within each cell.\n"
-    "Parameters for both of these models:\n"
-    "gridr, gridz - arrays of grid nodes in cylindrical radius and vertical coordinate "
-    "(should cover only the positive quadrant);\n"
-    "mmax - order of azmuthal Fourier expansion.\n\n"
-    "Kinematic constraints:\n\n"
-    "  KinemShell\n"
-    "This target object records the density-weighted radial and tangential velocity dispersion "
-    "in spherical coordinates, represented as projections onto basis elements of a B-spline grid "
-    "in radius.\n"
-    "Parameters:\n"
-    "degree (integer from 0 to 3) - degree of B-splines;\n"
-    "gridr - array of radial grid nodes.\n"
-    "These recorded projections may be used to constrain the velocity anisotropy of the model: "
-    "after choosing the desired value of coefficient beta = 1 - sigma_t^2 / (2 sigma_r^2), "
-    "one demands that\n2 (1-beta) * rho * sigma_r^2 - rho * sigma_t^2 = 0\nfor all radial points.\n\n"
-    "  LOSVD\n"
-    "This target object is intended for recording line-of-sight velocity distributions in a 2d image "
-    "plane; the latter is denoted by coordinates X, Y, with Y pointing up/north and X - left/east, "
-    "and the complementary Z axis points along the line of sight away from the observer.\n"
-    "The orientation of the image plane w.r.t. the intrinsic coordinate system x,y,z of the galaxy "
-    "is described by three Euler angles alpha, beta and gamma. "
-    "The first two angles define the line of sight: alpha is the angle between the x axis and "
-    "the line of nodes (the intersection between the equatorial (xy) plane of the galaxy and "
-    "the image plane); "
-    "beta is the inclination angle (beta=0 is face-on, with these two planes coinciding, beta=pi/2 "
-    "is edge-on, and beta=pi is again face-on but with z axis pointing towards the observer, "
-    "opposite to Z). "
-    "The third angle gamma defines additional rotation of the image plane: it is the position angle "
-    "(PA) of the projection of z axis onto the image plane, measured counter-clockwise from the Y "
-    "(up/north) axis towards the X (left/east) axis. The PA of the line of nodes is gamma+pi/2. "
-    "For instance, the projections along each of the principal axes are given by the following "
-    "triplets of angles: \n"
-    "(0, 0, 0) - face-on orientation, so that the image plane (X,Y) coincides with the (x,y) plane, "
-    "and the Z axis (line of sight) coincides with the z axis.\n"
-    "(0, pi/2, 0) - view down the y axis, image plane (X,Y) coincides with the (x,z) plane;\n"
-    "(pi/2, pi/2, 0) - view down the y axis, image plane coincides with the (y,z) plane.\n"
-    "LOSVDs are one-dimensional functions that describe the distribution of matter moving with "
-    "the given velocity v_Z in the given spatial region (aperture) in the (X,Y) plane. "
-    "Apertures are specified by arbitrary simple polygons (without self-intersection, but not "
-    "necessarily convex); different apertures may overlap in the same area. Any collection of slits "
-    "at various angles, regular 2d IFU spaxels, or Voronoi bins can be represented in this way. "
-    "In each aperture, the LOSVD is represented in terms of a B-spline expansion: "
-    "the degree of B-splines and the grid nodes in the velocity axis that together determine "
-    "the shape of basis functions are the same for all apertures, and the amplitudes of each basis "
-    "function are the free parameters that describe each LOSVD. For instance, the commonly used "
-    "approach to represent a LOSVD as a histogram with regularly-spaced bins is equivalent to "
-    "a 0th degree B-spline over a uniform grid in v; however, this is certainly not the most "
-    "efficient usage scenario. Higher-degree B-spines (2 or 3) result in smoother LOSVDs and need "
-    "substantially fewer grid points to achieve the same velocity resolution; in addition, the grid "
-    "needs not be uniformly-spaced.\n"
-    "The amplitudes of B-spline expansion in each aperture for each orbit or N-body snapshot "
-    "are computed by first constructing a datacube - the projection of said orbit onto "
-    "an auxiliary grid in the 2+1-dimensional space (X,Y and v_LOS). The grid in velocity space "
-    "is the same as used in the B-spline representation, but the grid in the image plane is "
-    "somewhat arbitrary (separable in X,Y, but not necessarily uniform); the only requirement "
-    "is for it to cover all apertures, and have a sufficient spatial resolution - typically "
-    "comparable to the PSF width if 2nd or 3rd-degree B-splines are used. "
-    "Then the datacube is convolved with spatial and velocity-space PSFs and re-binned into "
-    "the apertures (all done internally by the Target object); the final LOSVD has "
-    "numApertures * numBasisFnc elements, where the latter is len(gridv) + degree - 1.\n"
-    "Parameters for this target:\n"
-    "alpha,beta,gamma - angles specifying the orientation of the image plane w.r.t. model coordinates;\n"
-    "degree (integer from 0 to 3) - degree of B-splines;\n"
-    "gridv - array of grid nodes in velocity space (typically should be symmetric about origin);\n"
-    "gridx - nodes of the auxiliary (internal) grid in the X coordinate of the image plane;\n"
-    "gridy (optional - default is the same as gridx) - nodes of the internal grid in Y; "
-    "the spatial region covered by this 2d grid should encompass all apertures, and the grid spacing "
-    "should be comparable to either the PSF width or the typical aperture size, but not necessarily "
-    "uniform (i.e., it may be constructed with the routines 'nonuniformGrid' or 'symmetricGrid');\n"
-    "psf - description of spatial point-spread function: it may be either a single number, "
-    "interpreted as the width of the Gaussian PSF, or an Kx2 array describing a composition of K "
-    "such Gaussians (the first column is the width of each Gaussian, and the second column is "
-    "the relative fraction of this component, which should sum up to unity);\n"
-    "velpsf - width of the velocity-space smoothing kernel (a single Gaussian);\n"
-    "apertures - array of polygons describing the boundaries of each aperture: "
-    "each element of this array is a 2d array with X,Y coordinates of the polygon vertices, "
-    "and of course the number of vertices may be different for each polygon (but greater than two).\n"
-    "symmetry - a letter encoding the symmetries of the potential and orbit shapes, "
-    "determines how the points sampled from the trajectory of each orbit will be treated before "
-    "projecting them onto the image plane: 't' (triaxial, default) means that only the fourfold "
-    "reflection symmetry  z <-> -z  and  x,y <-> -x,-y  will be enforced,  'a' (axisymmetric) means "
-    "that the point will be rotated about the z axis by a random angle, and 's' (spherical) means "
-    "that both spherical angles will be randomized.\n\n"
-    "The role of a Target object is to collect data during the construction of an orbit library: "
-    "several instances of them could be provided as a 'targets=[t1,t2,...]' argument of "
-    "the 'orbit()' routine, and each one will produce a matrix with Norbit rows and Ncoef columns, "
-    "where the number of coefficients for a target t1 is given by the 'len(t1)' function.\n"
-    "A Target instance can also be used to produce the right-hand side of the matrix equation "
-    "in a linear superposition model, by applying it to a Density object or an N-body snapshot:\n"
-    ">>> den=agama.Density(params)     # create an instance of a density model with some parameters\n"
-    ">>> snapshot=den.sample(10000)    # draw 10000 sample points from this model\n"
-    ">>> rhs_d=t1(den)                 # apply the target 't1' to the analytic density model\n"
-    ">>> rhs_s=t1(snapshot)            # apply it to an array of particles\n"
-    "The result depends on the type of the target and the type of the argument (density or array "
-    "of particles). For density discretization targets, this produces the array of integrals of "
-    "the density profile multiplied by the basis functions over the entire volume, or, if the input "
-    "is an array of particles, the sum of particle masses multiplied by basis functions. "
-    "The length of the resulting array is equal to len(t1). "
-    "For a LOSVD target, applying it to a density object computes the integrals of surface mass "
-    "density over each aperture, convolved with the spatial PSF; equivalently, this is the overall "
-    "normalization of the LOSVD in each aperture, i.e. the integral of f(v) over all velocities. ";
-    //"This number may be used as the normalization factor in computing Gauss-Hermite coefficients "
-    //"from LOSVD, as shown below:\n";  // TODO expand
-
-/// \cond INTERNAL_DOCS
-/// Python type corresponding to Target class
-typedef struct {
-    PyObject_HEAD
-    galaxymodel::PtrTarget target;
-    // dimensional unit conversion factor for applying the Target to a Density object
-    double unitDensityProjection;
-    // same factor for a GalaxyModel object, an N-body snapshot, or during orbit integration
-    double unitDFProjection;
-} TargetObject;
-/// \endcond
-
-void Target_dealloc(TargetObject* self)
-{
-    if(self->target)
-        FILTERMSG(utils::VL_DEBUG, "Agama", "Deleted " + std::string(self->target->name()) +
-            " target at " + utils::toString(self->target.get()));
-    else
-        FILTERMSG(utils::VL_DEBUG, "Agama", "Deleted an empty target");
-    self->target.reset();
-    Py_TYPE(self)->tp_free(self);
-}
-
-int Target_init(TargetObject* self, PyObject* args, PyObject* namedArgs)
-{
-    if(self->target) {
-        PyErr_SetString(PyExc_RuntimeError, "Target object cannot be reinitialized");
-        return -1;
-    }
-    if(!onlyNamedArgs(args, namedArgs))
-        return -1;
-    NamedArgs nargs(namedArgs);
-    std::string type_str = toString(nargs.pop("type"));
-    if(type_str.empty()) {
-        PyErr_SetString(PyExc_TypeError, "Must provide a type='...' argument");
-        return -1;
-    }
-    try{
-        if(utils::stringsEqual(type_str.substr(0, 7), "Density")) {
-            // spatial grids
-            std::vector<double> gridr = toDoubleArray(nargs.pop("gridr"));
-            std::vector<double> gridz = toDoubleArray(nargs.pop("gridz"));
-            if(gridr.size()<2)
-                throw std::invalid_argument("gridr must be an array with >=2 elements");
-            if(gridz.size()<2 && utils::stringsEqual(type_str.substr(0, 18), "DensityCylindrical"))
-                throw std::invalid_argument("gridz must be an array with >=2 elements");
-            math::blas_dmul(conv->lengthUnit, gridr);
-            math::blas_dmul(conv->lengthUnit, gridz);
-            // orders of angular expansion or number of lines partitioning a spherical shell into cells
-            int lmax = toInt(nargs.pop("lmax"), 0),
-                mmax = toInt(nargs.pop("mmax"), 0),
-                stripsPerPane = toInt(nargs.pop("stripsPerPane"), 2);
-            // flattening of the spheroidal grid
-            double
-                axisRatioY = toDouble(nargs.pop("axisRatioY"), 1.0),
-                axisRatioZ = toDouble(nargs.pop("axisRatioZ"), 1.0);
-            if(utils::stringsEqual(type_str, "DensityClassicTopHat"))
-                self->target.reset(new galaxymodel::TargetDensityClassic<0>(
-                    stripsPerPane, gridr, axisRatioY, axisRatioZ));
-            else if(utils::stringsEqual(type_str, "DensityClassicLinear"))
-                self->target.reset(new galaxymodel::TargetDensityClassic<1>(
-                    stripsPerPane, gridr, axisRatioY, axisRatioZ));
-            else if(utils::stringsEqual(type_str, "DensitySphHarm"))
-                self->target.reset(new galaxymodel::TargetDensitySphHarm(lmax, mmax, gridr));
-            else if(utils::stringsEqual(type_str, "DensityCylindricalTopHat"))
-                self->target.reset(new galaxymodel::TargetDensityCylindrical<0>(mmax, gridr, gridz));
-            else if(utils::stringsEqual(type_str, "DensityCylindricalLinear"))
-                self->target.reset(new galaxymodel::TargetDensityCylindrical<1>(mmax, gridr, gridz));
-            else
-                throw std::invalid_argument("Unknown type='...' argument");
-            self->unitDensityProjection = conv->massUnit;
-            self->unitDFProjection = conv->massUnit;
-        }
-
-        // check if a KinemShell is being requested
-        if(utils::stringsEqual(type_str, "KinemShell")) {
-            int degree = toInt(nargs.pop("degree"), -1);
-            std::vector<double> gridr = toDoubleArray(nargs.pop("gridr"));
-            if(gridr.size()<2)
-                throw std::invalid_argument("gridr must be an array with >=2 elements");
-            math::blas_dmul(conv->lengthUnit, gridr);
-            switch(degree) {
-                case 0: self->target.reset(new galaxymodel::TargetKinemShell<0>(gridr)); break;
-                case 1: self->target.reset(new galaxymodel::TargetKinemShell<1>(gridr)); break;
-                case 2: self->target.reset(new galaxymodel::TargetKinemShell<2>(gridr)); break;
-                case 3: self->target.reset(new galaxymodel::TargetKinemShell<3>(gridr)); break;
-                default:
-                    throw std::invalid_argument(
-                        "KinemShell: degree of interpolation should be between 0 and 3");
-            }
-            self->unitDensityProjection = NAN;
-            self->unitDFProjection = conv->massUnit * pow_2(conv->velocityUnit);
-        }
-
-        // check if a LOSVD is being requested
-        if(utils::stringsEqual(type_str, "LOSVD")) {
-            galaxymodel::LOSVDParams params;
-            // parameters describing the orientation of the model
-            params.alpha = toDouble(nargs.pop("alpha"), params.alpha);
-            params.beta  = toDouble(nargs.pop("beta" ), params.beta);
-            params.gamma = toDouble(nargs.pop("gamma"), params.gamma);
-            // parameters of the internal grids in image plane and line-of-sight velocity
-            params.gridx = toDoubleArray(nargs.pop("gridx"));
-            params.gridy = toDoubleArray(nargs.pop("gridy"));
-            params.gridv = toDoubleArray(nargs.pop("gridv"));
-            if(params.gridy.empty())
-                params.gridy = params.gridx;
-            if(params.gridx.size()<2 || params.gridy.size()<2 || params.gridv.size()<2)
-                throw std::invalid_argument("gridx, [gridy, ] gridv must be arrays with >=2 elements");
-            math::blas_dmul(conv->lengthUnit, params.gridx);
-            math::blas_dmul(conv->lengthUnit, params.gridy);
-            math::blas_dmul(conv->velocityUnit, params.gridv);
-            // explicitly specified symmetry (triaxial by default)
-            params.symmetry = potential::getSymmetryTypeByName(toString(nargs.pop("symmetry")));
-            // parameters of the point-spread functions (spatial and velocity)
-            PyObject* psf_obj = nargs.pop("psf");
-            if(psf_obj) {
-                double psf = toDouble(psf_obj, NAN) * conv->lengthUnit;
-                if(isFinite(psf))
-                    params.spatialPSF.assign(1, galaxymodel::GaussianPSF(psf));
-                else {  // may be an array of several PSFs
-                    PyArrayObject* psf_arr = (PyArrayObject*)PyArray_FROM_OTF(psf_obj, NPY_DOUBLE, 0);
-                    if(psf_arr == NULL || PyArray_NDIM(psf_arr) != 2 || PyArray_DIM(psf_arr, 1) != 2) {
-                        Py_XDECREF(psf_arr);
-                        throw std::invalid_argument(
-                            "Argument 'psf' must be a single number (width of the Gaussian PSF), "
-                            "or a Kx2 array of PSF widths and fractional weights");
-                    }
-                    for(npy_intp k=0; k<PyArray_DIM(psf_arr, 0); k++)
-                        params.spatialPSF.push_back(galaxymodel::GaussianPSF(
-                            pyArrayElem<double>(psf_arr, k, 0) * conv->lengthUnit,
-                            pyArrayElem<double>(psf_arr, k, 1)));
-                }
-            }  // otherwise no PSF is assigned at all
-            params.velocityPSF = toDouble(nargs.pop("velpsf"), 0.) * conv->velocityUnit;
-            // apertures in the image plane where LOSVDs are analyzed
-            std::vector<PyObject*> apertures = toPyObjectArray(nargs.pop("apertures"));
-            if(apertures.empty())
-                throw std::invalid_argument("Must provide a list of polygons in 'apertures=...' argument");
-            // two possibilities: either apertures is a single 3d array of shape N_apert x N_vert x 2,
-            // or a list/tuple/array of individual 2d arrays of shapes N_vert,i x 2
-            for(size_t a=0; a<apertures.size(); a++) {
-                PyArrayObject* ap_arr =
-                    (PyArrayObject*)PyArray_FROM_OTF(apertures[a], NPY_DOUBLE, 0);
-                if( ap_arr != NULL &&
-                    PyArray_NDIM(ap_arr)  == 2 &&
-                    PyArray_DIM(ap_arr, 0) >= 3 &&
-                    PyArray_DIM(ap_arr, 1) == 2)
-                {   // an element of the list is a 2d array
-                    size_t nv = PyArray_DIM(ap_arr, 0);
-                    math::Polygon poly(nv);
-                    for(size_t v=0; v<nv; v++) {
-                        poly[v].x = pyArrayElem<double>(ap_arr, v, 0) * conv->lengthUnit;
-                        poly[v].y = pyArrayElem<double>(ap_arr, v, 1) * conv->lengthUnit;
-                    }
-                    params.apertures.push_back(poly);
-                } else
-                if( ap_arr != NULL &&
-                    apertures.size() == 1 &&
-                    PyArray_NDIM(ap_arr)  == 3 &&
-                    PyArray_DIM(ap_arr, 1) >= 3 &&
-                    PyArray_DIM(ap_arr, 2) == 2)
-                {   // the entire input is a single 3d array
-                    size_t na = PyArray_DIM(ap_arr, 0), nv = PyArray_DIM(ap_arr, 1);
-                    math::Polygon poly(nv);
-                    for(size_t aa=0; aa<na; aa++) {
-                        for(size_t v=0; v<nv; v++) {
-                            poly[v].x = pyArrayElem<double>(ap_arr, aa, v, 0) * conv->lengthUnit;
-                            poly[v].y = pyArrayElem<double>(ap_arr, aa, v, 1) * conv->lengthUnit;
-                        }
-                        params.apertures.push_back(poly);
-                    }
-                } else {
-                    if(PyErr_Occurred())
-                        return -1;
-                    Py_XDECREF(ap_arr);
-                    throw std::invalid_argument(
-                        "Each element of the list or tuple provided in the 'apertures=...' argument "
-                        "must be a Nx2 array defining a polygon on the sky plane, with N>=3 vertices");
-                }
-                Py_DECREF(ap_arr);
-            }
-            // degree of B-splines
-            int degree = toInt(nargs.pop("degree"), -1);
-            switch(degree) {
-                case 0: self->target.reset(new galaxymodel::TargetLOSVD<0>(params)); break;
-                case 1: self->target.reset(new galaxymodel::TargetLOSVD<1>(params)); break;
-                case 2: self->target.reset(new galaxymodel::TargetLOSVD<2>(params)); break;
-                case 3: self->target.reset(new galaxymodel::TargetLOSVD<3>(params)); break;
-                default:
-                    throw std::invalid_argument(
-                        "LOSVD: degree of interpolation should be between 0 and 3");
-            }
-            self->unitDensityProjection = conv->massUnit;
-            self->unitDFProjection = conv->massUnit / conv->velocityUnit;
-        }
-        if(!self->target)  // none of the above variants worked
-            throw std::invalid_argument("Unknown type='...' argument");
-    }
-    catch(std::exception& ex) {
-        raisePythonException(ex, "Error in creating a Target object: ");
-        return -1;
-    }
-    if(!nargs.empty())
-        return -1;
-    FILTERMSG(utils::VL_DEBUG, "Agama", "Created " + std::string(self->target->name()) +
-        " target at " + utils::toString(self->target.get()));
-    unitsWarning = true;  // any subsequent call to setUnits() will raise a warning
-    return 0;
-}
-
-PyObject* Target_value(TargetObject* self, PyObject* args, PyObject* namedArgs)
-{
-    if(!PyTuple_Check(args) || PyTuple_Size(args) != 1) {
-        PyErr_SetString(PyExc_TypeError, "Expected exactly 1 argument");
-        return NULL;
-    }
-    if(!noNamedArgs(namedArgs))
-        return NULL;
-    const char* errorstr = "Argument must be an instance of Density, GalaxyModel, or an array of "
-        "particles (a tuple with two elements - Nx6 position/velocity coordinates and N masses)";
-
-    PyObject* arg = PyTuple_GET_ITEM(args, 0);
-    particles::ParticleArrayCar particles;
-    try{
-        // check if we have a density object as input
-        potential::PtrDensity dens = getDensity(arg);
-        if(dens) {
-            std::vector<double> result;
-            {
-                // this operation contains OpenMP-parallelized loops, so we need to release GIL
-                PyReleaseGIL unlock;
-                result = self->target->computeDensityProjection(*dens);
-            }
-            math::blas_dmul(1./self->unitDensityProjection, result);
-            return toPyArray(result);
-        }
-
-        // otherwise we may have a GalaxyModel object as input
-        if(PyObject_IsInstance(arg, (PyObject*) &GalaxyModelType)) {
-            std::vector<galaxymodel::StorageNumT> result(self->target->numCoefs());
-            {   // same remark here
-                PyReleaseGIL unlock;
-                self->target->computeDFProjection(galaxymodel::GalaxyModel(
-                    *((GalaxyModelObject*)arg)->pot_obj->pot,
-                    *((GalaxyModelObject*)arg)->af_obj->af,
-                    *((GalaxyModelObject*)arg)->df_obj->df),
-                    &result[0]);
-            }
-            math::blas_dmul(1./self->unitDFProjection, result);
-            return toPyArray(result);
-        }
-
-        // otherwise this must be a particle object, which will be processed further down
-        if(!PyTuple_Check(arg) || PyTuple_Size(arg)!=2) {
-            PyErr_SetString(PyExc_TypeError, errorstr);
-            return NULL;
-        }
-        particles = convertParticles<coord::PosVelCar>(arg);
-        if(particles.size() == 0) {
-            PyErr_SetString(PyExc_TypeError, errorstr);
-            return NULL;
-        }
-    }
-    catch(std::exception& ex) {
-        raisePythonException(ex);
-        return NULL;
-    }
-
-    // now work with the input particle array
-    npy_intp size = self->target->numCoefs();
-    PyObject* result = PyArray_ZEROS(1, &size, STORAGE_NUM_T, 0);
-    if(!result)
-        return NULL;
-    std::string errorMessage;
-    // the loop below is parallelized, but it does not involve any Python C API functions,
-    // so we do not need to release GIL (although we could...)
-#ifdef _OPENMP
-#pragma omp parallel
-#endif
-    {
-        try{
-            // define thread-local intermediate matrices
-            math::Matrix<double> datacube = self->target->newDatacube();
-            std::vector<galaxymodel::StorageNumT> tmpresult(size);
-            const double mult = 1./self->unitDFProjection;
-#ifdef _OPENMP
-#pragma omp for schedule(static)
-#endif
-            for(int i=0; i<(int)particles.size(); i++) {
-                double xv[6];
-                particles.point(i).unpack_to(xv);
-                self->target->addPoint(xv, particles.mass(i), datacube.data());
-            }
-            self->target->finalizeDatacube(datacube, &tmpresult[0]);
-            // now sum up the thread-local intermediate matrices elementwise,
-            // but in such a way that the order is always the same, to ensure that
-            // the result is also deterministic (floating-point summation is not commutative)
-#ifdef _OPENMP
-#pragma omp for ordered schedule(static)
-            for(int t=0; t<omp_get_num_threads(); t++)
-#endif
-            {
-#ifdef _OPENMP
-#pragma omp ordered
-#endif
-                {
-                    for(npy_intp i=0; i<size; i++)
-                        pyArrayElem<galaxymodel::StorageNumT>(result, i) += mult * tmpresult[i];
-                }
-            }
-        }
-        catch(std::exception& ex) {
-            errorMessage = ex.what();
-        }
-    }
-
-    if(!errorMessage.empty()) {
-        raisePythonException(errorMessage);
-        Py_DECREF(result);
-        return NULL;
-    }
-    return result;
-}
-
-PyObject* Target_name(PyObject* self)
-{
-    return Py_BuildValue("s", ((TargetObject*)self)->target->name());
-}
-
-PyObject* Target_elem(TargetObject* self, Py_ssize_t index)
-{
-    try{
-        return Py_BuildValue("s", self->target->coefName(index).c_str());
-    }
-    catch(std::exception& ex) {
-        raisePythonException(ex);
-        return NULL;
-    }
-}
-
-Py_ssize_t Target_len(TargetObject* self)
-{
-    return self->target->numCoefs();
-}
-
-static PySequenceMethods Target_sequence_methods = {
-    (lenfunc)Target_len, 0, 0, (ssizeargfunc)Target_elem,
-};
-static PyMethodDef Target_methods[] = {
-    { NULL }  // no named methods
-};
-
-static PyTypeObject TargetType = {
-    PyVarObject_HEAD_INIT(NULL, 0)
-    "agama.Target",
-    sizeof(TargetObject), 0, (destructor)Target_dealloc,
-    0, 0, 0, 0, Target_name, 0, &Target_sequence_methods, 0, 0,
-    (PyCFunctionWithKeywords)Target_value, 0, 0, 0, 0,
-    Py_TPFLAGS_DEFAULT, docstringTarget,
-    0, 0, 0, 0, 0, 0, Target_methods, 0, 0, 0, 0, 0, 0, 0,
-    (initproc)Target_init
-};
-
-
-///@}
-//  --------------------------------------------
-/// \name  Computation of Gauss-Hermite moments
-//  --------------------------------------------
-///@{
-
-/// description of ghMoments function
-static const char* docstringGhMoments =
-    "Compute the coefficients of Gauss-Hermite expansion for line-of-sight velocity "
-    "distribution functions represented by a B-spline, as used in the LOSVD Target model.\n"
-    "Named arguments:\n"
-    "  degree - degree of B-spline expansion (int, 0 to 3).\n"
-    "  gridv  - array of grid nodes in velocity that determine the B-spline; "
-    "should be the same as used in constructing the Target object.\n"
-    "  matrix - a 1d or 2d array with the amplitudes of B-spline expansion of LOSVD. "
-    "The number of columns in the matrix is numBasisFnc * numApertures: "
-    "the former is the number of amplitudes of B-spline representation of a single LOSVD, "
-    "equal to len(gridv)+degree-1; the latter is the number of separate regions in "
-    "the image plane, each with its own LOSVD. Note that numApertures is inferred as the number "
-    "of columns divided by the number of basis functions (itself known from gridv and degree). "
-    "If the matrix is two-dimensional, each row corresponds to a single component "
-    "of the model (e.g., an orbit) which has its LOSVD recorded in each aperture. "
-    "In the opposite case (one-dimensional array) these could be LOSVDs for the entire model "
-    "(e.g., constructed from an N-body snapshot or from observations) in each aperture. "
-    "Amplitudes of LOSVD representation for a single aperture are grouped together "
-    "(in other words, each component may be viewed as a 2d matrix with numApertures rows "
-    "and numBasisFnc columns, reshaped into a 1d array).\n"
-    "  ghorder - the order of Gauss-Hermite expansion, should be >=2.\n"
-    "  ghbasis (optional) - if provided, should be a 2d array with numApertures rows and 3 columns, "
-    "each row containing the parameters of the Gaussian that serves as the basis for expansion: "
-    "amplitude, center and width. \n"
-    "There are two different scenarios for using this routine. \n"
-    "The first is to construct both the expansion parameters (amplitude, center and width) "
-    "by finding a best-fit Gaussian for each of the input LOSVDs, and then use these parameters "
-    "to compute higher-order GH moments; in this case the input matrix is supposed to represent "
-    "the LOSVDs in each aperture for the entire model (i.e., has only one component), "
-    "and the argument 'ghbasis' is not provided.\n"
-    "The second scenario is to convert the LOSVDs for a multi-component model (e.g., produced by "
-    "the Target LOSVD object during orbit integration) into GH moments, reducing the number of "
-    "parameters needed to represent each component's LOSVD. In this case all components "
-    "naturally should use the same base parameters of the Gaussian (separate for each aperture, "
-    "but identical between components), so that a linear superposition of input LOSVDs "
-    "corresponds to the same linear superposition of GH moments. Hence the argument 'ghbasis' "
-    "should be provided.\n"
-    "  Returns: a 1d or 2d array (depending on the number of dimensions of the input matrix), "
-    "where each row contains the GH moments for each aperture, and the number of rows is equal "
-    "to the number of components (rows of the input matrix).\n"
-    "If 'ghbasis' argument was not provided, the output will contain also the parameters of "
-    "the best-fit Gaussian serving as the basis for the expansion, i.e. three numbers "
-    "(amplitude, center and width), followed by GH moments h_0..h_M, where M is the order "
-    "of expansion - in total M+4 numbers for each aperture (grouped together), "
-    "of which the first three can be later used as the 'ghbasis' argument for computing the moments "
-    "in a multi-component model. In this case, h_0=1, h_1=h_2=0 with high accuracy.\n"
-    "In the opposite case when 'ghbasis' is provided, the output for each aperture contains M+1 "
-    "moments h_0..h_M.\n";
-
-PyObject* ghMoments(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
-{
-    if(!onlyNamedArgs(args, namedArgs))
-       return NULL;
-
-    int degree = -1, ghorder = -1;
-    PyObject *gridv_obj = NULL, *mat_obj = NULL, *gh_obj = NULL;
-    static const char* keywords[] = {"degree", "gridv", "matrix", "ghorder", "ghbasis", NULL};
-    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "iOOi|O", const_cast<char**>(keywords),
-        &degree, &gridv_obj, &mat_obj, &ghorder, &gh_obj))
-        return NULL;
-
-    // order of Gauss-Hermite expansion
-    if(ghorder<0) {
-        PyErr_SetString(PyExc_ValueError, "ghMoments: order of Gauss-Hermite expansion should be >=0");
-        return NULL;
-    }
-
-    // degree of B-splines
-    if(degree<0 || degree>3) {
-        PyErr_SetString(PyExc_ValueError, "ghMoments: degree of interpolation may not exceed 3");
-        return NULL;
-    }
-
-    // grid in velocity space
-    std::vector<double> gridv = toDoubleArray(gridv_obj);
-    if(gridv.size() < 2) {
-        PyErr_SetString(PyExc_ValueError, "ghMoments: gridv must be an array with >= 2 nodes");
-        return NULL;
-    }
-    int numBasisFnc = (npy_intp)gridv.size() + degree - 1;  // number of B-spline basis functions
-
-    // matrix of B-spline amplitudes of LOSVD in each aperture (columns)
-    // for each element of the model (e.g. an orbit) (rows)
-    PyArrayObject *mat_arr = mat_obj?
-        (PyArrayObject*) PyArray_FROM_OTF(mat_obj, STORAGE_NUM_T, NPY_ARRAY_FORCECAST) : NULL;
-    npy_intp numApertures = -1;
-    if(mat_arr && (PyArray_NDIM(mat_arr) == 1 || PyArray_NDIM(mat_arr) == 2))
-        numApertures = PyArray_DIM(mat_arr, PyArray_NDIM(mat_arr)-1) / numBasisFnc;
-    if(!mat_arr || numApertures * numBasisFnc != PyArray_DIM(mat_arr, PyArray_NDIM(mat_arr)-1)) {
-        Py_XDECREF(mat_arr);
-        PyErr_SetString(PyExc_ValueError, ("Argument 'matrix' should be a 1d array "
-            "of length numApertures * numBasisFnc (the latter is " + utils::toString(numBasisFnc) +
-            " for the provided gridv and degree), or a 2d array with this number of columns").c_str());
-        return NULL;
-    }
-    int ndim = PyArray_NDIM(mat_arr);
-    npy_intp numComponents = ndim==1 ? 1 : PyArray_DIM(mat_arr, 0);
-
-    // parameters of Gauss-Hermite expansion(s), if provided
-    PyArrayObject *gh_arr = gh_obj? (PyArrayObject*) PyArray_FROM_OTF(gh_obj, NPY_DOUBLE, 0) : NULL;
-    if( gh_obj != NULL && (gh_arr == NULL || PyArray_NDIM(gh_arr) != 2 ||
-        PyArray_DIM(gh_arr, 0) != numApertures || PyArray_DIM(gh_arr, 1) != 3))
-    {
-        Py_XDECREF(gh_arr);
-        Py_DECREF(mat_arr);
-        PyErr_SetString(PyExc_ValueError,
-            "Argument 'ghbasis', if provided, should be a 2d array with 3 columns: "
-            "amplitude,center,width, and the number of rows equal to the number of apertures");
-        return NULL;
-    }
-
-    // prepare the output array of Gauss-Hermite moments (and possibly the parameters of GH expansion)
-    npy_intp size[2] = {numComponents, numApertures * (gh_arr ? ghorder+1 : ghorder+4)};
-    PyObject* output_arr = PyArray_SimpleNew(ndim, &size[2-ndim], STORAGE_NUM_T);
-    if(!output_arr) {
-        Py_XDECREF(gh_arr);
-        Py_DECREF(mat_arr);
-        return NULL;
-    }
-
-    volatile bool fail = false;
-    std::string errorMessage;
-    utils::CtrlBreakHandler cbrk;
-    // the procedure is different depending on whether the parameters of GH expansion are provided or not
-    if(gh_arr) {
-        // compute the GH moments for known (provided) parameters of expansion (amplitude,center,width).
-        // Note that although this loop is OpenMP-parallelized, it does not involve any calls
-        // to Python C API, nor it involves any operations that may invoke Python callback functions,
-        // so we do not need to release GIL (same applies to the other loop further down).
-#ifdef _OPENMP
-#pragma omp parallel for schedule(static)
-#endif
-        for(npy_intp a=0; a<numApertures; a++) {
-            if(fail) continue;
-            try{
-                // obtain the matrix that converts the B-spline amplitudes into Gauss-Hermite moments
-                math::Matrix<double> ghmat(math::computeGaussHermiteMatrix(degree, gridv, ghorder,
-                    /*ampl  */ pyArrayElem<double>(gh_arr, a, 0),
-                    /*center*/ pyArrayElem<double>(gh_arr, a, 1),
-                    /*width */ pyArrayElem<double>(gh_arr, a, 2)));
-                std::vector<double> srcrow(numBasisFnc), dstrow(ghorder+1);  // temp storage
-                // loop over all rows of the input matrix (e.g. orbits)
-                for(npy_intp r=0; r<numComponents; r++) {
-                    // convert the section of one row of the input array, corresponding to
-                    // one aperture and one orbit, from StorageNumT to double
-                    for(int b=0; b<numBasisFnc; b++)
-                        srcrow[b] = ndim==1 ?
-                            pyArrayElem<galaxymodel::StorageNumT>(mat_arr,    a * numBasisFnc + b) :
-                            pyArrayElem<galaxymodel::StorageNumT>(mat_arr, r, a * numBasisFnc + b);
-                    // multiply the array of amplitudes by the conversion matrix
-                    math::blas_dgemv(math::CblasNoTrans, 1., ghmat, srcrow, 0., dstrow);
-                    // convert back to StorageNumT and write
-                    // to a section of one row of the result array
-                    for(int m=0; m<=ghorder; m++)
-                        (ndim==1 ?
-                        pyArrayElem<galaxymodel::StorageNumT>(output_arr,    a * (ghorder+1) + m) :
-                        pyArrayElem<galaxymodel::StorageNumT>(output_arr, r, a * (ghorder+1) + m) ) =
-                            static_cast<galaxymodel::StorageNumT>(dstrow[m]);
-                }
-            }
-            catch(std::exception& ex) {
-                errorMessage = ex.what();
-                fail = true;
-            }
-            if(cbrk.triggered()) {
-                errorMessage = cbrk.message();
-                fail = true;
-            }
-        }
-    } else {
-        // construct best-fit parameters of GH expansion (find amplitude,center,width)
-        // for each aperture and component, and then compute GH moments using these parameters
-        const npy_intp count = numApertures * numComponents;
-#ifdef _OPENMP
-#pragma omp parallel for schedule(dynamic,1)
-#endif
-        for(npy_intp ar=0; ar < count; ar++) {
-            if(fail) continue;
-            try{
-                int r = ar / numApertures, a = ar % numApertures;  // row and aperture indices
-                std::vector<double> srcrow(numBasisFnc);
-                for(int b=0; b<numBasisFnc; b++)
-                    srcrow[b] = ndim == 1 ?
-                        pyArrayElem<galaxymodel::StorageNumT>(mat_arr,    a * numBasisFnc + b) :
-                        pyArrayElem<galaxymodel::StorageNumT>(mat_arr, r, a * numBasisFnc + b);
-                shared_ptr<math::GaussHermiteExpansion> ghexp;
-                switch(degree) {
-                    case 0: ghexp.reset(new math::GaussHermiteExpansion(
-                        math::BsplineWrapper<0>(gridv, srcrow), ghorder));
-                        break;
-                    case 1: ghexp.reset(new math::GaussHermiteExpansion(
-                        math::BsplineWrapper<1>(gridv, srcrow), ghorder));
-                        break;
-                    case 2: ghexp.reset(new math::GaussHermiteExpansion(
-                        math::BsplineWrapper<2>(gridv, srcrow), ghorder));
-                        break;
-                    case 3: ghexp.reset(new math::GaussHermiteExpansion(
-                        math::BsplineWrapper<3>(gridv, srcrow), ghorder));
-                        break;
-                    default:  // shouldn't occur, we've checked degree beforehand
-                        assert(!"Invalid B-spline degree");
-                }
-                std::vector<double> dstrow(ghorder+4);
-                dstrow[0] = ghexp->ampl();    // overall amplitude
-                dstrow[1] = ghexp->center();  // center of the expansion
-                dstrow[2] = ghexp->width();   // width of the base gaussian
-                std::copy(ghexp->coefs().begin(), ghexp->coefs().end(), dstrow.begin()+3);
-                for(int m=0; m<=ghorder+3; m++)
-                    (ndim==1 ?
-                    pyArrayElem<galaxymodel::StorageNumT>(output_arr,    a * (ghorder+4) + m) :
-                    pyArrayElem<galaxymodel::StorageNumT>(output_arr, r, a * (ghorder+4) + m) ) =
-                        static_cast<galaxymodel::StorageNumT>(dstrow[m]);
-            }
-            catch(std::exception& ex) {
-                errorMessage = ex.what();
-                fail = true;
-            }
-            if(cbrk.triggered()) {
-                errorMessage = cbrk.message();
-                fail = true;
-            }
-        }
-    }
-    Py_XDECREF(gh_arr);
-    Py_DECREF(mat_arr);
-    if(fail) {
-        raisePythonException(errorMessage);
-        Py_DECREF(output_arr);
-        return NULL;
-    }
-    return output_arr;
-}
-
-
-///@}
 //  -----------------------------------------
 /// \name  Spline class and related routines
 //  -----------------------------------------
@@ -7270,9 +6532,9 @@ PyObject* splineLogDensity(PyObject* /*self*/, PyObject* args, PyObject* namedAr
 
 
 ///@}
-//  ---------------------------------------------------------------------------------------
-/// \name  Orbit integration routine and associated container class for storing its output
-//  ---------------------------------------------------------------------------------------
+//  ----------------------------------------------------------
+/// \name  Container class for storing the interpolated orbit
+//  ----------------------------------------------------------
 ///@{
 
 /// docstring of the helper class Orbit
@@ -7620,6 +6882,601 @@ bool createOrbit(int dtype, const orbit::Trajectory &traj,
     return true;
 }
 
+/// Apply a Target object to a stored orbit represented by interpolating splines:
+/// the procedure is identical to the one used during orbit integration, namely the addPoint
+/// method of the Target object is called on NUM_SAMPLES_PER_STEP equally-spaced points
+/// for each timestep, but these points are retrieved from the interpolating spline
+/// rather than the ODE integrator. The result should be identical up to interpolation errors.
+void applyTargetToOrbit(const galaxymodel::BaseTarget& target, OrbitObject* orbit, double normFactor,
+    /*output*/ galaxymodel::StorageNumT *output)
+{
+    const math::BaseInterpolator1d
+        &splx = *((SplineObject*)(orbit->x))->spl,
+        &sply = *((SplineObject*)(orbit->y))->spl,
+        &splz = *((SplineObject*)(orbit->z))->spl;
+    const std::vector<double>& times = splx.xvalues();
+    math::Matrix<double> datacube = target.newDatacube();
+    double *dataptr = datacube.data();
+    const int NUM_SAMPLES_PER_STEP = galaxymodel::RuntimeFncTarget::NUM_SAMPLES_PER_STEP;
+    for(size_t i=1; i<times.size(); i++) {
+        double substep = (times[i] - times[i-1]) / NUM_SAMPLES_PER_STEP;
+        for(int s=0; s<NUM_SAMPLES_PER_STEP; s++) {
+            // equally-spaced samples in time, offsets from the beginning of the current timestep
+            double t = times[i-1] + (s+0.5) * substep;
+            double point[6];  // position and velocity in cartesian coordinates at the current sub-step
+            double ca=1, sa=0, xi, vxi, yi, vyi;
+            splx.evalDeriv(t, &xi, &vxi);
+            sply.evalDeriv(t, &yi, &vyi);
+            splz.evalDeriv(t, &point[2], &point[5]);
+            if(orbit->Omega != 0)
+                math::sincos(orbit->Omega * t, sa, ca);
+            point[0] =  xi * ca +  yi * sa;
+            point[1] =  yi * ca -  xi * sa;
+            point[3] = vxi * ca + vyi * sa;
+            point[4] = vyi * ca - vxi * sa;
+            // spline-interpolated orbit is stored in physical units, so we need to perform
+            // unit conversion before passing the point to the Target object
+            convertPosVel(point).unpack_to(point);  // in-place conversion
+            target.addPoint(point, substep, dataptr);
+        }
+    }
+    target.finalizeDatacube(datacube, output);
+    const double mult = normFactor / (times.back() - times.front());
+    for(npy_intp i=0, size=target.numCoefs(); i<size; i++)
+        output[i] *= mult;
+}
+
+
+///@}
+//  ----------------------------------------
+/// \name  Target class for additive models
+//  ----------------------------------------
+///@{
+
+static const char* docstringTarget =
+    "Target objects represent various targets that need to be satisfied by an additive model.\n"
+    "The type of target is specified by the  type='...' argument, and other available arguments "
+    "depend on it. "
+    "Below follows the list of possible target types and their parameters (all case-insensitive).\n\n"
+    "Density discretization models:\n\n"
+    "  DensityClassicTopHat\n"
+    "Classical approach for spheroidal Schwarzschild models: "
+    "radial shells divided into three panes, each pane - into several strips, "
+    "and the density inside each resulting cell is approximated as a constant.\n\n"
+    "  DensityClassicLinear\n"
+    "Same as classical, but the density is specified at the grid nodes and interpolated "
+    "tri-linearly within each cell.\n"
+    "Parameters for both of these models:\n"
+    "gridr - array of radial grid nodes;\n"
+    "stripsPerPane - number of strips in each of three panes in each shell "
+    "(hence the number of cells in each pane is stripsPerPane^2);\n"
+    "axisRatioY, axisRatioZ - (optional) coefficients for squeezing the grid in each dimension.\n\n"
+    "  DensitySphHarm\n"
+    "Radial grid is the same as in the classic approach, but the angular dependence "
+    "of the density is represented in terms of spherical-harmonic expansion, "
+    "and the radial dependence of each term is a linearly-interpolated function.\n"
+    "Parameters:\n"
+    "gridr - array of radial grid nodes;\n"
+    "lmax, mmax - order of angular expansion in theta and phi, respectively.\n\n"
+    "  DensityCylindricalTopHat\n"
+    "A grid in meridional plane (R,z) aligned with cylindrical coordinates, "
+    "with the azimuthal dependence of the density represented by a Fourier expansion; "
+    "the density is attributed to each cell (implicitly assumed to be constant within a cell).\n\n"
+    "  DensityCylindricalLinear\n"
+    "Same as the previous one, but each azimuthal Fourier term in the meridional plane (R,z) "
+    "is bi-linearly interpolated within each cell.\n"
+    "Parameters for both of these models:\n"
+    "gridr, gridz - arrays of grid nodes in cylindrical radius and vertical coordinate "
+    "(should cover only the positive quadrant);\n"
+    "mmax - order of azmuthal Fourier expansion.\n\n"
+    "Kinematic constraints:\n\n"
+    "  KinemShell\n"
+    "This target object records the density-weighted radial and tangential velocity dispersion "
+    "in spherical coordinates, represented as projections onto basis elements of a B-spline grid "
+    "in radius.\n"
+    "Parameters:\n"
+    "degree (integer from 0 to 3) - degree of B-splines;\n"
+    "gridr - array of radial grid nodes.\n"
+    "These recorded projections may be used to constrain the velocity anisotropy of the model: "
+    "after choosing the desired value of coefficient beta = 1 - sigma_t^2 / (2 sigma_r^2), "
+    "one demands that\n2 (1-beta) * rho * sigma_r^2 - rho * sigma_t^2 = 0\nfor all radial points.\n\n"
+    "  LOSVD\n"
+    "This target object is intended for recording line-of-sight velocity distributions in a 2d image "
+    "plane; the latter is denoted by coordinates X, Y, with Y pointing up/north and X - left/east, "
+    "and the complementary Z axis points along the line of sight away from the observer.\n"
+    "The orientation of the image plane w.r.t. the intrinsic coordinate system x,y,z of the galaxy "
+    "is described by three Euler angles alpha, beta and gamma. "
+    "The first two angles define the line of sight: alpha is the angle between the x axis and "
+    "the line of nodes (the intersection between the equatorial (xy) plane of the galaxy and "
+    "the image plane); "
+    "beta is the inclination angle (beta=0 is face-on, with these two planes coinciding, beta=pi/2 "
+    "is edge-on, and beta=pi is again face-on but with z axis pointing towards the observer, "
+    "opposite to Z). "
+    "The third angle gamma defines additional rotation of the image plane: it is the position angle "
+    "(PA) of the projection of z axis onto the image plane, measured counter-clockwise from the Y "
+    "(up/north) axis towards the X (left/east) axis. The PA of the line of nodes is gamma+pi/2. "
+    "For instance, the projections along each of the principal axes are given by the following "
+    "triplets of angles: \n"
+    "(0, 0, 0) - face-on orientation, so that the image plane (X,Y) coincides with the (x,y) plane, "
+    "and the Z axis (line of sight) coincides with the z axis.\n"
+    "(0, pi/2, 0) - view down the y axis, image plane (X,Y) coincides with the (x,z) plane;\n"
+    "(pi/2, pi/2, 0) - view down the y axis, image plane coincides with the (y,z) plane.\n"
+    "LOSVDs are one-dimensional functions that describe the distribution of matter moving with "
+    "the given velocity v_Z in the given spatial region (aperture) in the (X,Y) plane. "
+    "Apertures are specified by arbitrary simple polygons (without self-intersection, but not "
+    "necessarily convex); different apertures may overlap in the same area. Any collection of slits "
+    "at various angles, regular 2d IFU spaxels, or Voronoi bins can be represented in this way. "
+    "In each aperture, the LOSVD is represented in terms of a B-spline expansion: "
+    "the degree of B-splines and the grid nodes in the velocity axis that together determine "
+    "the shape of basis functions are the same for all apertures, and the amplitudes of each basis "
+    "function are the free parameters that describe each LOSVD. For instance, the commonly used "
+    "approach to represent a LOSVD as a histogram with regularly-spaced bins is equivalent to "
+    "a 0th degree B-spline over a uniform grid in v; however, this is certainly not the most "
+    "efficient usage scenario. Higher-degree B-spines (2 or 3) result in smoother LOSVDs and need "
+    "substantially fewer grid points to achieve the same velocity resolution; in addition, the grid "
+    "needs not be uniformly-spaced.\n"
+    "The amplitudes of B-spline expansion in each aperture for each orbit or N-body snapshot "
+    "are computed by first constructing a datacube - the projection of said orbit onto "
+    "an auxiliary grid in the 2+1-dimensional space (X,Y and v_LOS). The grid in velocity space "
+    "is the same as used in the B-spline representation, but the grid in the image plane is "
+    "somewhat arbitrary (separable in X,Y, but not necessarily uniform); the only requirement "
+    "is for it to cover all apertures, and have a sufficient spatial resolution - typically "
+    "comparable to the PSF width if 2nd or 3rd-degree B-splines are used. "
+    "Then the datacube is convolved with spatial and velocity-space PSFs and re-binned into "
+    "the apertures (all done internally by the Target object); the final LOSVD has "
+    "numApertures * numBasisFnc elements, where the latter is len(gridv) + degree - 1.\n"
+    "Parameters for this target:\n"
+    "alpha,beta,gamma - angles specifying the orientation of the image plane w.r.t. model coordinates;\n"
+    "degree (integer from 0 to 3) - degree of B-splines;\n"
+    "gridv - array of grid nodes in velocity space (typically should be symmetric about origin);\n"
+    "gridx - nodes of the auxiliary (internal) grid in the X coordinate of the image plane;\n"
+    "gridy (optional - default is the same as gridx) - nodes of the internal grid in Y; "
+    "the spatial region covered by this 2d grid should encompass all apertures, and the grid spacing "
+    "should be comparable to either the PSF width or the typical aperture size, but not necessarily "
+    "uniform (i.e., it may be constructed with the routines 'nonuniformGrid' or 'symmetricGrid');\n"
+    "psf - description of spatial point-spread function: it may be either a single number, "
+    "interpreted as the width of the Gaussian PSF, or an Kx2 array describing a composition of K "
+    "such Gaussians (the first column is the width of each Gaussian, and the second column is "
+    "the relative fraction of this component, which should sum up to unity);\n"
+    "velpsf - width of the velocity-space smoothing kernel (a single Gaussian);\n"
+    "apertures - array of polygons describing the boundaries of each aperture: "
+    "each element of this array is a 2d array with X,Y coordinates of the polygon vertices, "
+    "and of course the number of vertices may be different for each polygon (but greater than two).\n"
+    "symmetry - a letter encoding the symmetries of the potential and orbit shapes, "
+    "determines how the points sampled from the trajectory of each orbit will be treated before "
+    "projecting them onto the image plane: 't' (triaxial, default) means that only the fourfold "
+    "reflection symmetry  z <-> -z  and  x,y <-> -x,-y  will be enforced,  'a' (axisymmetric) means "
+    "that the point will be rotated about the z axis by a random angle, and 's' (spherical) means "
+    "that both spherical angles will be randomized.\n\n"
+    "The role of a Target object is to collect data during the construction of an orbit library: "
+    "several instances of them could be provided as a 'targets=[t1,t2,...]' argument of "
+    "the 'orbit()' routine, and each one will produce a matrix with Norbit rows and Ncoef columns, "
+    "where the number of coefficients for a target t1 is given by the 'len(t1)' function.\n"
+    "A Target instance can also be used to produce the right-hand side of the matrix equation "
+    "in a linear superposition model, by applying it to a Density object or an N-body snapshot:\n"
+    ">>> den=agama.Density(params)     # create an instance of a density model with some parameters\n"
+    ">>> snapshot=den.sample(10000)    # draw 10000 sample points from this model\n"
+    ">>> rhs_d=t1(den)                 # apply the target 't1' to the analytic density model\n"
+    ">>> rhs_s=t1(snapshot)            # apply it to an array of particles\n"
+    "The result depends on the type of the target and the type of the argument (density or array "
+    "of particles). For density discretization targets, this produces the array of integrals of "
+    "the density profile multiplied by the basis functions over the entire volume, or, if the input "
+    "is an array of particles, the sum of particle masses multiplied by basis functions. "
+    "The length of the resulting array is equal to len(t1). "
+    "For a LOSVD target, applying it to a density object computes the integrals of surface mass "
+    "density over each aperture, convolved with the spatial PSF; equivalently, this is the overall "
+    "normalization of the LOSVD in each aperture, i.e. the integral of f(v) over all velocities. ";
+    //"This number may be used as the normalization factor in computing Gauss-Hermite coefficients "
+    //"from LOSVD, as shown below:\n";  // TODO expand
+
+/// \cond INTERNAL_DOCS
+/// Python type corresponding to Target class
+typedef struct {
+    PyObject_HEAD
+    galaxymodel::PtrTarget target;
+    // dimensional unit conversion factor for applying the Target to a Density object
+    double unitDensityProjection;
+    // same factor for a GalaxyModel object, an N-body snapshot, or during orbit integration
+    double unitDFProjection;
+} TargetObject;
+/// \endcond
+
+void Target_dealloc(TargetObject* self)
+{
+    if(self->target)
+        FILTERMSG(utils::VL_DEBUG, "Agama", "Deleted " + std::string(self->target->name()) +
+            " target at " + utils::toString(self->target.get()));
+    else
+        FILTERMSG(utils::VL_DEBUG, "Agama", "Deleted an empty target");
+    self->target.reset();
+    Py_TYPE(self)->tp_free(self);
+}
+
+int Target_init(TargetObject* self, PyObject* args, PyObject* namedArgs)
+{
+    if(self->target) {
+        PyErr_SetString(PyExc_RuntimeError, "Target object cannot be reinitialized");
+        return -1;
+    }
+    if(!onlyNamedArgs(args, namedArgs))
+        return -1;
+    NamedArgs nargs(namedArgs);
+    std::string type_str = toString(nargs.pop("type"));
+    if(type_str.empty()) {
+        PyErr_SetString(PyExc_TypeError, "Must provide a type='...' argument");
+        return -1;
+    }
+    try{
+        if(utils::stringsEqual(type_str.substr(0, 7), "Density")) {
+            // spatial grids
+            std::vector<double> gridr = toDoubleArray(nargs.pop("gridr"));
+            std::vector<double> gridz = toDoubleArray(nargs.pop("gridz"));
+            if(gridr.size()<2)
+                throw std::invalid_argument("gridr must be an array with >=2 elements");
+            if(gridz.size()<2 && utils::stringsEqual(type_str.substr(0, 18), "DensityCylindrical"))
+                throw std::invalid_argument("gridz must be an array with >=2 elements");
+            math::blas_dmul(conv->lengthUnit, gridr);
+            math::blas_dmul(conv->lengthUnit, gridz);
+            // orders of angular expansion or number of lines partitioning a spherical shell into cells
+            int lmax = toInt(nargs.pop("lmax"), 0),
+                mmax = toInt(nargs.pop("mmax"), 0),
+                stripsPerPane = toInt(nargs.pop("stripsPerPane"), 2);
+            // flattening of the spheroidal grid
+            double
+                axisRatioY = toDouble(nargs.pop("axisRatioY"), 1.0),
+                axisRatioZ = toDouble(nargs.pop("axisRatioZ"), 1.0);
+            if(utils::stringsEqual(type_str, "DensityClassicTopHat"))
+                self->target.reset(new galaxymodel::TargetDensityClassic<0>(
+                    stripsPerPane, gridr, axisRatioY, axisRatioZ));
+            else if(utils::stringsEqual(type_str, "DensityClassicLinear"))
+                self->target.reset(new galaxymodel::TargetDensityClassic<1>(
+                    stripsPerPane, gridr, axisRatioY, axisRatioZ));
+            else if(utils::stringsEqual(type_str, "DensitySphHarm"))
+                self->target.reset(new galaxymodel::TargetDensitySphHarm(lmax, mmax, gridr));
+            else if(utils::stringsEqual(type_str, "DensityCylindricalTopHat"))
+                self->target.reset(new galaxymodel::TargetDensityCylindrical<0>(mmax, gridr, gridz));
+            else if(utils::stringsEqual(type_str, "DensityCylindricalLinear"))
+                self->target.reset(new galaxymodel::TargetDensityCylindrical<1>(mmax, gridr, gridz));
+            else
+                throw std::invalid_argument("Unknown type='...' argument");
+            self->unitDensityProjection = conv->massUnit;
+            self->unitDFProjection = conv->massUnit;
+        }
+
+        // check if a KinemShell is being requested
+        if(utils::stringsEqual(type_str, "KinemShell")) {
+            int degree = toInt(nargs.pop("degree"), -1);
+            std::vector<double> gridr = toDoubleArray(nargs.pop("gridr"));
+            if(gridr.size()<2)
+                throw std::invalid_argument("gridr must be an array with >=2 elements");
+            math::blas_dmul(conv->lengthUnit, gridr);
+            switch(degree) {
+                case 0: self->target.reset(new galaxymodel::TargetKinemShell<0>(gridr)); break;
+                case 1: self->target.reset(new galaxymodel::TargetKinemShell<1>(gridr)); break;
+                case 2: self->target.reset(new galaxymodel::TargetKinemShell<2>(gridr)); break;
+                case 3: self->target.reset(new galaxymodel::TargetKinemShell<3>(gridr)); break;
+                default:
+                    throw std::invalid_argument(
+                        "KinemShell: degree of interpolation should be between 0 and 3");
+            }
+            self->unitDensityProjection = NAN;
+            self->unitDFProjection = conv->massUnit * pow_2(conv->velocityUnit);
+        }
+
+        // check if a LOSVD is being requested
+        if(utils::stringsEqual(type_str, "LOSVD")) {
+            galaxymodel::LOSVDParams params;
+            // parameters describing the orientation of the model
+            params.alpha = toDouble(nargs.pop("alpha"), params.alpha);
+            params.beta  = toDouble(nargs.pop("beta" ), params.beta);
+            params.gamma = toDouble(nargs.pop("gamma"), params.gamma);
+            // parameters of the internal grids in image plane and line-of-sight velocity
+            params.gridx = toDoubleArray(nargs.pop("gridx"));
+            params.gridy = toDoubleArray(nargs.pop("gridy"));
+            params.gridv = toDoubleArray(nargs.pop("gridv"));
+            if(params.gridy.empty())
+                params.gridy = params.gridx;
+            if(params.gridx.size()<2 || params.gridy.size()<2 || params.gridv.size()<2)
+                throw std::invalid_argument("gridx, [gridy, ] gridv must be arrays with >=2 elements");
+            math::blas_dmul(conv->lengthUnit, params.gridx);
+            math::blas_dmul(conv->lengthUnit, params.gridy);
+            math::blas_dmul(conv->velocityUnit, params.gridv);
+            // explicitly specified symmetry (triaxial by default)
+            params.symmetry = potential::getSymmetryTypeByName(toString(nargs.pop("symmetry")));
+            // parameters of the point-spread functions (spatial and velocity)
+            PyObject* psf_obj = nargs.pop("psf");
+            if(psf_obj) {
+                double psf = toDouble(psf_obj, NAN) * conv->lengthUnit;
+                if(isFinite(psf))
+                    params.spatialPSF.assign(1, galaxymodel::GaussianPSF(psf));
+                else {  // may be an array of several PSFs
+                    PyArrayObject* psf_arr = (PyArrayObject*)PyArray_FROM_OTF(psf_obj, NPY_DOUBLE, 0);
+                    if(psf_arr == NULL || PyArray_NDIM(psf_arr) != 2 || PyArray_DIM(psf_arr, 1) != 2) {
+                        Py_XDECREF(psf_arr);
+                        throw std::invalid_argument(
+                            "Argument 'psf' must be a single number (width of the Gaussian PSF), "
+                            "or a Kx2 array of PSF widths and fractional weights");
+                    }
+                    for(npy_intp k=0; k<PyArray_DIM(psf_arr, 0); k++)
+                        params.spatialPSF.push_back(galaxymodel::GaussianPSF(
+                            pyArrayElem<double>(psf_arr, k, 0) * conv->lengthUnit,
+                            pyArrayElem<double>(psf_arr, k, 1)));
+                }
+            }  // otherwise no PSF is assigned at all
+            params.velocityPSF = toDouble(nargs.pop("velpsf"), 0.) * conv->velocityUnit;
+            // apertures in the image plane where LOSVDs are analyzed
+            std::vector<PyObject*> apertures = toPyObjectArray(nargs.pop("apertures"));
+            if(apertures.empty())
+                throw std::invalid_argument("Must provide a list of polygons in 'apertures=...' argument");
+            // two possibilities: either apertures is a single 3d array of shape N_apert x N_vert x 2,
+            // or a list/tuple/array of individual 2d arrays of shapes N_vert,i x 2
+            for(size_t a=0; a<apertures.size(); a++) {
+                PyArrayObject* ap_arr =
+                    (PyArrayObject*)PyArray_FROM_OTF(apertures[a], NPY_DOUBLE, 0);
+                if( ap_arr != NULL &&
+                    PyArray_NDIM(ap_arr)  == 2 &&
+                    PyArray_DIM(ap_arr, 0) >= 3 &&
+                    PyArray_DIM(ap_arr, 1) == 2)
+                {   // an element of the list is a 2d array
+                    size_t nv = PyArray_DIM(ap_arr, 0);
+                    math::Polygon poly(nv);
+                    for(size_t v=0; v<nv; v++) {
+                        poly[v].x = pyArrayElem<double>(ap_arr, v, 0) * conv->lengthUnit;
+                        poly[v].y = pyArrayElem<double>(ap_arr, v, 1) * conv->lengthUnit;
+                    }
+                    params.apertures.push_back(poly);
+                } else
+                if( ap_arr != NULL &&
+                    apertures.size() == 1 &&
+                    PyArray_NDIM(ap_arr)  == 3 &&
+                    PyArray_DIM(ap_arr, 1) >= 3 &&
+                    PyArray_DIM(ap_arr, 2) == 2)
+                {   // the entire input is a single 3d array
+                    size_t na = PyArray_DIM(ap_arr, 0), nv = PyArray_DIM(ap_arr, 1);
+                    math::Polygon poly(nv);
+                    for(size_t aa=0; aa<na; aa++) {
+                        for(size_t v=0; v<nv; v++) {
+                            poly[v].x = pyArrayElem<double>(ap_arr, aa, v, 0) * conv->lengthUnit;
+                            poly[v].y = pyArrayElem<double>(ap_arr, aa, v, 1) * conv->lengthUnit;
+                        }
+                        params.apertures.push_back(poly);
+                    }
+                } else {
+                    if(PyErr_Occurred())
+                        return -1;
+                    Py_XDECREF(ap_arr);
+                    throw std::invalid_argument(
+                        "Each element of the list or tuple provided in the 'apertures=...' argument "
+                        "must be a Nx2 array defining a polygon on the sky plane, with N>=3 vertices");
+                }
+                Py_DECREF(ap_arr);
+            }
+            // degree of B-splines
+            int degree = toInt(nargs.pop("degree"), -1);
+            switch(degree) {
+                case 0: self->target.reset(new galaxymodel::TargetLOSVD<0>(params)); break;
+                case 1: self->target.reset(new galaxymodel::TargetLOSVD<1>(params)); break;
+                case 2: self->target.reset(new galaxymodel::TargetLOSVD<2>(params)); break;
+                case 3: self->target.reset(new galaxymodel::TargetLOSVD<3>(params)); break;
+                default:
+                    throw std::invalid_argument(
+                        "LOSVD: degree of interpolation should be between 0 and 3");
+            }
+            self->unitDensityProjection = conv->massUnit;
+            self->unitDFProjection = conv->massUnit / conv->velocityUnit;
+        }
+        if(!self->target)  // none of the above variants worked
+            throw std::invalid_argument("Unknown type='...' argument");
+    }
+    catch(std::exception& ex) {
+        raisePythonException(ex, "Error in creating a Target object: ");
+        return -1;
+    }
+    if(!nargs.empty())
+        return -1;
+    FILTERMSG(utils::VL_DEBUG, "Agama", "Created " + std::string(self->target->name()) +
+        " target at " + utils::toString(self->target.get()));
+    unitsWarning = true;  // any subsequent call to setUnits() will raise a warning
+    return 0;
+}
+
+PyObject* Target_value(TargetObject* self, PyObject* args, PyObject* namedArgs)
+{
+    if(!PyTuple_Check(args) || PyTuple_Size(args) != 1) {
+        PyErr_SetString(PyExc_TypeError, "Expected exactly 1 argument");
+        return NULL;
+    }
+    if(!noNamedArgs(namedArgs))
+        return NULL;
+    const char* errorstr = "Argument must be an instance of Density, GalaxyModel, "
+        "one or several Orbit instances, or an array of particles "
+        "(a tuple with two elements - Nx6 position/velocity coordinates and N masses)";
+
+    PyObject* arg = PyTuple_GET_ITEM(args, 0);
+    particles::ParticleArrayCar particles;
+    npy_intp size = self->target->numCoefs();
+    try{
+
+        // check if the input is an instance of Orbit: output is a 1d array of length "size"
+        if(PyObject_IsInstance(arg, (PyObject*) OrbitTypePtr)) {
+            PyObject* result = PyArray_ZEROS(1, &size, STORAGE_NUM_T, 0);
+            if(!result)
+                return NULL;
+            applyTargetToOrbit(*self->target, (OrbitObject*) arg,
+                conv->massUnit / self->unitDFProjection,
+                &pyArrayElem<galaxymodel::StorageNumT>(result, 0));
+            return result;
+        }
+
+        // or it may be an array of Orbits: output is a 2d array of shape "numOrbits * size",
+        // and contains nearly the same data as when the Target is used during orbit integration
+        if(PyArray_Check(arg)) {
+            PyArrayObject* arr = (PyArrayObject*)arg;
+            bool valid = PyArray_NDIM(arr) == 1 &&  PyArray_TYPE(arr) == NPY_OBJECT;
+            npy_intp numOrbits = valid ? PyArray_DIM(arr, 0) : 0;
+            for(npy_intp i=0; valid && i<numOrbits; i++)
+                valid &= PyObject_IsInstance(pyArrayElem<PyObject*>(arr, i), (PyObject*) OrbitTypePtr);
+            if(valid) {
+                npy_intp dims[2] = {numOrbits, size};
+                PyObject* result = PyArray_ZEROS(2, dims, STORAGE_NUM_T, 0);
+                if(!result)
+                    return NULL;
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static)
+#endif
+                for(int i=0; i<numOrbits; i++) {
+                    applyTargetToOrbit(*self->target, pyArrayElem<OrbitObject*>(arr, i),
+                        conv->massUnit / self->unitDFProjection,
+                        &pyArrayElem<galaxymodel::StorageNumT>(result, i, 0));
+                }
+                return result;
+            }
+        }
+
+        // check if we have a density object as input
+        potential::PtrDensity dens = getDensity(arg);
+        if(dens) {
+            std::vector<double> result;
+            {
+                // this operation contains OpenMP-parallelized loops, so we need to release GIL
+                PyReleaseGIL unlock;
+                result = self->target->computeDensityProjection(*dens);
+            }
+            math::blas_dmul(1./self->unitDensityProjection, result);
+            return toPyArray(result);
+        }
+
+        // otherwise we may have a GalaxyModel object as input
+        if(PyObject_IsInstance(arg, (PyObject*) &GalaxyModelType)) {
+            std::vector<galaxymodel::StorageNumT> result(self->target->numCoefs());
+            {   // same remark here
+                PyReleaseGIL unlock;
+                self->target->computeDFProjection(galaxymodel::GalaxyModel(
+                    *((GalaxyModelObject*)arg)->pot_obj->pot,
+                    *((GalaxyModelObject*)arg)->af_obj->af,
+                    *((GalaxyModelObject*)arg)->df_obj->df),
+                    &result[0]);
+            }
+            math::blas_dmul(1./self->unitDFProjection, result);
+            return toPyArray(result);
+        }
+
+        // otherwise this must be a particle object, which will be processed further down
+        if(!PyTuple_Check(arg) || PyTuple_Size(arg)!=2) {
+            PyErr_SetString(PyExc_TypeError, errorstr);
+            return NULL;
+        }
+        particles = convertParticles<coord::PosVelCar>(arg);
+        if(particles.size() == 0) {
+            PyErr_SetString(PyExc_TypeError, errorstr);
+            return NULL;
+        }
+    }
+    catch(std::exception& ex) {
+        raisePythonException(ex);
+        return NULL;
+    }
+
+    // now work with the input particle array
+    PyObject* result = PyArray_ZEROS(1, &size, STORAGE_NUM_T, 0);
+    if(!result)
+        return NULL;
+    std::string errorMessage;
+    // the loop below is parallelized, but it does not involve any Python C API functions,
+    // so we do not need to release GIL (although we could...)
+#ifdef _OPENMP
+#pragma omp parallel
+#endif
+    {
+        try{
+            // define thread-local intermediate matrices
+            math::Matrix<double> datacube = self->target->newDatacube();
+            std::vector<galaxymodel::StorageNumT> tmpresult(size);
+            const double mult = 1./self->unitDFProjection;
+#ifdef _OPENMP
+#pragma omp for schedule(static)
+#endif
+            for(int i=0; i<(int)particles.size(); i++) {
+                double xv[6];
+                particles.point(i).unpack_to(xv);
+                self->target->addPoint(xv, particles.mass(i), datacube.data());
+            }
+            self->target->finalizeDatacube(datacube, &tmpresult[0]);
+            // now sum up the thread-local intermediate matrices elementwise,
+            // but in such a way that the order is always the same, to ensure that
+            // the result is also deterministic (floating-point summation is not commutative)
+#ifdef _OPENMP
+#pragma omp for ordered schedule(static)
+            for(int t=0; t<omp_get_num_threads(); t++)
+#endif
+            {
+#ifdef _OPENMP
+#pragma omp ordered
+#endif
+                {
+                    for(npy_intp i=0; i<size; i++)
+                        pyArrayElem<galaxymodel::StorageNumT>(result, i) += mult * tmpresult[i];
+                }
+            }
+        }
+        catch(std::exception& ex) {
+            errorMessage = ex.what();
+        }
+    }
+
+    if(!errorMessage.empty()) {
+        raisePythonException(errorMessage);
+        Py_DECREF(result);
+        return NULL;
+    }
+    return result;
+}
+
+PyObject* Target_name(PyObject* self)
+{
+    return Py_BuildValue("s", ((TargetObject*)self)->target->name());
+}
+
+PyObject* Target_elem(TargetObject* self, Py_ssize_t index)
+{
+    try{
+        return Py_BuildValue("s", self->target->coefName(index).c_str());
+    }
+    catch(std::exception& ex) {
+        raisePythonException(ex);
+        return NULL;
+    }
+}
+
+Py_ssize_t Target_len(TargetObject* self)
+{
+    return self->target->numCoefs();
+}
+
+static PySequenceMethods Target_sequence_methods = {
+    (lenfunc)Target_len, 0, 0, (ssizeargfunc)Target_elem,
+};
+static PyMethodDef Target_methods[] = {
+    { NULL }  // no named methods
+};
+
+static PyTypeObject TargetType = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    "agama.Target",
+    sizeof(TargetObject), 0, (destructor)Target_dealloc,
+    0, 0, 0, 0, Target_name, 0, &Target_sequence_methods, 0, 0,
+    (PyCFunctionWithKeywords)Target_value, 0, 0, 0, 0,
+    Py_TPFLAGS_DEFAULT, docstringTarget,
+    0, 0, 0, 0, 0, 0, Target_methods, 0, 0, 0, 0, 0, 0, 0,
+    (initproc)Target_init
+};
+
+
+///@}
+//  -------------------------------------
+/// \name  Routine for orbit integration
+//  -------------------------------------
+///@{
 
 /// description of orbit function
 static const char* docstringOrbit =
@@ -8131,6 +7988,247 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
             PyTuple_SET_ITEM(result_tuple, t, PyArray_Return(result_arrays[t]));
         return result_tuple;
     }
+}
+
+
+///@}
+//  --------------------------------------------
+/// \name  Computation of Gauss-Hermite moments
+//  --------------------------------------------
+///@{
+
+/// description of ghMoments function
+static const char* docstringGhMoments =
+    "Compute the coefficients of Gauss-Hermite expansion for line-of-sight velocity "
+    "distribution functions represented by a B-spline, as used in the LOSVD Target model.\n"
+    "Named arguments:\n"
+    "  degree - degree of B-spline expansion (int, 0 to 3).\n"
+    "  gridv  - array of grid nodes in velocity that determine the B-spline; "
+    "should be the same as used in constructing the Target object.\n"
+    "  matrix - a 1d or 2d array with the amplitudes of B-spline expansion of LOSVD. "
+    "The number of columns in the matrix is numBasisFnc * numApertures: "
+    "the former is the number of amplitudes of B-spline representation of a single LOSVD, "
+    "equal to len(gridv)+degree-1; the latter is the number of separate regions in "
+    "the image plane, each with its own LOSVD. Note that numApertures is inferred as the number "
+    "of columns divided by the number of basis functions (itself known from gridv and degree). "
+    "If the matrix is two-dimensional, each row corresponds to a single component "
+    "of the model (e.g., an orbit) which has its LOSVD recorded in each aperture. "
+    "In the opposite case (one-dimensional array) these could be LOSVDs for the entire model "
+    "(e.g., constructed from an N-body snapshot or from observations) in each aperture. "
+    "Amplitudes of LOSVD representation for a single aperture are grouped together "
+    "(in other words, each component may be viewed as a 2d matrix with numApertures rows "
+    "and numBasisFnc columns, reshaped into a 1d array).\n"
+    "  ghorder - the order of Gauss-Hermite expansion, should be >=2.\n"
+    "  ghbasis (optional) - if provided, should be a 2d array with numApertures rows and 3 columns, "
+    "each row containing the parameters of the Gaussian that serves as the basis for expansion: "
+    "amplitude, center and width. \n"
+    "There are two different scenarios for using this routine. \n"
+    "The first is to construct both the expansion parameters (amplitude, center and width) "
+    "by finding a best-fit Gaussian for each of the input LOSVDs, and then use these parameters "
+    "to compute higher-order GH moments; in this case the input matrix is supposed to represent "
+    "the LOSVDs in each aperture for the entire model (i.e., has only one component), "
+    "and the argument 'ghbasis' is not provided.\n"
+    "The second scenario is to convert the LOSVDs for a multi-component model (e.g., produced by "
+    "the Target LOSVD object during orbit integration) into GH moments, reducing the number of "
+    "parameters needed to represent each component's LOSVD. In this case all components "
+    "naturally should use the same base parameters of the Gaussian (separate for each aperture, "
+    "but identical between components), so that a linear superposition of input LOSVDs "
+    "corresponds to the same linear superposition of GH moments. Hence the argument 'ghbasis' "
+    "should be provided.\n"
+    "  Returns: a 1d or 2d array (depending on the number of dimensions of the input matrix), "
+    "where each row contains the GH moments for each aperture, and the number of rows is equal "
+    "to the number of components (rows of the input matrix).\n"
+    "If 'ghbasis' argument was not provided, the output will contain also the parameters of "
+    "the best-fit Gaussian serving as the basis for the expansion, i.e. three numbers "
+    "(amplitude, center and width), followed by GH moments h_0..h_M, where M is the order "
+    "of expansion - in total M+4 numbers for each aperture (grouped together), "
+    "of which the first three can be later used as the 'ghbasis' argument for computing the moments "
+    "in a multi-component model. In this case, h_0=1, h_1=h_2=0 with high accuracy.\n"
+    "In the opposite case when 'ghbasis' is provided, the output for each aperture contains M+1 "
+    "moments h_0..h_M.\n";
+
+PyObject* ghMoments(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
+{
+    if(!onlyNamedArgs(args, namedArgs))
+       return NULL;
+
+    int degree = -1, ghorder = -1;
+    PyObject *gridv_obj = NULL, *mat_obj = NULL, *gh_obj = NULL;
+    static const char* keywords[] = {"degree", "gridv", "matrix", "ghorder", "ghbasis", NULL};
+    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "iOOi|O", const_cast<char**>(keywords),
+        &degree, &gridv_obj, &mat_obj, &ghorder, &gh_obj))
+        return NULL;
+
+    // order of Gauss-Hermite expansion
+    if(ghorder<0) {
+        PyErr_SetString(PyExc_ValueError, "ghMoments: order of Gauss-Hermite expansion should be >=0");
+        return NULL;
+    }
+
+    // degree of B-splines
+    if(degree<0 || degree>3) {
+        PyErr_SetString(PyExc_ValueError, "ghMoments: degree of interpolation may not exceed 3");
+        return NULL;
+    }
+
+    // grid in velocity space
+    std::vector<double> gridv = toDoubleArray(gridv_obj);
+    if(gridv.size() < 2) {
+        PyErr_SetString(PyExc_ValueError, "ghMoments: gridv must be an array with >= 2 nodes");
+        return NULL;
+    }
+    int numBasisFnc = (npy_intp)gridv.size() + degree - 1;  // number of B-spline basis functions
+
+    // matrix of B-spline amplitudes of LOSVD in each aperture (columns)
+    // for each element of the model (e.g. an orbit) (rows)
+    PyArrayObject *mat_arr = mat_obj?
+        (PyArrayObject*) PyArray_FROM_OTF(mat_obj, STORAGE_NUM_T, NPY_ARRAY_FORCECAST) : NULL;
+    npy_intp numApertures = -1;
+    if(mat_arr && (PyArray_NDIM(mat_arr) == 1 || PyArray_NDIM(mat_arr) == 2))
+        numApertures = PyArray_DIM(mat_arr, PyArray_NDIM(mat_arr)-1) / numBasisFnc;
+    if(!mat_arr || numApertures * numBasisFnc != PyArray_DIM(mat_arr, PyArray_NDIM(mat_arr)-1)) {
+        Py_XDECREF(mat_arr);
+        PyErr_SetString(PyExc_ValueError, ("Argument 'matrix' should be a 1d array "
+            "of length numApertures * numBasisFnc (the latter is " + utils::toString(numBasisFnc) +
+            " for the provided gridv and degree), or a 2d array with this number of columns").c_str());
+        return NULL;
+    }
+    int ndim = PyArray_NDIM(mat_arr);
+    npy_intp numComponents = ndim==1 ? 1 : PyArray_DIM(mat_arr, 0);
+
+    // parameters of Gauss-Hermite expansion(s), if provided
+    PyArrayObject *gh_arr = gh_obj? (PyArrayObject*) PyArray_FROM_OTF(gh_obj, NPY_DOUBLE, 0) : NULL;
+    if( gh_obj != NULL && (gh_arr == NULL || PyArray_NDIM(gh_arr) != 2 ||
+        PyArray_DIM(gh_arr, 0) != numApertures || PyArray_DIM(gh_arr, 1) != 3))
+    {
+        Py_XDECREF(gh_arr);
+        Py_DECREF(mat_arr);
+        PyErr_SetString(PyExc_ValueError,
+            "Argument 'ghbasis', if provided, should be a 2d array with 3 columns: "
+            "amplitude,center,width, and the number of rows equal to the number of apertures");
+        return NULL;
+    }
+
+    // prepare the output array of Gauss-Hermite moments (and possibly the parameters of GH expansion)
+    npy_intp size[2] = {numComponents, numApertures * (gh_arr ? ghorder+1 : ghorder+4)};
+    PyObject* output_arr = PyArray_SimpleNew(ndim, &size[2-ndim], STORAGE_NUM_T);
+    if(!output_arr) {
+        Py_XDECREF(gh_arr);
+        Py_DECREF(mat_arr);
+        return NULL;
+    }
+
+    volatile bool fail = false;
+    std::string errorMessage;
+    utils::CtrlBreakHandler cbrk;
+    // the procedure is different depending on whether the parameters of GH expansion are provided or not
+    if(gh_arr) {
+        // compute the GH moments for known (provided) parameters of expansion (amplitude,center,width).
+        // Note that although this loop is OpenMP-parallelized, it does not involve any calls
+        // to Python C API, nor it involves any operations that may invoke Python callback functions,
+        // so we do not need to release GIL (same applies to the other loop further down).
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static)
+#endif
+        for(npy_intp a=0; a<numApertures; a++) {
+            if(fail) continue;
+            try{
+                // obtain the matrix that converts the B-spline amplitudes into Gauss-Hermite moments
+                math::Matrix<double> ghmat(math::computeGaussHermiteMatrix(degree, gridv, ghorder,
+                    /*ampl  */ pyArrayElem<double>(gh_arr, a, 0),
+                    /*center*/ pyArrayElem<double>(gh_arr, a, 1),
+                    /*width */ pyArrayElem<double>(gh_arr, a, 2)));
+                std::vector<double> srcrow(numBasisFnc), dstrow(ghorder+1);  // temp storage
+                // loop over all rows of the input matrix (e.g. orbits)
+                for(npy_intp r=0; r<numComponents; r++) {
+                    // convert the section of one row of the input array, corresponding to
+                    // one aperture and one orbit, from StorageNumT to double
+                    for(int b=0; b<numBasisFnc; b++)
+                        srcrow[b] = ndim==1 ?
+                            pyArrayElem<galaxymodel::StorageNumT>(mat_arr,    a * numBasisFnc + b) :
+                            pyArrayElem<galaxymodel::StorageNumT>(mat_arr, r, a * numBasisFnc + b);
+                    // multiply the array of amplitudes by the conversion matrix
+                    math::blas_dgemv(math::CblasNoTrans, 1., ghmat, srcrow, 0., dstrow);
+                    // convert back to StorageNumT and write
+                    // to a section of one row of the result array
+                    for(int m=0; m<=ghorder; m++)
+                        (ndim==1 ?
+                        pyArrayElem<galaxymodel::StorageNumT>(output_arr,    a * (ghorder+1) + m) :
+                        pyArrayElem<galaxymodel::StorageNumT>(output_arr, r, a * (ghorder+1) + m) ) =
+                            static_cast<galaxymodel::StorageNumT>(dstrow[m]);
+                }
+            }
+            catch(std::exception& ex) {
+                errorMessage = ex.what();
+                fail = true;
+            }
+            if(cbrk.triggered()) {
+                errorMessage = cbrk.message();
+                fail = true;
+            }
+        }
+    } else {
+        // construct best-fit parameters of GH expansion (find amplitude,center,width)
+        // for each aperture and component, and then compute GH moments using these parameters
+        const npy_intp count = numApertures * numComponents;
+#ifdef _OPENMP
+#pragma omp parallel for schedule(dynamic,1)
+#endif
+        for(npy_intp ar=0; ar < count; ar++) {
+            if(fail) continue;
+            try{
+                int r = ar / numApertures, a = ar % numApertures;  // row and aperture indices
+                std::vector<double> srcrow(numBasisFnc);
+                for(int b=0; b<numBasisFnc; b++)
+                    srcrow[b] = ndim == 1 ?
+                        pyArrayElem<galaxymodel::StorageNumT>(mat_arr,    a * numBasisFnc + b) :
+                        pyArrayElem<galaxymodel::StorageNumT>(mat_arr, r, a * numBasisFnc + b);
+                shared_ptr<math::GaussHermiteExpansion> ghexp;
+                switch(degree) {
+                    case 0: ghexp.reset(new math::GaussHermiteExpansion(
+                        math::BsplineWrapper<0>(gridv, srcrow), ghorder));
+                        break;
+                    case 1: ghexp.reset(new math::GaussHermiteExpansion(
+                        math::BsplineWrapper<1>(gridv, srcrow), ghorder));
+                        break;
+                    case 2: ghexp.reset(new math::GaussHermiteExpansion(
+                        math::BsplineWrapper<2>(gridv, srcrow), ghorder));
+                        break;
+                    case 3: ghexp.reset(new math::GaussHermiteExpansion(
+                        math::BsplineWrapper<3>(gridv, srcrow), ghorder));
+                        break;
+                    default:  // shouldn't occur, we've checked degree beforehand
+                        assert(!"Invalid B-spline degree");
+                }
+                std::vector<double> dstrow(ghorder+4);
+                dstrow[0] = ghexp->ampl();    // overall amplitude
+                dstrow[1] = ghexp->center();  // center of the expansion
+                dstrow[2] = ghexp->width();   // width of the base gaussian
+                std::copy(ghexp->coefs().begin(), ghexp->coefs().end(), dstrow.begin()+3);
+                for(int m=0; m<=ghorder+3; m++)
+                    (ndim==1 ?
+                    pyArrayElem<galaxymodel::StorageNumT>(output_arr,    a * (ghorder+4) + m) :
+                    pyArrayElem<galaxymodel::StorageNumT>(output_arr, r, a * (ghorder+4) + m) ) =
+                        static_cast<galaxymodel::StorageNumT>(dstrow[m]);
+            }
+            catch(std::exception& ex) {
+                errorMessage = ex.what();
+                fail = true;
+            }
+            if(cbrk.triggered()) {
+                errorMessage = cbrk.message();
+                fail = true;
+            }
+        }
+    }
+    Py_XDECREF(gh_arr);
+    Py_DECREF(mat_arr);
+    if(fail) {
+        raisePythonException(errorMessage);
+        Py_DECREF(output_arr);
+        return NULL;
+    }
+    return output_arr;
 }
 
 
@@ -8856,7 +8954,7 @@ PyInit_agama(void)
     OrbitType.tp_new = PyType_GenericNew;
     if(PyType_Ready(&OrbitType) < 0) return NULL;
     Py_INCREFx(&OrbitType);
-    // deliberately not adding this class to the module
+    // deliberately not adding this class to the module - it cannot be created from a Python script
     OrbitTypePtr = &OrbitType;
 
     // if available, use a fancy progress bar for long operations

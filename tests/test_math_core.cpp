@@ -182,6 +182,30 @@ public:
 };
 #endif
 
+// another test case for integrateNdim - a function with an integrable (in D>=2) singularity
+template<int D>
+class test9Ndim: public math::IFunctionNdim{
+public:
+    test9Ndim() : exact(
+        D==2 ? 4*log(1+M_SQRT2) + 4*atanh(1/M_SQRT2) :
+        D==3 ? 24*asinh(1/M_SQRT2) - 2*M_PI : NAN /*not known*/)
+    {}
+    virtual void eval(const double x[], double result[]) const {
+        result[0] = 0;
+        for(int d=0; d<D; d++)
+            result[0] += pow_2(x[d]);
+        if(result[0]>0)  // else leave at 0 instead of infinity
+            result[0] = 1 / sqrt(result[0]);
+#ifdef _OPENMP
+#pragma omp atomic
+#endif
+        ++numEval;
+    }
+    virtual unsigned int numVars()   const { return D; }
+    virtual unsigned int numValues() const { return 1; }
+    const double exact;   // exact analytic value of the integral on [-1..1]^D
+};
+
 // test functions for estimating the accuracy of Gauss-Legendre integration
 class test_GL_powerlaw: public math::IFunctionNoDeriv{
 public:
@@ -792,6 +816,22 @@ int main()
         for(unsigned int i=0; i<points.rows(); i++)
             fout << points(i,0) << "\t" << points(i,1) << "\t" << points(i,2) << "\n";
     }
+
+#if 0   // these tests fail at the moment
+    numEval=0;
+    test9Ndim<2> fnc9a;
+    double xlow[3] = {-1,-1,-1}, xupp[3] = {1,1,1};
+    integrateNdim(fnc9a, xlow, xupp, toler, 10000, &result, &error);
+    std::cout << "Integrable singularity in 2d: integral = "<<result<<" +- "<<error<<
+        " (delta="<<(result-fnc9a.exact)<<"; neval="<<numEval<<")\n";
+    ok &= (result > 0 && error < 0.01 && fabs(result-fnc9a.exact) < error) || err();
+    numEval=0;
+    test9Ndim<3> fnc9b;
+    integrateNdim(fnc9b, xlow, xupp, toler, 10000, &result, &error);
+    std::cout << "Integrable singularity in 3d: integral = "<<result<<" +- "<<error<<
+        " (delta="<<(result-fnc9b.exact)<<"; neval="<<numEval<<")\n";
+    ok &= (result > 0 && error < 0.01 && fabs(result-fnc9b.exact) < error) || err();
+#endif
 
 #if 0
     // test the accuracy of fixed-order (n) Gauss-Legendre quadrature in integrating a power-law function in radius

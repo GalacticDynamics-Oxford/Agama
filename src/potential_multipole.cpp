@@ -61,6 +61,10 @@ static const double GRID_SAFETY_FACTOR = ROOT3_DBL_EPSILON;
 /// eliminate multipole terms whose relative amplitude is less than this number
 static const double EPS_COEF = 1e-10;
 
+/// min/max limits for coordinates; when squared, these underflow/overflow
+static const double SQRT_DBL_MIN = 1.4916681462400413e-154;
+static const double SQRT_DBL_MAX = 1.3407807929942597e+154;
+
 // Helper function to deduce symmetry from the list of non-zero coefficients;
 // combine the array of coefficients at different radii into a single array
 // and then call the corresponding routine from math::.
@@ -241,7 +245,7 @@ void computeSphHarmCoefs(const BaseDensityOrPotential& src,
         for(int indA=0; indA<numSamplesAngles; indA++) {
             double rad  = radii[indR];
             double z    = rad * trans.costheta(indA);
-            double R    = sqrt(rad*rad - z*z);
+            double R    = rad * sqrt(1 - pow_2(trans.costheta(indA)));
             double phi  = trans.phi(indA);
             points[indR * numSamplesAngles + indA] = coord::PosCyl(R, z, phi);
         }
@@ -1496,15 +1500,18 @@ double Multipole::densityCyl(const coord::PosCyl &pos, double /*time*/) const
 
 double Multipole::enclosedMass(double radius) const
 {
-    if(radius <= 1e-100)
+    if(radius <= SQRT_DBL_MIN)
         return 0;  // TODO: this may not be correct for a potential of a point mass!
     // use the l=0 harmonic term of dPhi/dr to estimate the spherically-averaged enclosed mass
-    if(radius == INFINITY)
-        radius = gridRadii.back() * 1e20;
+    if(radius >= SQRT_DBL_MAX)  // use the asymptotic expansion at a very large but finite radius
+        radius = gridRadii.back() * 1e100;
     const BasePotential& pot =
         radius <= gridRadii.front()* (1+GRID_SAFETY_FACTOR) ? *asymptInner :
         radius >= gridRadii.back() * (1-GRID_SAFETY_FACTOR) ? *asymptOuter : *impl;
     std::vector< std::vector<double> > coefs[2];  // Phi, dPhi
+    // note: it is quite wasteful to compute the entire set of harmonic coefficients
+    // when we only need one, but in the common case of using 2d spline interpolators in R,costheta,
+    // they represent terms with all values of l at fixed m, so one cannot retrieve the l=0 term easily
     computeSphHarmCoefs<BasePotential>(pot, ind,
         /*a single point in radius*/ std::vector<double>(1, radius),
         /*output*/ coefs);

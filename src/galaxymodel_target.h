@@ -116,10 +116,10 @@ class RuntimeFncTarget: public orbit::BaseRuntimeFnc {
     /// at the end of orbit integration
     double time;
 
+public:
     /// number of points taken from the trajectory during each timestep of the ODE solver
     static const int NUM_SAMPLES_PER_STEP = 10;
 
-public:
     RuntimeFncTarget(orbit::BaseOrbitIntegrator& orbint, const BaseTarget& _target, StorageNumT* _output) :
         BaseRuntimeFnc(orbint), target(_target), output(_output),
         datacube(target.newDatacube()), time(0.) {}
@@ -131,7 +131,7 @@ public:
         target.finalizeDatacube(datacube, output);  // now output contains un-normalized values
         if(time==0) return;
         const StorageNumT invtime = static_cast<StorageNumT>(1./time);
-        for(size_t i=0, size = target.numCoefs(); i<size; i++)
+        for(size_t i=0, size=target.numCoefs(); i<size; i++)
             output[i] *= invtime;
     }
 

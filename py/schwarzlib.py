@@ -369,10 +369,10 @@ def makeGridForTargetLOSVD(polygons, psf, psfwingfrac=0.99, psfcorefrac=0.2, pix
     Ymin = int(_numpy.floor(ymin / pix))
     Ymax = int(_numpy.ceil (ymax / pix))
     # if |Xmin| ~= Xmax, make the grid fully symmetric (this saves some cpu time), similarly for Y
-    if Xmin<0 and Xmax>0 and (abs(Xmin+Xmax) <= 3 or (-Xmin/Xmax>=0.8) and (-Xmin/Xmax<=1.25)):
+    if Xmin<0 and Xmax>0 and (abs(Xmin+Xmax) <= 3 or (-1.*Xmin/Xmax>=0.8) and (-1.*Xmin/Xmax<=1.25)):
         Xmax = max(Xmax, -Xmin)
         Xmin = -Xmax
-    if Ymin<0 and Ymax>0 and (abs(Ymin+Ymax) <= 3 or (-Ymin/Ymax>=0.8) and (-Ymin/Ymax<=1.25)):
+    if Ymin<0 and Ymax>0 and (abs(Ymin+Ymax) <= 3 or (-1.*Ymin/Ymax>=0.8) and (-1.*Ymin/Ymax<=1.25)):
         Ymax = max(Ymax, -Ymin)
         Ymin = -Ymax
     # sanity check
@@ -466,7 +466,7 @@ class DensityDataset:
         elif 'DENSITYCYLINDRICAL' in targetType.upper():
             ncons = len(gridr) * len(gridz)   # take only the m=0 harmonic term in the array of constraints
         elif 'DENSITYSPHHARM' == targetType.upper():
-            ncons = len(gridr)   # same but for the l=0,m=0 harmonic term only
+            ncons = len(gridr)+1   # same but for the l=0,m=0 harmonic term only
         else:
             ncons = 0    # unknown discretization scheme, should have failed at the earlier stage
         print('%s with %i constraints; total mass: %g; fraction of mass in %i density bins: %g' %
@@ -688,16 +688,17 @@ class KinemDatasetGH:
         v0    = ghm_val[:,0]
         sigma = ghm_val[:,1]
         self.ghbasis  = _numpy.column_stack(( self.aperture_mass / norm, v0, sigma ))
-        # constraint values: aperture masses and GH moments h_1..h_M, with h_1 = h_2 = 0
+        # constraint values: 0th column stands for aperture mass constraints (normalized to unity),
+        # remaining columns are GH moments h_1..h_M, with h_1 = h_2 = 0
         self.cons_val = _numpy.column_stack((
-            self.aperture_mass,
+            _numpy.ones(self.num_aper),
             ghm_val[:,0:2]*0,
             ghm_val[:,2:]
         )).reshape(-1)
         # constraint errors: translate errors in v0, sigma into errors in h_1,h_2
         self.cons_err = _numpy.column_stack((
-            self.aperture_mass_err,
-            ghm_err[:,0:2] / sigma[:,None] / 2**0.5,
+            _numpy.zeros(self.num_aper) + tolerance,  # fractional error on aperture mass
+            ghm_err[:,0:2] / sigma[:,None] / 2**0.5,  # errors on h_1, h_2
             ghm_err[:,2:]
         )).reshape(-1)
         # also store the original arrays (v,sigma,h_3...h_M) and their error estimates
@@ -717,15 +718,15 @@ class KinemDatasetGH:
         num_orbits = len(kinem_matrix)
         mod_bsint  = _agama.bsplineIntegrals(self.mod_degree, self.mod_gridv)
         return _numpy.dstack((
-            # 0th column is the contribution of each orbit to aperture masses
-            kinem_matrix.reshape(num_orbits, self.num_aper, self.num_bsplines).dot(mod_bsint),
+            # 0th column is the fractional contribution of each orbit to aperture masses, normalized to unity
+            kinem_matrix.reshape(num_orbits, self.num_aper, self.num_bsplines).dot(mod_bsint) / self.aperture_mass,
             # remaining columns are GH moments h_1..h_M computed in the observed GH basis
             # after rescaling the model velocity grid by sqrt(Upsilon) and
             # multiplying the values of coefficients by 1/sqrt(Upsilon)
             _agama.ghMoments(
             degree=self.mod_degree, gridv=self.mod_gridv * Upsilon**0.5,
-            matrix=kinem_matrix, ghorder=self.num_cons, ghbasis=self.ghbasis).
-            reshape(num_orbits, self.num_aper ,  self.num_cons+1)[:,:,1:] * Upsilon**-0.5
+            matrix=kinem_matrix * Upsilon**-0.5, ghorder=self.num_cons, ghbasis=self.ghbasis).
+            reshape(num_orbits, self.num_aper ,  self.num_cons+1)[:,:,1:]
         )). reshape(num_orbits, self.num_aper * (self.num_cons+1))
 
     def getPenalty(self, model_losvd, Upsilon):
@@ -1008,7 +1009,8 @@ def runModel(datasets, potential, ic, Omega=0, intTime=100.0,
         # prepare the matrix equation
         matrix    = [ ds.getOrbitMatrix(mat, Upsilon).T for ds,mat in zip(datasets, matrices) ]
         rhs       = [ ds.cons_val/mult for ds in datasets ]
-        pen_cons  = [ 2*ds.cons_err**-2 for ds in datasets ]
+        with _numpy.errstate(all='ignore'):  # mute the warning about division by zero if cons_err==0
+            pen_cons  = [ 2*ds.cons_err**-2 for ds in datasets ]
         # regularization penalty
         numOrbits = len(ic)
         totalMass = 1.0  # weights are normalized to total mass of unity
@@ -1219,13 +1221,13 @@ def runPlot(datasets,                           # list of [kinematic] datasets t
         I=archive['cosincl']
         weights=archive['weights'][archiveIndex]
         if this.axo is None:  # create axes on the first call
-            this.axo=fig.add_axes([0.83, 0.06, 0.165, 0.43])
-            axa=fig.add_axes([0.995,0.15, 0.005, 0.25])  # colorbar showing the third variable
+            this.axo=fig.add_axes([0.83, 0.09, 0.165, 0.40])
+            axa=fig.add_axes([0.995, 0.14, 0.005, 0.30])  # colorbar showing the third variable
             axa.imshow(_numpy.linspace(0,1,256).reshape(-1,1), extent=[0,1,-1,1], origin='lower', interpolation='nearest', aspect='auto', cmap='mist')
             axa.set_xticks([])
             axa.set_ylabel('$L_z/L$', fontsize=10, labelpad=-10)
-            this.axp=fig.add_axes([0.83, 0.56, 0.165, 0.43], sharex=this.axo)
-            axa=fig.add_axes([0.995,0.65, 0.005, 0.25])  # colorbar
+            this.axp=fig.add_axes([0.83, 0.59, 0.165, 0.40], sharex=this.axo)
+            axa=fig.add_axes([0.995, 0.64, 0.005, 0.30])  # colorbar
             axa.imshow(_numpy.linspace(0,1,256).reshape(-1,1), extent=[0,1,0,1], origin='lower', interpolation='nearest', aspect='auto', cmap='mist')
             axa.set_xticks([])
             axa.set_ylabel(r'$[L/L_\mathrm{circ}(E)]^2$', fontsize=10, labelpad=-2)
@@ -1247,11 +1249,13 @@ def runPlot(datasets,                           # list of [kinematic] datasets t
         this.axo.set_xscale('log')
         this.axo.set_xlim(xlim)
         this.axo.set_ylim(0, 1)
+        this.axo.set_yticks(_numpy.linspace(0, 1, 6))
         this.axo.set_xlabel(r'$R_\mathrm{circ}(E)$', labelpad=-2, fontsize=12)
         this.axo.set_ylabel(r'$[L/L_\mathrm{circ}(E)]^2$', labelpad=0, fontsize=12)
         this.axp.set_xscale('log')
         this.axp.set_xlim(xlim)
         this.axp.set_ylim(-1, 1)
+        this.axp.set_yticks(_numpy.linspace(-1, 1, 5))
         this.axp.set_xlabel(r'$R_\mathrm{circ}(E)$', labelpad=-2, fontsize=12)
         this.axp.set_ylabel(r'$L_z/L$', labelpad=-5, fontsize=12)
         this.ic = archive['ic'][use]
@@ -1298,7 +1302,7 @@ def runPlot(datasets,                           # list of [kinematic] datasets t
             fig.delaxes(this.orbitplot)
             this.orbitplot = None
         if this.losvdplot is None:
-            this.losvdplot = fig.add_axes([0.03, 0.06, 0.165, 0.34])
+            this.losvdplot = fig.add_axes([0.03, 0.07, 0.165, 0.36])
             this.losvdplot.set_yticklabels([])
             this.losvdplot.set_xlim(min(plot_gridv), max(plot_gridv))
             this.losvdplot.set_xlabel('v')
@@ -1340,8 +1344,8 @@ def runPlot(datasets,                           # list of [kinematic] datasets t
         prob = _numpy.cumsum(this.weights[indOrbit])
         prob /= prob[-1]
         indSel = indOrbit[_numpy.searchsorted(prob, _numpy.random.random())]
-        this.oro.set_data(this.sco.get_offsets()[indSel])
-        this.orp.set_data(this.scp.get_offsets()[indSel])
+        this.oro.set_data(_numpy.atleast_2d(this.sco.get_offsets()[indSel]).T)
+        this.orp.set_data(_numpy.atleast_2d(this.scp.get_offsets()[indSel]).T)
         print('Selected orbit #%i' % indSel +
             (' from a list of %i orbits' % len(indOrbit) if len(indOrbit)>1 else ''))
         if potential is None: return
@@ -1352,7 +1356,7 @@ def runPlot(datasets,                           # list of [kinematic] datasets t
             this.ind_aper  = None
         if this.orbitplot is None:
             try:
-                this.orbitplot = fig.add_axes([0.03, 0.06, 0.165, 0.34], projection='3d')
+                this.orbitplot = fig.add_axes([0.03, 0.06, 0.165, 0.37], projection='3d')
             except:
                 traceback.print_exc()
                 return
@@ -1395,7 +1399,7 @@ def runPlot(datasets,                           # list of [kinematic] datasets t
 
 
     # main section of the runPlot routine
-    fig = matplotlib.pyplot.figure(figsize=(18,8), dpi=75)
+    fig = matplotlib.pyplot.figure(figsize=(17, 7), dpi=75)
     fig.canvas.mpl_connect('pick_event', onclick)
 
     # parse and combine all kinematic datasets
@@ -1455,16 +1459,16 @@ def runPlot(datasets,                           # list of [kinematic] datasets t
     if v0err    is None: v0err   = max(ghm_err[:,0])
     if sigmaerr is None: sigmaerr= max(ghm_err[:,1])
     panel_params = [
-        dict(title=r'$v_0$',   data_range=v0lim,   error_range=v0err,   extent=[0.23, 0.56, 0.165, 0.43]),
-        dict(title=r'$\sigma$',data_range=sigmalim,error_range=sigmaerr,extent=[0.23, 0.06, 0.165, 0.43]),
-        dict(title=r'$h_3$',   data_range=hlim,    error_range=herr,    extent=[0.43, 0.56, 0.165, 0.43]),
-        dict(title=r'$h_4$',   data_range=hlim,    error_range=herr,    extent=[0.43, 0.06, 0.165, 0.43]),
-        dict(title=r'$h_5$',   data_range=hlim,    error_range=herr,    extent=[0.63, 0.56, 0.165, 0.43]),
-        dict(title=r'$h_6$',   data_range=hlim,    error_range=herr,    extent=[0.63, 0.06, 0.165, 0.43]),
+        dict(title=r'$v_0$',   data_range=v0lim,   error_range=v0err,   extent=[0.24, 0.59, 0.165, 0.40]),
+        dict(title=r'$\sigma$',data_range=sigmalim,error_range=sigmaerr,extent=[0.24, 0.09, 0.165, 0.40]),
+        dict(title=r'$h_3$',   data_range=hlim,    error_range=herr,    extent=[0.43, 0.59, 0.165, 0.40]),
+        dict(title=r'$h_4$',   data_range=hlim,    error_range=herr,    extent=[0.43, 0.09, 0.165, 0.40]),
+        dict(title=r'$h_5$',   data_range=hlim,    error_range=herr,    extent=[0.62, 0.59, 0.165, 0.40]),
+        dict(title=r'$h_6$',   data_range=hlim,    error_range=herr,    extent=[0.62, 0.09, 0.165, 0.40]),
     ]
 
     ##### four buttons determining which map to display #####
-    radioplot = fig.add_axes([0.03, 0.4, 0.165, 0.1])
+    radioplot = fig.add_axes([0.03, 0.43, 0.165, 0.1])
     radioplot.set_axis_off()
     buttons = [
         matplotlib.patches.Rectangle((-0.50, 0.05), 0.49,0.4, color='#60f080', picker=True, ec='k'),
@@ -1522,13 +1526,13 @@ def runPlot(datasets,                           # list of [kinematic] datasets t
     plotMaps()
     # add colorbars to data maps
     for patch, param in zip(patchcoll, panel_params):
-        cax = fig.add_axes([param['extent'][0], param['extent'][1]-0.035, param['extent'][2], 0.01])
+        cax = fig.add_axes([param['extent'][0], param['extent'][1]-0.05, param['extent'][2], 0.01])
         fig.colorbar(patch, cax=cax, orientation='horizontal', ticks=matplotlib.ticker.MaxNLocator(6))
 
     ##### likelihood surface #####
     if len(aval)>0:
         print('%i models available' % len(aval))
-        ax = fig.add_axes([0.03, 0.56, 0.165, 0.43])
+        ax = fig.add_axes([0.03, 0.59, 0.165, 0.40])
         modelgrid = ax.plot(aval, bval, 'o', c='g', ms=5, picker=5, mew=0, alpha=0.75)[0]
         this.selected  = ax.plot([_numpy.nan], [_numpy.nan], marker='o', c='r', ms=8, mew=0)[0]
         this.modellabel= ax.text(0.01, 0.01, '', color='r', ha='left', va='bottom', transform=ax.transAxes, fontsize=10)
@@ -1555,7 +1559,8 @@ def runPlot(datasets,                           # list of [kinematic] datasets t
             ax.contourf(a, b, c, cntr, cmap='hell_r', vmin=0, vmax=deltaChi2lim, alpha=0.75)
             ax.clabel(ax.contour(a, b, c, cntr, cmap='Blues_r', vmin=0, vmax=deltaChi2lim), fmt='%.0f', fontsize=10, inline=1)
             # marginalized chi^2 as a function of the variable on the horizontal axis
-            cmarg = -2*_numpy.log(_numpy.sum( _numpy.exp(-0.5*_numpy.where(c==c, c, _numpy.inf)), axis=0))
+            with _numpy.errstate(all='ignore'):
+                cmarg = -2*_numpy.log(_numpy.sum( _numpy.exp(-0.5*_numpy.where(c==c, c, _numpy.inf)), axis=0))
             ax.plot(a[0], (cmarg-_numpy.nanmin(cmarg))/deltaChi2lim, color='r', transform=ax.get_xaxis_transform())
             for itick in range(5):
                 ax.text(1.01, itick/5.0, '%.0f' % (itick/5.0*deltaChi2lim), color='r',
