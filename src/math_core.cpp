@@ -166,12 +166,19 @@ double unwrapAngle(double x, double xprev)
 
 void sincos(double x, double& s, double& c)
 {
-    double y = x>=0 ? x : -x;     // fabs(x)
-    double z = x>=0 ? 1 : -1;     // sign(x)
+    double y = fabs(x);
     long quad = long(4/M_PI * y); // floor(...), non-negative (!!no overflow check!!)
     quad = (quad+1) >> 1;         // 0 => 0, 1 => 1, 2 => 1, 3 => 2, 4 => 2, 5 => 3, etc.
-    y -= M_PI/2 * quad;           // bring the range to [-pi/4 .. pi/4];
-    // note that multiples of M_PI/2 are exactly mapped to zero (this is a deliberate tweak).
+    // range reduction to [-pi/4 .. pi/4]
+#if 1
+    // in this variant, multiples of M_PI/2 are exactly mapped to zero (this is a deliberate tweak)
+    y -= M_PI/2 * quad;
+#else
+    // a more accurate expression, but it leaves sin(M_PI)!=0, which we'd like to banish
+    y = ((y - quad * 1.57079631090164185) - quad * 1.58932547122958567e-08) - quad * 6.12323399573676604e-17;
+#endif
+    int q13 = quad & 1, q02 = 1 - q13;
+    int signc = 1 - (quad & 2), signs = std::signbit(x) ? -signc : signc;
     double y2 = y * y;
     // use a Chebyshev approximation for sin and cos on this interval
     double sy = y + y * (((((
@@ -181,23 +188,60 @@ void sincos(double x, double& s, double& c)
         -1.9841269829589539e-4) * y2
         +8.3333333333221186e-3) * y2
         -0.1666666666666663073) * y2;
-    double cy = 1.0 + (((((
-        +2.064357075039214e-09  * y2
-        -2.755549453909573e-07) * y2
-        +2.480158051577225e-05) * y2
-        -0.0013888888877062660) * y2
-        +0.0416666666665909000) * y2
-        -0.5000000000000000000) * y2;
-    // assign the output values, depending on the quadrant (also change the sign of sin(x) if x<0)
-    switch(quad & 3) {
-        case 0: s = sy * z; c = cy; return;
-        case 1: s = cy * z; c =-sy; return;
-        case 2: s =-sy * z; c =-cy; return;
-        case 3: s =-cy * z; c = sy; return;
-        default: s=NAN; c=NAN; /*shouldn't occur*/
-    }
+    double cy = 1.0 + ((((((
+        -1.1358536521387682e-11 * y2
+        +2.0875700841974730e-9) * y2
+        -2.7557314179296740e-7) * y2
+        +2.4801587288851704e-5) * y2
+        -0.0013888888888873056) * y2
+        +0.0416666666666665950) * y2
+        -0.5) * y2;
+    // assign the output values, depending on the quadrant
+    s = (q02 * sy + q13 * cy) * signs;
+    c = (q02 * cy - q13 * sy) * signc;
 }
 
+// rational approximation for |x| <= 1, accurate to 5e-17(rms) / 2e-16(max)
+// - somewhat worse than standard atan, but faster
+inline double atan1(double x)
+{
+    double x2 = x*x,
+    num = -403.11710541978266 +
+    x2 * (-902.59989673314130 +
+    x2 * (-707.35355100686270 +
+    x2 * (-230.47304101738868 +
+    x2 * (-28.595211396994470 +
+    x2 *  -0.9023747369388881)))),
+    den = 1209.3513162593547 +
+    x2 * (3433.4104799543807 +
+    x2 * (3663.8135197609940 +
+    x2 * (1821.3627056982116 +
+    x2 * (423.04454079463840 +
+    x2 * (39.917377889601520 + x2 )))));
+    return x * x2 * (num/den) + x;  // ONLY in that order!! x * (1 + x2 * num/den) is _much_ worse
+}
+
+double atan(double x)
+{
+    bool bigx = x>1 || x<-1;
+    double res = atan1(bigx ? -1/x : x);
+    if(bigx)
+        res +=  x<0 ? -0.5*M_PI : 0.5*M_PI;
+    return res;
+}
+
+double atan2(double y, double x)
+{
+    if(y==0)  // correct quadrant for all combinations of x=+-0 and/or y=+-0
+        return std::copysign(M_PI * std::signbit(x), y);
+    bool negx = x<0;
+    double signy = y>=0 ? 1 : -1, absy = y * signy, absx = negx ? -x : x;
+    bool ybigger = absy > absx;
+    double res = atan1(ybigger ? -x/y : y/x);
+    if(ybigger)   res += 0.5*M_PI * signy;
+    else if(negx) res += M_PI * signy;
+    return res;
+}
 
 template<typename NumT>
 ptrdiff_t binSearch(const NumT x, const NumT arr[], size_t size)
@@ -622,7 +666,8 @@ namespace {  // internal
 template<int N>
 inline double polishRoot(const double a[N+1], double x)
 {
-    for(int k=0; k<=N; k++) {
+    double prevf = INFINITY;
+    for(int k=0; k<=N*2; k++) {
         double X = fabs(x);
         double f = a[N], df = a[N] * N, d2f = a[N] * N * (N-1), e = 0.5 * fabs(a[N]);
         for(int i=N-1; i>=0; i--) {
@@ -633,13 +678,15 @@ inline double polishRoot(const double a[N+1], double x)
             if(i>=2)
                 d2f = x * d2f + a[i] * i * (i-1);
         }
-        e = (e - 0.5 * fabs(f)) * DBL_EPSILON;
-        if(fabs(f) <= e)
-            break;  // can't get any better than the roundoff error
+        double absf = fabs(f);
+        e = (e - 0.5 * absf) * DBL_EPSILON;
+        if(absf <= e || absf > prevf)
+            break;  // can't get any better than the roundoff error, or the method diverges
         double dx = -f * df / (df * df - 0.5 * f * d2f);  // Halley's method
         x += dx;
         if(fabs(dx) < X * SQRT_DBL_EPSILON)
             break;  // next iteration would make the correction smaller than roundoff error
+        prevf = absf;
     }
     return x;
 }

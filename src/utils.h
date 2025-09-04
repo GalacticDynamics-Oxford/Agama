@@ -22,7 +22,8 @@ namespace utils {
 
 /// level of verbosity for logging messages
 enum VerbosityLevel {
-    VL_MESSAGE = 0,   ///< information messages that are always printed
+    VL_DISABLE = -1,  ///< same as the default setting, but suppress the progress indicator in Python
+    VL_MESSAGE = 0,   ///< information messages that are always printed (default)
     VL_WARNING = 1,   ///< important but non-critical warnings indicating possible problems
     VL_DEBUG   = 2,   ///< ordinary debugging messages
     VL_VERBOSE = 3,   ///< copious amount of debugging messages and various data written to text files

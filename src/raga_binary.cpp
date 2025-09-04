@@ -133,7 +133,7 @@ bool RuntimeBinary::processTimestep(double tbegin, double timestep)
     enc.deltaE  += Eend  - Ebegin;
     enc.deltaLz += Lzend - Lzbegin - Lztorque;
     enc.costheta = ptend.vz / sqrt(pow_2(ptend.vx) + pow_2(ptend.vy) + pow_2(ptend.vz));
-    enc.phi      = atan2(ptend.vy, ptend.vx);
+    enc.phi      = math::atan2(ptend.vy, ptend.vx);
 
     return true;
 }

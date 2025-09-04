@@ -30,14 +30,14 @@ void evalIsochrone(
         // below are quantities that depend on position along the orbit
         double k1   = point.r * point.vr;
         double k2   = J0 - M * rb / J0;
-        double psi  = atan2(pointCyl.z * L,  -pointCyl.R * point.vtheta * point.r);
-        double chi  = atan2(pointCyl.z * point.vphi, -point.vtheta * point.r);
-        double eta  = atan2(k1, k2);                         // eccentric anomaly
+        double psi  = math::atan2(pointCyl.z * L,  -pointCyl.R * point.vtheta * point.r);
+        double chi  = math::atan2(pointCyl.z * point.vphi, -point.vtheta * point.r);
+        double eta  = math::atan2(k1, k2);                         // eccentric anomaly
         double sineta     = k1 / sqrt(k1*k1 + k2*k2);        // sin(eta)
         double tanhalfeta = eta==0 ? 0 : -k2/k1 + 1/sineta;  // tan(eta/2)
         ang->thetar   = math::wrapAngle(eta - sineta * ecc );
         ang->thetaz   = math::wrapAngle(psi + 0.5 * (1 + L/L1) * (ang->thetar - (eta<0 ? 2*M_PI : 0))
-                      - atan(fac1 * tanhalfeta) - atan(fac2 * tanhalfeta) * L/L1 );
+                      - math::atan(fac1 * tanhalfeta) - math::atan(fac2 * tanhalfeta) * L/L1 );
         ang->thetaphi = math::wrapAngle(point.phi - chi + math::sign(Lz) * ang->thetaz);
         if(pointCyl.z==0 && pointCyl.vz==0)  // if Jz=0, the value of theta_z is meaningless
             ang->thetaz = 0;
@@ -80,11 +80,11 @@ coord::PosVelCyl mapIsochrone(
     double ra = 1 - ecc * coseta;   // Kepler problem:  r / a = 1 - e cos(eta)
     double tanhalfeta = coseta==-1 ? INFINITY : sineta / (1 + coseta);
     double thetar   = aa.thetar - (eta>M_PI ? 2*M_PI : 0);
-    double psi1     = atan(fac1 * tanhalfeta);
-    double psi2     = atan(fac2 * tanhalfeta);
+    double psi1     = math::atan(fac1 * tanhalfeta);
+    double psi2     = math::atan(fac2 * tanhalfeta);
     double psi      = aa.thetaz - LL1 * thetar + psi1 + psi2 * L/L1;
     math::sincos(psi, sinpsi, cospsi);
-    double chi      = aa.Jz != 0 ? atan2(absJphi * sinpsi, L * cospsi) : psi;
+    double chi      = aa.Jz != 0 ? math::atan2(absJphi * sinpsi, L * cospsi) : psi;
     double sini     = sqrt(1 - pow_2(aa.Jphi / L)); // inclination angle of the orbital plane
     double costheta = sini * sinpsi;                // z/r
     double sintheta = sqrt(1 - pow_2(costheta));    // R/r is always non-negative

@@ -59,7 +59,7 @@ template<> PosCar toPos(const PosSph& p, const Car) {
     return PosCar(mul(p.r, sintheta*cosphi), mul(p.r, sintheta*sinphi), mul(p.r, costheta));
 }
 template<> PosCyl toPos(const PosCar& p, const Cyl) {
-    return PosCyl(sqrt(pow_2(p.x) + pow_2(p.y)), p.z, atan2(p.y, p.x));
+    return PosCyl(sqrt(pow_2(p.x) + pow_2(p.y)), p.z, math::atan2(p.y, p.x));
 }
 template<> PosCyl toPos(const PosSph& p, const Cyl) {
     double sintheta, costheta;
@@ -68,10 +68,10 @@ template<> PosCyl toPos(const PosSph& p, const Cyl) {
 }
 template<> PosSph toPos(const PosCar& p, const Sph) {
     return PosSph(sqrt(pow_2(p.x)+pow_2(p.y)+pow_2(p.z)),
-        atan2(sqrt(pow_2(p.x) + pow_2(p.y)), p.z), atan2(p.y, p.x));
+        math::atan2(sqrt(pow_2(p.x) + pow_2(p.y)), p.z), math::atan2(p.y, p.x));
 }
 template<> PosSph toPos(const PosCyl& p, const Sph) {
-    return PosSph(sqrt(pow_2(p.R) + pow_2(p.z)), atan2(p.R, p.z), p.phi);
+    return PosSph(sqrt(pow_2(p.R) + pow_2(p.z)), math::atan2(p.R, p.z), p.phi);
 }
 template<> PosCyl toPos(const PosProlSph& p, const Cyl) {
     if(fabs(p.nu)>p.coordsys.Delta2 || p.lambda<p.coordsys.Delta2)
@@ -119,7 +119,7 @@ PosCyl toPosDeriv(const PosCar& p, PosDerivT<Car, Cyl>* deriv, PosDeriv2T<Car, C
         deriv2->d2phidy2 =-deriv2->d2phidx2;
         deriv2->d2phidxdy=(pow_2(sinphi)-pow_2(cosphi))/R2;
     }
-    return PosCyl(R, p.z, atan2(p.y, p.x));
+    return PosCyl(R, p.z, math::atan2(p.y, p.x));
 }
 
 template<>
@@ -160,7 +160,7 @@ PosSph toPosDeriv(const PosCar& p, PosDerivT<Car, Sph>* deriv, PosDeriv2T<Car, S
         deriv2->d2phidy2=-deriv2->d2phidx2;
         deriv2->d2phidxdy=(y2-x2)/pow_2(R2);
     }
-    return PosSph(r, atan2(R, p.z), atan2(p.y, p.x));
+    return PosSph(r, math::atan2(R, p.z), math::atan2(p.y, p.x));
 }
 
 template<>
@@ -204,7 +204,7 @@ PosSph toPosDeriv(const PosCyl& p, PosDerivT<Cyl, Sph>* deriv, PosDeriv2T<Cyl, S
         deriv2->d2thetadz2=-deriv2->d2thetadR2;
         deriv2->d2thetadRdz=(pow_2(sintheta)-pow_2(costheta))*pow_2(rinv);
     }
-    return PosSph(r, atan2(p.R, p.z), p.phi);
+    return PosSph(r, math::atan2(p.R, p.z), p.phi);
 }
 
 template<>
@@ -476,11 +476,11 @@ template<> PosVelCar toPosVel(const PosVelSph& p, const Car) {
 template<> PosVelCyl toPosVel(const PosVelCar& p, const Cyl) {
     const double R=sqrt(pow_2(p.x) + pow_2(p.y));
     if(R==0)  // determine phi from vy/vx rather than y/x
-        return PosVelCyl(R, p.z, atan2(p.vy, p.vx), sqrt(pow_2(p.vx) + pow_2(p.vy)), p.vz, 0);
+        return PosVelCyl(R, p.z, math::atan2(p.vy, p.vx), sqrt(pow_2(p.vx) + pow_2(p.vy)), p.vz, 0);
     const double cosphi = p.x / R, sinphi = p.y / R;
     const double vR   = p.vx * cosphi + p.vy * sinphi;
     const double vphi =-p.vx * sinphi + p.vy * cosphi;
-    return PosVelCyl(R, p.z, atan2(p.y, p.x), vR, p.vz, vphi);
+    return PosVelCyl(R, p.z, math::atan2(p.y, p.x), vR, p.vz, vphi);
 }
 
 template<> PosVelCyl toPosVel(const PosVelSph& p, const Cyl) {
@@ -497,9 +497,9 @@ template<> PosVelSph toPosVel(const PosVelCar& p, const Sph) {
     const double r2 = R2 + pow_2(p.z), r = sqrt(r2), invr = 1/r;
     if(R==0) {  // point along the z axis - determine phi from velocity rather than position
         const double vR = sqrt(pow_2(p.vx) + pow_2(p.vy));
-        const double phi = atan2(p.vy, p.vx);
+        const double phi = math::atan2(p.vy, p.vx);
         if(p.z==0)  // point at origin - an even more special case
-            return PosVelSph(0, atan2(vR, p.vz), phi, sqrt(pow_2(vR) + pow_2(p.vz)), 0, 0);
+            return PosVelSph(0, math::atan2(vR, p.vz), phi, sqrt(pow_2(vR) + pow_2(p.vz)), 0, 0);
         return PosVelSph(r, p.z>=0 ? 0 : M_PI, phi,
             p.vz * (p.z>=0 ? 1 : -1), vR * (p.z>=0 ? 1 : -1), 0);
     }
@@ -507,19 +507,19 @@ template<> PosVelSph toPosVel(const PosVelCar& p, const Sph) {
     const double vr     = (temp + p.z * p.vz) * invr;
     const double vtheta = (temp * p.z * invR - p.vz * R) * invr;
     const double vphi   = (p.x * p.vy - p.y * p.vx) * invR;
-    return PosVelSph(r, atan2(R, p.z), atan2(p.y, p.x), vr, vtheta, vphi);
+    return PosVelSph(r, math::atan2(R, p.z), math::atan2(p.y, p.x), vr, vtheta, vphi);
 }
 
 template<> PosVelSph toPosVel(const PosVelCyl& p, const Sph) {
     const double r=sqrt(pow_2(p.R) + pow_2(p.z));
     if(r==0) {
-        return PosVelSph(0, atan2(p.vR, p.vz), p.phi, sqrt(pow_2(p.vR) + pow_2(p.vz)), 0, 0);
+        return PosVelSph(0, math::atan2(p.vR, p.vz), p.phi, sqrt(pow_2(p.vR) + pow_2(p.vz)), 0, 0);
     }
     const double invr = 1./r;
     const double costheta = p.z * invr, sintheta = p.R * invr;
     const double vr = p.vR * sintheta + p.vz * costheta;
     const double vtheta = p.vR * costheta - p.vz * sintheta;
-    return PosVelSph(r, atan2(p.R, p.z), p.phi, vr, vtheta, p.vphi);
+    return PosVelSph(r, math::atan2(p.R, p.z), p.phi, vr, vtheta, p.vphi);
 }
 
 template<> PosVelProlSph toPosVel(const PosVelCyl& from, const ProlSph cs) {
@@ -1031,15 +1031,15 @@ void Orientation::toEulerAngles(double& alpha, double& beta, double& gamma) cons
     // beta is between 0 and pi; sin(beta) >= 0,
     // and while beta=acos(mat[8]) is mathematically correct, it has poor accuracy
     // when beta is close to 0 or pi; the alternative formula with atan2 works in all cases.
-    beta  = atan2(sqrt(pow_2(mat[2]) + pow_2(mat[5])), mat[8]);
+    beta  = math::atan2(sqrt(pow_2(mat[2]) + pow_2(mat[5])), mat[8]);
     if(mat[2] == 0 && mat[5] == 0 && mat[6] == 0 && mat[7] == 0) {
         // degenerate case: beta=0 or beta=pi;
         // in this case we can determine only the sum or the difference of the other two angles
         alpha = 0;
-        gamma = atan2(mat[1], mat[0]) * (mat[8]>0 ? 1 : -1);
+        gamma = math::atan2(mat[1], mat[0]) * (mat[8]>0 ? 1 : -1);
     } else {
-        gamma = atan2(mat[2], mat[5]);
-        alpha = atan2(mat[6],-mat[7]);
+        gamma = math::atan2(mat[2], mat[5]);
+        alpha = math::atan2(mat[6],-mat[7]);
     }
 }
 

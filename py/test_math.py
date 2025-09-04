@@ -23,7 +23,8 @@ valI,errI,_ = agama.integrateNdim(fnc, 2, maxeval=50000)
 exact =  (2/numpy.pi)**2 * 83./165
 print("N-dimensional integration: result=%f +- %f (exact value: %f)" % (valI, errI, exact))
 
-arr,valS,errS,_ = agama.sampleNdim(fnc, 50000, [-1,1], [0,2])
+arr,weights,errS,_ = agama.sampleNdim(fnc, 50000, [-1,1], [0,2])
+valS = numpy.sum(weights)
 print("N-dimensional sampling: result=%f +- %f" % (valS, errS))
 
 ### shows a pretty checkerboard picture - samples drawn from the given function

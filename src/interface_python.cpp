@@ -65,7 +65,7 @@
 #include "utils.h"
 #include "utils_config.h"
 // text string embedded into the python module as the __version__ attribute (including Github commit number)
-#define AGAMA_VERSION "1.0.153 compiled on " __DATE__
+#define AGAMA_VERSION "1.0.154 compiled on " __DATE__
 
 // older versions of numpy have different macro names
 // (will need to expand this list if other similar macros are used in the code)
@@ -338,6 +338,8 @@ public:
     */
     void update(Py_ssize_t numCompleted)
     {
+        if(utils::verbosityLevel <= utils::VL_DISABLE)
+            return;  // suppress the progress indication altogether
 #ifdef _OPENMP
 #pragma omp atomic
 #endif
@@ -442,8 +444,7 @@ bool checkCallable(PyObject* fnc, int dim)
         PyObject* result = PyObject_CallFunctionObjArgs(fnc, args, NULL);
         Py_DECREF(args);
         if(result == NULL) {
-            PyErr_Print();
-            return false;
+            return false;  // callable but incorrect; keep the error message set by the above call
         }
         bool success = false;
         if(PyArray_Check(result)) {
@@ -451,12 +452,15 @@ bool checkCallable(PyObject* fnc, int dim)
             success  = PyArray_NDIM((PyArrayObject*) result)==1 &&
                 PyArray_DIM((PyArrayObject*) result, 0) == Npoints &&
                 (type==NPY_FLOAT || type==NPY_DOUBLE || type==NPY_BOOL);
-        }
+            if(!success)  // callable but incorrect result - report this
+                PyErr_SetString(PyExc_TypeError, "Invalid array returned by the user-provided function");
+        } else
+            PyErr_SetString(PyExc_TypeError, "User-provided function should return an array");
         Py_DECREF(result);
         return success;
     }
     else
-        return false;  // not a callable
+        return false;  // not a callable, no error is set
 }
 
 /// return a string representation of a Python object
@@ -834,6 +838,8 @@ public:
 /// (either a KeyboardInterrupt or a generic RuntimeError)
 void raisePythonException(const char* message, const char* prefix=NULL)
 {
+    if(PyErr_Occurred())  // if a Python exception has already been raised, keep it
+        return;
     PyErr_SetString(
         message == utils::CtrlBreakHandler::message() ? PyExc_KeyboardInterrupt : PyExc_RuntimeError,
         prefix ? (std::string(prefix) + message).c_str() : message);
@@ -1945,7 +1951,10 @@ int Density_init(DensityObject* self, PyObject* args, PyObject* namedArgs)
                 "(cannot mix positional and named arguments), type help(Density) for details");
         if(PyErr_Occurred())
             return -1;
-        assert(self->dens);
+        else if(!self->dens) {
+            PyErr_SetString(PyExc_ValueError, "Invalid arguments passed to the constructor");
+            return -1;
+        }
         FILTERMSG(utils::VL_DEBUG, "Agama", "Created "+std::string(self->dens->name())+
             " density at "+utils::toString(self->dens.get()));
         unitsWarning = true;  // any subsequent call to setUnits() will raise a warning
@@ -2182,12 +2191,13 @@ PyObject* Density_export(PyObject* self, PyObject* args)
 /// sample the density profile with points
 PyObject* Density_sample(PyObject* self, PyObject* args, PyObject* namedArgs)
 {
-    static const char* keywords[] = {"n", "potential", "beta", "kappa", NULL};
+    static const char* keywords[] = {"n", "potential", "beta", "kappa", "method", NULL};
     Py_ssize_t numPoints=0;
     PyObject* pot_obj=NULL;
     double beta=NAN, kappa=NAN;  // undefined by default, if no argument is provided
-    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "n|Odd", const_cast<char**>(keywords),
-        &numPoints, &pot_obj, &beta, &kappa))
+    math::SampleMethod method = math::SM_DEFAULT;
+    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "n|Oddb", const_cast<char**>(keywords),
+        &numPoints, &pot_obj, &beta, &kappa, &method))
         return NULL;
     if(numPoints<=0) {
         PyErr_SetString(PyExc_ValueError, "number of sampling points 'n' must be positive");
@@ -2207,7 +2217,7 @@ PyObject* Density_sample(PyObject* self, PyObject* args, PyObject* namedArgs)
             PyReleaseGIL unlock;
 
             // do the sampling of the density profile
-            points = galaxymodel::sampleDensity(*dens, numPoints);
+            points = galaxymodel::sampleDensity(*dens, numPoints, method);
 
             // assign the velocities if needed
             if(pot) {
@@ -2447,6 +2457,8 @@ static PyMethodDef Density_methods[] = {
       "(sigma_phi = 1/2 kappa_epi / Omega_epi * sigma_R, where kappa_epi and Omega_epi are "
       "radial and azimuthal epicyclic frequencies).\n"
       "If this argument is provided, this triggers the use of the axisymmetric Jeans method.\n"
+      "  method (optional, default 0) - choice of method (currently applies only to the coordinates "
+      "sampling), see the docstring of sampleNdim for description.\n"
       "Returns: a tuple of two arrays: "
       "a 2d array of size Nx3 (in case of positions only) or Nx6 (in case of velocity assignment), "
       "and a 1d array of N point masses." },
@@ -2882,7 +2894,10 @@ int Potential_init(PotentialObject* self, PyObject* args, PyObject* namedArgs)
                 "(cannot mix positional and named arguments), type help(Potential) for details");
         if(PyErr_Occurred())
             return -1;
-        assert(self->pot);
+        else if(!self->pot) {
+            PyErr_SetString(PyExc_ValueError, "Invalid arguments passed to the constructor");
+            return -1;
+        }
         FILTERMSG(utils::VL_DEBUG, "Agama", "Created "+std::string(self->pot->name())+
             " potential at "+utils::toString(self->pot.get()));
         unitsWarning = true;  // any subsequent call to setUnits() will raise a warning
@@ -4227,7 +4242,10 @@ int DistributionFunction_init(DistributionFunctionObject* self, PyObject* args, 
         }
         if(PyErr_Occurred())
             return -1;
-        assert(self->df);
+        else if(!self->df) {
+            PyErr_SetString(PyExc_ValueError, "Invalid arguments passed to the constructor");
+            return -1;
+        }
         FILTERMSG(utils::VL_DEBUG, "Agama", "Created a distribution function at "+
             utils::toString(self->df.get()));
         unitsWarning = true;  // any subsequent call to setUnits() will raise a warning
@@ -4817,16 +4835,16 @@ PyObject* GalaxyModel_totalMass(GalaxyModelObject* self, PyObject* args, PyObjec
 }
 
 /// generate samples in position/velocity space
-PyObject* GalaxyModel_sample_posvel(GalaxyModelObject* self, PyObject* args)
+PyObject* GalaxyModel_sample_posvel(GalaxyModelObject* self, PyObject* args, PyObject* namedArgs)
 {
     if(!GalaxyModel_isCorrect(self))
         return NULL;
-    Py_ssize_t numPoints=0;
-    if(!PyArg_ParseTuple(args, "n", &numPoints) || numPoints<=0)
-    {
-        PyErr_SetString(PyExc_TypeError, "sample() takes one integer argument - the number of points");
+    static const char* keywords[] = {"n", "method", NULL};
+    Py_ssize_t numPoints = 0;
+    math::SampleMethod method = math::SM_DEFAULT;
+    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "n|b", const_cast<char**>(keywords),
+        &numPoints, &method) || numPoints<=0)
         return NULL;
-    }
     try{
         particles::ParticleArrayCar points;
         // temporary wrapper object for the selection function (or a trivial one if not provided)
@@ -4839,16 +4857,15 @@ PyObject* GalaxyModel_sample_posvel(GalaxyModelObject* self, PyObject* args)
             PyReleaseGIL unlock;
             points = galaxymodel::samplePosVel(galaxymodel::GalaxyModel(
                 *self->pot_obj->pot, *self->af_obj->af, *self->df_obj->df, *selfnc),
-                numPoints);
+                numPoints, method);
         }
 
         // remaining operations use Python C API and thus should be performed under GIL.
-        // convert output to NumPy array
-        assert(numPoints == (Py_ssize_t)points.size());
-        npy_intp dims[] = {numPoints, 6};
+        // convert output to NumPy array; its size may be different from numPoints, depending on method
+        npy_intp dims[] = {static_cast<npy_intp>(points.size()), 6};
         PyObject* posvel_arr = PyArray_SimpleNew(2, dims, NPY_DOUBLE);
         PyObject* mass_arr   = PyArray_SimpleNew(1, dims, NPY_DOUBLE);
-        for(Py_ssize_t i=0; i<numPoints; i++) {
+        for(npy_intp i=0; i<dims[0]; i++) {
             unconvertPosVel(points.point(i), &pyArrayElem<double>(posvel_arr, i, 0));
             pyArrayElem<double>(mass_arr, i) = points.mass(i) / conv->massUnit;
         }
@@ -5285,10 +5302,12 @@ static PyMethodDef GalaxyModel_methods[] = {
       "space rather than the 3d action space. The sum of masses returned by the sample() method "
       "should also be equal to totalMass up to integration errors. "
       "If separate is True, the return value is an array of length Ncomp." },
-    { "sample", (PyCFunction)GalaxyModel_sample_posvel, METH_VARARGS,
+    { "sample", (PyCFunction)GalaxyModel_sample_posvel, METH_VARARGS | METH_KEYWORDS,
       "Sample distribution function in the given potential by N particles.\n"
       "Arguments:\n"
-      "  Number of particles to sample.\n"
+      "  n -- number of particles to sample.\n"
+      "  method (optional, default 0) -- choice of method; "
+      "see the docstring of sampleNdim for description.\n"
       "Returns:\n"
       "  A tuple of two arrays: position/velocity (2d array of size Nx6) "
       "and mass (1d array of length N)." },
@@ -8716,53 +8735,87 @@ static const char* docstringSampleNdim =
     "Draw a requested number of points from the hypercube in such a way that "
     "the density of points at any location is proportional to the value of function.\n"
     "Arguments:\n"
-    "  fnc - a callable object that must accept a single argument "
+    "  fnc -- a callable object that must accept a single argument "
     "(a 2d array MxN array of coordinates, where N is the dimension of the hypercube, "
     "and M>=1 is the number of points where the function should be evaluated simultaneously -- "
     "this improves performance), and return a 1d array of M non-negative values "
-    "(one for each point), interpreted as the probability density;\n"
-    "  nsamples - the required number of samples drawn from this function;\n"
-    "  lower, upper - two arrays of the same length (equal to the number of dimensions) "
+    "(one for each point), interpreted as the probability density.\n"
+    "  n -- the required number of samples drawn from this function.\n"
+    "  lower, upper -- two arrays of the same length (equal to the number of dimensions) "
     "that specify the lower and upper boundaries of the region (hypercube) to be sampled; "
     "alternatively, a single value - the number of dimensions - may be passed instead of 'lower', "
-    "in which case the default interval [0:1] is used for each dimension;\n"
-    "Returns: a tuple consisting of the array of samples with shape (nsamples,ndim), "
-    "the integral of the function over the given region estimated in a Monte Carlo way from the samples, "
-    "error estimate of the integral, and the actual number of function evaluations performed "
-    "(which is typically a factor of few larger than the number of output samples).\n\n"
+    "in which case the default interval [0:1] is used for each dimension.\n"
+    "  method (optional) -- choice of sampling method and output:\n"
+    "    0 (default): use quasi-random number generator (QRNG, aka low-discrepancy sequences) "
+    "for the coordinates of points, perform adaptive refinement of the hypercube, "
+    "and return exactly n points (a subset of a larger number of internally collected samples). "
+    "The weights of output points are all equal, and their density is proportional to "
+    "the function value at each point.\n"
+    "    1: use QRNG and refinement, but return all collected samples, rather than "
+    "an equally-weighted subset. The sample weights are proportional to the function values "
+    "at each point and inversely proportional to the number of samples put into each subregion "
+    "during the adaptive refinement procedure. The weights do not exceed the integral of the "
+    "function over the entire hypercube divided by n (the originally specified number of samples), "
+    "but the length of the resulting arrays most likely will exceed n. "
+    "This method may be useful if the samples will be used to estimate integrals of some other "
+    "quantities (e.g. moments of the function) using the Monte Carlo approach; the use of QRNG "
+    "improves the accuracy of these estimates.\n"
+    "    3: use QRNG, but no refinement; in this case exactly n samples are placed uniformly "
+    "inside the hypercube, and their weights are proportional to the values of the function; "
+    "unless the function is constant, some weights will exceed the integral of the function "
+    "over the entire hypercube divided by n. This method may be useful in the same context of "
+    "Monte Carlo integration of some derived quantities, but the accuracy will be competitive "
+    "with the previous method only if n is a power of two.\n"
+    "    4: like 0, but replace QRNG by the more common pseudo-rangom number generator (PRNG). "
+    "This method may be useful if one needs the sample points to be truly independent, "
+    "but the accuracy of computing the integral of the function over the hypercube "
+    "(and thus the error in sample weights) is worse than when using QRNG.\n"
+    "Returns: a tuple with the following elements:\n"
+    "  - a 2d array of samples with shape (nsamples,ndim), where nsamples=n except when method=1;\n"
+    "  - a 1d array of weights of each sample; weights are all equal in methods 0 and 3, and "
+    "the sum of all n weights equals the integral I of the function over the entire hypercube "
+    "in all methods.\n"
+    "  - the estimated error on the integral I;\n"
+    "  - the actual number of function evaluations performed during sampling: "
+    "it is typically a few times larger than n (except when method=3), and likewise larger than "
+    "the length of the returned array of samples (except when method=1 or 3).\n\n"
     "Example:\n"
-    ">>> samples,integr,error,_ = sampleNdim(fnc, 10000, [0,-1,0], [10,1,3.14])\n";
+    ">>> samples,weights,error,_ = sampleNdim(fnc, 10000, [0,-1,0], [10,1,3.14])\n";
 
 /// N-dimensional sampling
 PyObject* sampleNdim(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
 {
-    static const char* keywords[] = {"fnc", "nsamples", "lower", "upper", NULL};
+    static const char* keywords[] = {"fnc", "n", "lower", "upper", "method", NULL};
     Py_ssize_t numSamples=-1;
+    math::SampleMethod method = math::SM_DEFAULT;
     PyObject *callback=NULL, *lower_obj=NULL, *upper_obj=NULL;
-    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "On|OO", const_cast<char**>(keywords),
-        &callback, &numSamples, &lower_obj, &upper_obj))
+    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "On|OOb", const_cast<char**>(keywords),
+        &callback, &numSamples, &lower_obj, &upper_obj, &method))
         return NULL;
     if(!PyCallable_Check(callback)) {
         PyErr_SetString(PyExc_TypeError, "fnc must be callable");
         return NULL;
     }
     if(numSamples<=0) {
-        PyErr_SetString(PyExc_ValueError, "nsamples must be positive");
+        PyErr_SetString(PyExc_ValueError, "n must be positive");
         return NULL;
     }
     std::vector<double> xlow, xupp;
     if(!parseLowerUpperBounds(lower_obj, upper_obj, xlow, xupp))
         return NULL;
-    double result, error;
     try{
-        size_t numEval=0;
         math::Matrix<double> samples;
+        std::vector<double> weights;
+        double error;
+        size_t numEval=0;
         {   // run in a no-GIL block since sampleNdim is OpenMP-parallelized
             PyReleaseGIL unlock;
-            math::sampleNdim(FncWrapper(xlow.size(), callback),
-                &xlow[0], &xupp[0], numSamples, samples, &numEval, &result, &error);
+            math::sampleNdim(
+                FncWrapper(xlow.size(), callback),
+                &xlow[0], &xupp[0], numSamples, method,
+                samples, weights, &error, &numEval);
         }
-        return Py_BuildValue("Nddn", toPyArray(samples), result, error, (Py_ssize_t)numEval);
+        return Py_BuildValue("NNdn", toPyArray(samples), toPyArray(weights), error, (Py_ssize_t)numEval);
     }
     catch(std::exception& ex) {
         if(!PyErr_Occurred())    // set our own error string if it hadn't been set by Python

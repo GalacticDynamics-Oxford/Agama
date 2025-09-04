@@ -10,13 +10,40 @@
 #include <omp.h>
 #endif
 
+// a couple of bit-twiddling functions
+#if _cplusplus >= 201907L
+#include <bit>
+#endif
+
+// count the number of bits that are set to 1
+static inline int popcount(uint64_t x) {
+#ifdef __GNUC__
+    return __builtin_popcountll(x);
+#elif _cplusplus >= 201907L
+    return std::popcount(x);
+#else   // bit twiddling hack
+    x -= ((x >> 1) & 0x5555555555555555ULL);
+    x = (x & 0x3333333333333333ULL) + (x >> 2 & 0x3333333333333333ULL);
+    return ((x + (x >> 4)) & 0xF0F0F0F0F0F0F0FULL) * 0x101010101010101ULL >> 56;
+#endif
+}
+
+// find the position of the least-significant zero bit
+static inline int countr_one(uint64_t x) {
+#ifdef __GNUC__
+    return __builtin_ffsll(~x) - 1;
+#elif _cplusplus >= 201907L
+    return std::countr_one(x);
+#else   // naive approach; compilers are smart enough to optimize it
+    int l = 0;
+    while((x & (1 << l)))
+        l++;
+#endif
+}
+
 namespace math{
 
 namespace {
-
-/// 2^-64, conversion factor from integer to double random numbers
-static const double TWOMINUS64 = 1./18446744073709551616.;
-
 
 /// The "xoroshiro128+" pseudo-random number generator, supposed to be very fast and good quality.
 /// Written in 2016 by David Blackman and Sebastiano Vigna
@@ -119,7 +146,7 @@ void randomize(unsigned int seed)
     randgen.randomize(seed);
 }
 
-double random(PRNGState* state)
+uint64_t randint(PRNGState* state)
 {
     if(state == NULL) {
         // use a thread-local state vector
@@ -128,10 +155,30 @@ double random(PRNGState* state)
 #else
         state = &randgen.state[0];
 #endif
-        return xoroshiro128plus_next(state) * TWOMINUS64;  /*convert to the range [0:1) */
+        return xoroshiro128plus_next(state);
     } else {
-        return xorshift64star_next(state) * TWOMINUS64;
+        return xorshift64star_next(state);
     }
+}
+
+/// not a PRNG by itself, but a function that thoroughly scrambles the input bit sequence:
+/// adaptation of MurmurHash64A written by Austin Appleby
+uint64_t hash(const void* data, int len /*length of data in 8-byte chunks*/, unsigned int seed)
+{
+    const uint64_t m = 0xc6a4a7935bd1e995;  // magic number for scrambling
+    uint64_t h = (len + m) ^ seed;
+    for(int i=0; i<len; i++) {
+        uint64_t k = static_cast<const uint64_t*>(data)[i];
+        k *= m;
+        k ^= k >> 47;
+        k *= m;
+        h ^= k;
+        h *= m;
+    }
+    h ^= h >> 47;
+    h *= m;
+    h ^= h >> 47;
+    return h;
 }
 
 // generate 2 random numbers with normal distribution, using the Box-Muller approach
@@ -221,30 +268,10 @@ void getRandomPermutation(size_t count, size_t output[], PRNGState* state)
     }
 }
 
-// adaptation of MurmurHash64A written by Austin Appleby
-uint64_t hash(const void* data, int len /*length of data in 8-byte chunks*/, unsigned int seed)
+QuasiRandomHalton::QuasiRandomHalton(uint8_t dimension, PRNGState* state)
 {
-    const uint64_t m = 0xc6a4a7935bd1e995;  // magic number for scrambling
-    uint64_t h = (len + m) ^ seed;
-    for(int i=0; i<len; i++) {
-        uint64_t k = static_cast<const uint64_t*>(data)[i];
-        k *= m;
-        k ^= k >> 47;
-        k *= m;
-        h ^= k;
-        h *= m;
-    }
-    h ^= h >> 47;
-    h *= m;
-    h ^= h >> 47;
-    return h;
-}
-
-QuasiRandomHalton::QuasiRandomHalton(int dimension, PRNGState* state)
-{
-    static const int MAX_PRIMES = 16;  // not that there aren't more!
-    static const int PRIMES[MAX_PRIMES] = { 2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53 };
-    if(dimension > MAX_PRIMES)
+    static const uint8_t PRIMES[MAX_DIM] = { 2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53 };
+    if(dimension >= MAX_DIM)
         throw std::runtime_error("QuasiRandomHalton: dimension is too large");
     base = PRIMES[dimension];
     invbase = 1./base;
@@ -278,6 +305,103 @@ double QuasiRandomHalton::operator()(size_t index) const
     // we retrieve the precomputed remainders summing up 0th elements of permutations
     // for all subsequent iterations
     return value + remainders[k];
+}
+
+QuasiRandomSobol::QuasiRandomSobol(uint8_t dimension, PRNGState* prngState, uint8_t _numBits) :
+    numBits(_numBits),
+    scale(pow(0.5, numBits)),
+    offset(randint(prngState) & ((1ULL << numBits) - 1)),  // random integer restricted to numbits
+    count(0),
+    state(offset)
+{
+    static const int DEGREES[MAX_DIM] = { 1, 3, 7, 11, 13, 19, 25, 37, 41, 47, 55, 59, 61, 67, 91, 97 };
+    static const int INIT_NUMBERS[MAX_DIM][6] = {
+        {0},
+        {1},
+        {1, 3},
+        {1, 3, 1},
+        {1, 1, 1},
+        {1, 1, 3,  3},
+        {1, 3, 5, 13},
+        {1, 1, 5,  5, 17},
+        {1, 1, 5,  5,  5},
+        {1, 1, 7, 11, 19},
+        {1, 1, 5,  1,  1},
+        {1, 1, 1,  3, 11},
+        {1, 3, 5,  5, 31},
+        {1, 3, 3,  9,  7, 49},
+        {1, 1, 1, 15, 21, 21},
+        {1, 3, 1, 13, 27, 49} };
+    if(dimension >= MAX_DIM)
+        throw std::runtime_error("QuasiRandomSobol: dimension is too large");
+    if(numBits > MAX_BITS)
+        throw std::runtime_error("QuasiRandomSobol: number of bits is too large");
+    if(dimension == 0) {
+        directionNumbers.assign(numBits, 1);
+    } else {
+        directionNumbers.assign(numBits, 0);
+        int p = DEGREES[dimension];
+        int m = 0, pp = p;
+        while(pp >>= 1)
+            m++; // determine the width of p in bits
+        for(int b=0; b<m; b++)
+            directionNumbers[b] = INIT_NUMBERS[dimension][b];
+        // fill remaining elements using Bratley & Fox (1988) algorithm 659
+        for(int b=m; b<numBits; b++) {
+            uint64_t z = directionNumbers[b-m];
+            for(int k=0; k<m; k++) {
+                if((p >> (m-k-1)) & 1)
+                    z ^= (2<<k) * directionNumbers[b-k-1];
+            }
+            directionNumbers[b] = z;
+        }
+    }
+    for(uint8_t b=0; b<numBits; b++)  // multiply the direction numbers by successive powers of 2
+        directionNumbers[b] <<= numBits-1-b;
+
+    // generate a lower triangular matrix with size numbits*numbits containing random 0/1 values
+    // except diagonal elements, which are set to 1;
+    // the bit sequence in each row is represented by one integer, most significant bit is on the left
+    uint64_t scrambles[MAX_BITS];
+    for(uint8_t b=0; b<numBits; b++) {
+        scrambles[b]  = randint(prngState);
+        // keep only b upper bits in each row (i.e. create a lower triangular matrix)
+        scrambles[b] &= ((1ULL << numBits) - 1) >> (numBits-1-b) << (numBits-1-b);
+        // set diagonal elements to 1
+        scrambles[b] |= 1ULL << (numBits-1-b);
+    }
+    // now scramble the direction numbers (same algorithm as in scipy; Matousek 1998)
+    for(uint8_t b=0; b<numBits; b++) {
+        uint64_t dirNum = directionNumbers[b], newDirNum = 0;
+        for(uint8_t p=0; p<numBits; p++)
+            newDirNum += uint64_t(popcount(scrambles[numBits-1-p] & dirNum) & 1) << p;
+        directionNumbers[b] = newDirNum;
+    }
+}
+
+double QuasiRandomSobol::operator()(size_t index) const
+{
+    // check that the index does not exceed the number of available distinct values (2^numBits)
+    if(index >> numBits)
+        return NAN;
+    // if the requested index is different from the number of already completed elements,
+    // we need to replace the cached state with the freshly prepared one
+    // (fortunately, this "fast-forward" operation has fixed cost independent of index).
+    if(index != count) {
+        uint64_t gray = index ^ (index >> 1);  // Gray code for index
+        state = offset;
+        for(uint8_t b=0; b<numBits; b++) {
+            state ^= ((gray >> b) & 1) * directionNumbers[b];
+        }
+    }
+    // find the location of the least significant zero bit in index
+    int l = countr_one(index);
+    // return the current state
+    double result = state * scale;
+    // update cached state in preparation for the next element
+    state ^= directionNumbers[l];
+    count = index + 1;
+    return result;
 }
 
 }  // namespace math

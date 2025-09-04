@@ -125,18 +125,4 @@ public:
 double totalEntropy(const BaseDistributionFunction& DF,
     const double reqRelError=1e-4, const int maxNumEval=1e6);
 
-/** Sample the distribution function in actions.
-    In other words, draw N sampling points from the action space, so that the density of points 
-    in the neighborhood of any point is proportional to the value of DF at this point 
-    (point = triplet of actions).
-    \param[in]  DF  is the distribution function;
-    \param[in]  numSamples  is the required number of sampling points;
-    \param[out] totalMass (optional) if not NULL, will store the Monte Carlo estimate 
-    of the integral of the distribution function (i.e., the same quantity as computed by 
-    BaseDistributionFunction::totalMass(), but calculated with a different method).
-    \returns    the array of actions sampled from the DF.
-*/
-std::vector<actions::Actions> sampleActions(const BaseDistributionFunction& DF,
-    const std::size_t numSamples, double* totalMass=NULL);
-
 }  // namespace df

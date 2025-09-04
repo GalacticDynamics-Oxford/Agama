@@ -399,6 +399,13 @@ bool testIntegration(const Integrand& fnc, double a, double b,
     return ok;
 }
 
+inline bool equal(double a, double b)
+{
+    if(!(a==b)) return false;
+    if(a==0) return std::signbit(a) == std::signbit(b);  // +0. and -0. are distinct
+    return true;
+}
+
 inline bool swapIfNeeded(double& x1, double& x2)
 {
     if(x1 > x2) {
@@ -622,6 +629,73 @@ bool testSolvePoly()
     return ok;
 }
 
+template<typename QRNG>
+bool testQRNG(const char* name, int ndim=6, int npoints=1048576)
+{
+    utils::Timer timer;
+    std::vector<QRNG> gens;
+    const int ncreate = 10000;
+    for(int a=0; a<ncreate; a++) {
+        gens.clear();
+        for(int d=0; d<ndim; d++)
+            gens.push_back(QRNG(d));
+    }
+    double t1 = timer.deltaSeconds();
+    std::vector<double> sum(ndim);
+    for(int k=0; k<npoints; k++) {
+        for(int d=0; d<ndim; d++) {
+            double val = gens[d](k);
+            sum[d] += val - 0.5;
+        }
+    }
+    double t2 = timer.deltaSeconds();
+    std::vector<double> dif(sum);
+    for(int k=npoints-1; k>=0; k--) {
+        for(int d=0; d<ndim; d++)
+            dif[d] -= gens[d](k) - 0.5;
+    }
+    double t3 = timer.deltaSeconds();
+
+    std::cout << name << ": create in " << utils::toString(t1/ndim/ncreate * 1e9, 4) << " ns; "
+        "sequential eval: " << utils::toString((t2-t1)/ndim/npoints * 1e9, 3) << " ns/point; "
+        "reverse order: " << utils::toString((t3-t2)/ndim/npoints * 1e9, 3) << " ns/point; drift: ";
+    bool ok = true;
+    double totalsum = 0;
+    for(int d=0; d<ndim; d++) {
+        totalsum += fabs(sum[d]);
+        ok &= (fabs(sum[d]) < 2) && (fabs(dif[d]) < fabs(sum[d])*1e-9);
+    }
+    std::cout << utils::toString(totalsum/ndim, 3) << " ";
+    if(!ok)
+        err();
+    std::cout << "\n";
+    return ok;
+}
+
+bool testPRNG(int npoints=4194304)
+{
+    utils::Timer timer;
+    double sum1 = 0, sum2 = 0;
+    for(int k=0; k<npoints; k++)
+        sum1 += math::random() - 0.5;
+    double t1 = timer.deltaSeconds();
+    math::PRNGState state = 1;
+    for(int k=0; k<npoints; k++)
+        state = math::hash(&state, 1);
+    double t2 = timer.deltaSeconds();
+    for(int k=0; k<npoints; k++)
+        sum2 += math::random(&state) - 0.5;
+    double t3 = timer.deltaSeconds();
+    std::cout << "PRNG1: " << utils::toString(t1/npoints * 1e9, 3) << " ns/point; "
+        "PRNG2: " << utils::toString((t3-t2)/npoints * 1e9, 3) << " ns/point; "
+        "hash: "  << utils::toString((t2-t1)/npoints * 1e9, 3) << " ns/point";
+    bool ok = fmax(sum1, sum2) < sqrt(npoints)*3;
+    if(!ok)
+        err();
+    std::cout << "\n";
+    return ok;
+}
+
 int main()
 {
     std::cout << std::setprecision(10);
@@ -651,12 +725,13 @@ int main()
     std::cout << "\n";
 
     // special functions
-    double maxerrk=0, maxerrs=0, maxerrc=0;
+    double maxerrk=0, maxerrs=0, maxerrc=0, maxerra=0;
     for(double ecc=0.; ecc<0.999; ecc = 1-(1-ecc)*0.9) {
         for(double phase=-0.05; phase<1e10; phase<6.4? phase+=0.01 : phase*=1.5) {
             double eta = math::solveKepler(ecc, phase);
             double sineta, coseta;
             math::sincos(eta, sineta, coseta);
+            double aeta = math::atan2(sineta, coseta);
             double phasek = eta - ecc * sineta;
             double phasew = math::wrapAngle(phase);
             if(fabs(phasek - phasew)>0.1)
@@ -666,15 +741,31 @@ int main()
             maxerrk = fmax(maxerrk, fabs(phasek - phasew));
             maxerrs = fmax(maxerrs, fabs(sin(eta) - sineta));
             maxerrc = fmax(maxerrc, fabs(cos(eta) - coseta));
+            maxerra = fmax(maxerra, fabs(aeta / (eta > M_PI ? eta - 2*M_PI : eta) - 1));
         }
     }
     std::cout << "Specfunc: E(sin)=" << utils::toString(maxerrs,4);
     ok &= maxerrs < 5e-16 || err();
     std::cout << ", E(cos)=" << utils::toString(maxerrc,4);
     ok &= maxerrc < 5e-16 || err();
+    std::cout << ", E(atan)=" << utils::toString(maxerra,4);
+    // check special cases
+    ok &= math::atan(-INFINITY) == -M_PI/2 && math::atan(+INFINITY) == +M_PI/2 &&
+        equal(math::atan2(-1.,-0.), atan2(-1.,-0.)) && equal(math::atan2(-1.,+0.), atan2(-1.,+0 )) &&
+        equal(math::atan2(-0.,-1.), atan2(-0.,-1.)) && equal(math::atan2(-0.,+1.), atan2(-0.,+1.)) &&
+        equal(math::atan2(-0.,-0.), atan2(-0.,-0.)) && equal(math::atan2(-0.,+0.), atan2(-0.,+0.)) &&
+        equal(math::atan2(+0.,-0.), atan2(+0.,-0.)) && equal(math::atan2(+0.,+0.), atan2(+0.,+0.)) &&
+        equal(math::atan2(+0.,-1.), atan2(+0.,-1.)) && equal(math::atan2(+0.,+1.), atan2(+0.,+1.)) &&
+        equal(math::atan2(+1.,-0.), atan2(+1.,-0.)) && equal(math::atan2(+1.,+0.), atan2(+1.,+0.));
+    ok &= maxerra < 5e-16 || err();
     std::cout << ", E(kepler)=" << utils::toString(maxerrk,4);
     ok &= maxerrk < 2e-15 || err();
     std::cout << "\n";
+
+    // test pseudo- and quasi-random number generators
+    ok &= testPRNG();
+    ok &= testQRNG<math::QuasiRandomHalton>("QRNG-Halton");
+    ok &= testQRNG<math::QuasiRandomSobol> ("QRNG-Sobol ");
 
     // integration routines
     std::cout << "Integration in several variants\n";
@@ -802,15 +893,19 @@ int main()
     integrateNdim(fnc8, fnc8.ymin, fnc8.ymax, toler, 1000000, &result, &error);
     std::cout << "Volume of a 3d torus = "<<result<<" +- "<<error<<
         " (delta="<<(result-fnc8.exact)<<"; neval="<<numEval<<")\n";
-    ok &= (error < 3.0 && fabs(result-fnc8.exact) < fmin(0.01*result, error*2)) || err();
+    ok &= (error < 2.0 && fabs(result-fnc8.exact) < fmin(0.01*result, error)) || err();
 
     // N-dimensional sampling
     numEval=0;
     math::Matrix<double> points;
-    sampleNdim(fnc8, fnc8.ymin, fnc8.ymax, 100000, points, NULL, &result, &error);
+    std::vector<double> weights;
+    sampleNdim(fnc8, fnc8.ymin, fnc8.ymax, 100000, math::SM_DEFAULT, points, weights, &error);
+    result = 0;
+    for(size_t i=0; i<weights.size(); i++)
+        result += weights[i];
     std::cout << "Monte Carlo Volume of a 3d torus = "<<result<<" +- "<<error<<
         " (delta="<<(result-fnc8.exact)<<"; neval="<<numEval<<")\n";
-    ok &= (error < 1.0 && fabs(result-fnc8.exact) < fmin(0.01*result, error*2)) || err();
+    ok &= (error < 1.0 && fabs(result-fnc8.exact) < fmin(0.01*result, error)) || err();
     if(utils::verbosityLevel >= utils::VL_VERBOSE) {
         std::ofstream fout("sampleNdim.dat");
         for(unsigned int i=0; i<points.rows(); i++)

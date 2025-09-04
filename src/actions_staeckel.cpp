@@ -520,7 +520,7 @@ AxisymActionDerivatives computeActionDerivatives(
     // and the remaining regular part integrated numerically
     double delta_minus_nu_max = fnc.point.coordsys.Delta2 - lim.nu_max;
     double singpart = 2 * sqrt(-2 * lim.nu_max / integrand.dfdnu_at_nu_max / delta_minus_nu_max ) *
-        atan(sqrt(lim.nu_max / delta_minus_nu_max));
+        math::atan(sqrt(lim.nu_max / delta_minus_nu_max));
     der.dJzdLz = -fnc.Lz * (math::integrateGL(transf_n, 0, 1, lim.integrOrder) + singpart) / (2*M_PI);
     return der;
 }
@@ -591,8 +591,8 @@ AxisymGenFuncDerivatives computeGenFuncDerivatives(
     // and the remaining regular part integrated numerically
     double delta_minus_nu_max = fnc.point.coordsys.Delta2 - lim.nu_max;
     double singpart = 2 * sqrt(-2 * lim.nu_max / integrand.dfdnu_at_nu_max / delta_minus_nu_max ) *
-        (atan(sqrt( lim.nu_max / delta_minus_nu_max)) -
-         atan(sqrt((lim.nu_max - fabs(fnc.point.nu)) / delta_minus_nu_max)));
+        (math::atan(sqrt( lim.nu_max / delta_minus_nu_max)) -
+         math::atan(sqrt((lim.nu_max - fabs(fnc.point.nu)) / delta_minus_nu_max)));
     der.dSdLz = fnc.Lz==0 ? 0 : fnc.point.phi +
         signldot * -fnc.Lz *  math::integrateGL(transf_l, 0, yl, lim.integrOrder) / 4
       + signndot * -fnc.Lz * (math::integrateGL(transf_n, 0, yn, lim.integrOrder) + singpart) / 4;

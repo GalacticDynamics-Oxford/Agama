@@ -125,24 +125,36 @@ public:
 //---- create an N-body realization of a spherical model ----//
 
 particles::ParticleArraySph samplePosVel(
-    const math::IFunction& pot, const math::IFunction& df, const unsigned int numPoints)
+    const math::IFunction& pot, const math::IFunction& df, const unsigned int numPoints,
+    math::SampleMethod method, math::PRNGState* state)
 {
     SphericalIsotropicModelIntegrand fnc(pot, df);
-    math::Matrix<double> result;  // sampled scaled coordinates/velocities
-    double totalMass, errorMass;  // total normalization of the DF and its estimated error
+    math::Matrix<double> result;  // sampled scaled coordinates/velocities (magnitudes of r and v)
+    std::vector<double> weights;  // corresponding weights (uniform or not, depending on method)
     double xlower[2] = {0,0};     // boundaries of sampling region in scaled coordinates
     double xupper[2] = {1,1};
-    math::sampleNdim(fnc, xlower, xupper, numPoints, result, NULL, &totalMass, &errorMass);
-    const double pointMass = totalMass / result.rows();
+    math::sampleNdim(fnc, xlower, xupper, numPoints, method, result, weights, NULL, NULL, state);
     particles::ParticleArraySph points;
     points.data.reserve(result.rows());
+    // to assign the remaining phase-space coordinates (directions of r and v vectors),
+    // we use different approaches depending on the method: if it requested to return all
+    // samples rather than an equally-weighted subset (to be used for high-accuracy integration),
+    // it is mandatory to use QRNG for the remaining coordinates, otherwise can use PRNG.
+    bool qrng = method & math::SM_RETURN_ALL_SAMPLES;
+    int numBits = std::max<int>(ceil(log2(result.rows())), 32);
+    std::vector<math::QuasiRandomSobol> gen;
+    for(int k=0; qrng && k<4; k++)
+        gen.push_back(math::QuasiRandomSobol(/*dimension*/ k+2, state, numBits));
     for(unsigned int i=0; i<result.rows(); i++) {
-        double r, v, Phi, vdir[3],
-        rtheta = acos(math::random()*2-1),
-        rphi   = 2*M_PI * math::random();
-        math::getRandomUnitVector(vdir);
+        double rand[4];
+        for(int k=0; k<4; k++)
+            rand[k] = qrng ? gen[k](i) : math::random(state);
+        double costh = 2 * rand[2] - 1, sinth = sqrt(1 - pow_2(costh)), sinphi, cosphi;
+        math::sincos(2*M_PI * rand[3], sinphi, cosphi);
+        double r, v, Phi;
         fnc.unscalerv(result(i, 0), result(i, 1), r, v, Phi);
-        points.add(coord::PosVelSph(r, rtheta, rphi, v*vdir[0], v*vdir[1], v*vdir[2]), pointMass);
+        points.add(coord::PosVelSph(r, /*theta*/ acos(rand[0] * 2 - 1), /*phi*/ 2*M_PI * rand[1],
+            v * costh, v * sinth * cosphi, v * sinth * sinphi), weights[i]);
     }
     return points;
 }

@@ -134,20 +134,4 @@ double totalEntropy(const BaseDistributionFunction& DF, const double reqRelError
     return result;
 }
 
-std::vector<actions::Actions> sampleActions(const BaseDistributionFunction& DF, const size_t numSamples,
-    double* totalMass)
-{
-    double xlower[3] = {0, 0, 0};  // boundaries of integration region in scaled coordinates
-    double xupper[3] = {1, 1, 1};
-    math::Matrix<double> result;   // the result array of actions
-    DFIntegrandNdim<false> fnc(DF);
-    math::sampleNdim(fnc, xlower, xupper, numSamples, result, 0/*NULL*/, totalMass);
-    std::vector<actions::Actions> samples(result.rows());
-    for(size_t i=0; i<result.rows(); i++) {
-        const double point[3] = {result(i,0), result(i,1), result(i,2)};
-        samples[i] = fnc.scaling.toActions(point);  // transform from scaled vars to actions
-    }
-    return samples;
-}
-
 }

@@ -50,7 +50,8 @@ particles::ParticleArrayCar assignVelocityEdd(
 particles::ParticleArrayCar assignVelocityJeansSph(
     const particles::ParticleArray<coord::PosCyl>& pointCoords,
     const potential::BasePotential& pot,
-    const math::IFunction& jeansSphModel, const double beta)
+    const math::IFunction& jeansSphModel,
+    const double beta)
 {
     ptrdiff_t npoints = pointCoords.size();
     particles::ParticleArrayCar result;
@@ -129,7 +130,8 @@ particles::ParticleArrayCar assignVelocity(
     const particles::ParticleArray<coord::PosCyl>& pointCoords,
     const potential::BaseDensity& dens,
     const potential::BasePotential& pot,
-    const double beta, const double kappa)
+    const double beta,
+    const double kappa)
 {
     /// type of velocity sampling procedure
     enum SamplingMethod {

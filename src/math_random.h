@@ -20,14 +20,30 @@ typedef uint64_t PRNGState;
 */
 void randomize(unsigned int seed=0);
 
-/** generate a pseudo-random number in the range [0,1).
-    \param[in,out]  state  is the internal state of the PRNG, which gets updated after each call.
+/** generate an integer pseudo-random number in the range [0, 2^64-1].
+    \param[in,out]  state  is the internal state of the PRNG, which gets updated after each call;
+    can be any number except zero.
     If not provided (NULL), the internal global state is used, which is an array with the number
     of elements equal to the number of OpenMP threads; each thread thus has access to a separate
     PRNG instance, seeded with a different number at the beginning of the program or after randomize().
     \return the pseudo-random number.
 */
-double random(PRNGState* state=NULL);
+uint64_t randint(PRNGState* state=NULL);
+
+/** generate a floating-point pseudo-random number in the range [0,1).
+    \param[in,out]  state  is the internal state of the PRNG, which gets updated after each call;
+    can be any number except zero.
+    If not provided (NULL), the internal global state is used, which is an array with the number
+    of elements equal to the number of OpenMP threads; each thread thus has access to a separate
+    PRNG instance, seeded with a different number at the beginning of the program or after randomize().
+    \return the pseudo-random number.
+*/
+inline double random(PRNGState* state=NULL)
+{
+    /// 2^-64, conversion factor from the full range of 64-bit integers to doubles in the range [0:1)
+    const double TWOMINUS64 = 1./18446744073709551616.;
+    return randint(state) * TWOMINUS64;
+}
 
 /** generate two uncorrelated random numbers from the standard normal distribution.
     \param[out]  num1, num2 will contain the output -- two normally distributed random numbers.
@@ -84,31 +100,73 @@ void getRandomPermutation(size_t count, size_t output[], /*input/output*/ PRNGSt
 */
 PRNGState hash(const void* data, int len, unsigned int seed=0);
 
-/// an overloaded version which takes an array of doubles as input
-inline PRNGState hash(const double* data, int len, unsigned int seed=0) {
-    return hash(static_cast<const void*>(data), len, seed); }
-
 /** Generator of quasirandom numbers from the Halton sequence with a randomly initialized scrambling.
     Sequences with different dimension indices are independent and have mutually low discrepancy,
     while sequences with the same dimension but different scrambling seeds are not.
     Once initialized, the () operator returns the quasi-random number with the given index.
 */
 class QuasiRandomHalton {
-    unsigned int base;  ///< prime number that depends on dimension
-    double invbase;     ///< inverse of the above
-    std::vector<size_t> permutations;  ///< scrambling set
-    std::vector<double> remainders;    ///< table for speeding up computations for low indices
+    uint8_t base;    ///< prime number that depends on dimension
+    double invbase;  ///< inverse of the above
+    std::vector<size_t> permutations;   ///< scrambling set
+    std::vector<double> remainders;     ///< table for speeding up computations for low indices
 public:
+    static const uint8_t MAX_DIM = 16;  ///< maximum number of dimensions
+
     /** Create the generator for the given dimension and random seed.
-        \param[in] dimension  is the index of dimension, should be <16.
+        \param[in] dimension  is the index of dimension (starting from zero), should be < MAX_DIM.
         \param[in,out] state  is the internal state of a PRNG that is used to initialize the scrambling,
         which gets updated after the call; if NULL, the internal global state is used.
     */
-    QuasiRandomHalton(int dimension, /*input/output*/ PRNGState* state=NULL);
+    QuasiRandomHalton(uint8_t dimension, /*input/output*/ PRNGState* state=NULL);
 
     /** Return the quasi-random number between 0 and 1 from this sequence with a given index;
         the value depends deterministically on index, dimension and random seed used to initialize
         the scrambling, i.e., subsequent calls with the same index return the same value.
+    */
+    double operator()(size_t index) const;
+};
+
+/** Generator of quasirandom numbers from the Sobol sequence with a randomly initialized scrambling.
+    Sequences with different dimension indices are independent and have mutually low discrepancy,
+    while sequences with the same dimension but different scrambling seeds are not.
+    Once initialized, the () operator returns the quasi-random number with the given index.
+    This generator is somewhat faster than Halton (when called with sequentially increasing indices),
+    and produces sequences that are more equally distributed between the lower and upper halves
+    of the interval, but its statistical properties are best realized when the number of points
+    is a power of two. It is also not thread-safe due to caching of the internal state.
+*/
+class QuasiRandomSobol {
+    const uint8_t numBits;  ///< number of bits generated by the sequence before it starts to repeat
+    const double scale;     ///< 2^(-numbits)
+    std::vector<uint64_t> directionNumbers;  ///< magic constants (including random scrambling)
+    const uint64_t offset;  ///< random offset of the initial point
+    mutable uint64_t count; ///< index of next point; generation is faster if done sequentially
+    mutable uint64_t state; ///< cached state for optimized generation of count+1'th point
+public:
+    static const uint8_t MAX_DIM = 16;   ///< maximum number of dimensions
+    static const uint8_t MAX_BITS = 53;  ///< maximum number of bits produced by the generator
+
+    /** Create the generator for the given dimension and random seed.
+        \param[in] dimension  is the index of dimension (starting from zero), should be < MAX_DIM.
+        \param[in,out] state  is the internal state of a PRNG that is used to initialize the scrambling,
+        which gets updated after the call; if NULL, the internal global state is used.
+        \param[in] numBits  is the number of bits produced by the generator;
+        larger values enable longer non-repeating sequences, up to the limit of double precision,
+        but make the generator slower to construct and to access out-of-order; default is 32.
+    */
+    QuasiRandomSobol(uint8_t dimension, /*input/output*/ PRNGState* state=NULL, uint8_t numBits=32);
+
+    /** Return the quasi-random number between 0 and 1 from this sequence with a given index;
+        the value depends deterministically on index, dimension and random seed used to initialize
+        the scrambling, i.e., subsequent calls with the same index return the same value.
+        If index exceeds 2^numbits, the sequence would repeat itself, so a NAN is returned instead.
+        Note that the subsequent calls with indices incremented by one are ~10x faster than
+        the general case of arbitrary-order access, thanks to an optimized computation method
+        for sequential numbers, which relies on caching of the current state.
+        \warning  Due to caching, this method is not safe to call from multiple threads in parallel;
+        one should instead create and use thread-local copies of this generator object cloned from
+        the same master generator (to ensure identical scrambling constants initialized from a PRNG).
     */
     double operator()(size_t index) const;
 };

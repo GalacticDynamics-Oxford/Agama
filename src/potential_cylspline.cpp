@@ -310,10 +310,10 @@ public:
                 - prod(log(pow_2(dRdxi * (0-xi0)) + pow_2(dzdeta * (1-eta0))), 1-eta0)
                 + prod(log(pow_2(dRdxi * (1-xi0)) + pow_2(dzdeta * (1-eta0))), 1-eta0) ) +
             1.0 / dzdeta * (
-                + prod(atan(dzdeta * (0-eta0) / dRdxi / (0-xi0)), 0-xi0)
-                - prod(atan(dzdeta * (1-eta0) / dRdxi / (0-xi0)), 0-xi0)
-                - prod(atan(dzdeta * (0-eta0) / dRdxi / (1-xi0)), 1-xi0)
-                + prod(atan(dzdeta * (1-eta0) / dRdxi / (1-xi0)), 1-xi0) ) );
+                + prod(math::atan(dzdeta * (0-eta0) / dRdxi / (0-xi0)), 0-xi0)
+                - prod(math::atan(dzdeta * (1-eta0) / dRdxi / (0-xi0)), 0-xi0)
+                - prod(math::atan(dzdeta * (0-eta0) / dRdxi / (1-xi0)), 1-xi0)
+                + prod(math::atan(dzdeta * (1-eta0) / dRdxi / (1-xi0)), 1-xi0) ) );
         dPhidz_add = mul * (
             0.5 / dzdeta * (
                 + prod(log(pow_2(dRdxi * (0-xi0)) + pow_2(dzdeta * (0-eta0))), 0-xi0)
@@ -321,10 +321,10 @@ public:
                 - prod(log(pow_2(dRdxi * (1-xi0)) + pow_2(dzdeta * (0-eta0))), 1-xi0)
                 + prod(log(pow_2(dRdxi * (1-xi0)) + pow_2(dzdeta * (1-eta0))), 1-xi0) ) +
             1.0 / dRdxi * (
-                + prod(atan(dRdxi * (0-xi0) / dzdeta / (0-eta0)), 0-eta0)
-                - prod(atan(dRdxi * (1-xi0) / dzdeta / (0-eta0)), 0-eta0)
-                - prod(atan(dRdxi * (0-xi0) / dzdeta / (1-eta0)), 1-eta0)
-                + prod(atan(dRdxi * (1-xi0) / dzdeta / (1-eta0)), 1-eta0) ) );
+                + prod(math::atan(dRdxi * (0-xi0) / dzdeta / (0-eta0)), 0-eta0)
+                - prod(math::atan(dRdxi * (1-xi0) / dzdeta / (0-eta0)), 0-eta0)
+                - prod(math::atan(dRdxi * (0-xi0) / dzdeta / (1-eta0)), 1-eta0)
+                + prod(math::atan(dRdxi * (1-xi0) / dzdeta / (1-eta0)), 1-eta0) ) );
         if(R0==0) {  // the integral of the z-derivative has a different functional form on the z axis
             dPhidR_add = 0;  // and the R-derivative term is zero
             dPhidz_add = M_PI * mul / (dRdxi * dzdeta) * (

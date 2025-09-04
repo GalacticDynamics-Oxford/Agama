@@ -1,6 +1,10 @@
 This file lists the most important updates in Agama (in reverse chronological order);
 breaking changes in API are listed at the end.
 
+September 2025:
+Improved the accuracy of N-dimensional sampling (at the expense of a moderate
+increase in computational cost) and added several options for its output.
+
 April 2025:
 Added another method for orbit integration (DPRKN8), improved the accuracy of
 integration of the variational equation and estimation of the Lyapunov exponent,
@@ -16,7 +20,7 @@ Implemented analytic convolution of 1d interpolators and determination of their
 roots and extrema.
 
 April 2024:
-Implemented computation of DF derivatives w.r.t. actions
+Implemented computation of DF derivatives w.r.t. actions.
 
 March 2024:
 Implemented computation of orbit derivatives w.r.t. initial conditions
@@ -31,7 +35,7 @@ redesigned ActionMapperTorus to create multiple tori on demand and cache them.
 
 October 2023:
 Redesigned the parallelization strategy in the Python interface, making it more robust
-when involving (nested) calls to user-defined Python callback functions
+when involving (nested) calls to user-defined Python callback functions.
 
 March 2023:
 Added an option for representing the result of orbit integration as an interpolator
@@ -144,6 +148,10 @@ Some of this functionality is not yet ported to Agama.
 
 -----------
 API Changes
+
+September 2025:
+[C++,Python] changed the interface for sampleNdim and related routines, adding several
+modes of operation, including options for unequal weights of returned arrays.
 
 April 2025:
 [C++] redesigned the interface for ODE solvers and associated orbit integration module.

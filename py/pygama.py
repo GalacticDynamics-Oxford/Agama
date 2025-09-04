@@ -621,11 +621,17 @@ def sampleOrbitLibrary(nbody, orbits, weights, returnIndices=False):
     In case of success, the result is a tuple of two or three arrays:
     particle coordinates/velocities (2d Nx6 array), particle masses (1d array of length N),
     and optionally the indices of orbits from which particles were drawn (1d array of length N).
-    In case of failure (when some of the orbits, usually with high weights, had fewer points
+    A failure indicates that some of the orbits, usually with high weights, had fewer points
     recorded from their trajectories during orbit integration than is needed to represent them
-    in the N-body snapshot), the result is a different tuple of two arrays:
+    in the N-body snapshot. This can only happen when the output of the `orbit()` routine was
+    requested in the form of arrays of regularly sampled points from trajectories.
+    When the output was requested as an array of `Orbit` interpolators, these can produce any
+    desired number of samples from the orbit, so a failure should not occur.
+    In case of failure, the result is a different tuple of two arrays:
     list of orbit indices which did not have enough trajectory samples (length is anywhere
     from 1 to N), and corresponding required numbers of samples for each orbit from this list.
+    Note that this routine uses `numpy` random number generators, unlike the rest of Agama,
+    so the seed is controlled by `numpy.random.seed()` rather than `agama.setRandomSeed()`.
     '''
     nbody = int(nbody)
     if nbody <= 0:

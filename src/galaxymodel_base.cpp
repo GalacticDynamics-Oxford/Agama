@@ -6,7 +6,6 @@
 #include "math_spline.h"
 #include "math_linalg.h"
 #include "potential_utils.h"
-#include "actions_torus.h"
 #include "smart.h"
 #include "utils.h"
 #include <cmath>
@@ -419,7 +418,7 @@ public:
             // when they have infinite uncertainties, this means integrating vX,vY over a circle
             // |vXY| = sqrt(vX^2+vY^2) <= sqrt(Vescape^2 - vZ^2)
             assert(dimvX==1 && dimvY==2);  // the two dimensions of integration in the vX,vY plane
-            double sinphi, cosphi, addphi = atan2(Y, X);
+            double sinphi, cosphi, addphi = math::atan2(Y, X);
             math::sincos(2*M_PI*vars[2] + addphi, sinphi, cosphi);
             vX = vXYmax * vars[1] * cosphi;
             vY = vXYmax * vars[1] * sinphi;
@@ -742,6 +741,8 @@ public:
         std::fill(values, values + dflen * Ntotal, 0);
         // transform the velocity back to the observed coordinate system
         coord::VelCar VEL = orientation.toRotated(coord::VelCar(pv));
+        if(!isFinite(VEL.vx+VEL.vy+VEL.vz))
+            return;
         double valvX[N+1], valvY[N+1], valvZ[N+1];
         unsigned int
             iX = bsplvX.nonzeroComponents(VEL.vx, 0, valvX),
@@ -764,6 +765,8 @@ public:
         sintwophi = R2==0 ? 0 : 2 * pv.x * pv.y / R2;
         VEL = orientation.toRotated(coord::VelCar(
             -pv.vx * costwophi - pv.vy * sintwophi, -pv.vx * sintwophi + pv.vy * costwophi, -pv.vz));
+        if(!isFinite(VEL.vx+VEL.vy+VEL.vz))
+            return;
         iX = bsplvX.nonzeroComponents(VEL.vx, 0, valvX),
         iY = bsplvY.nonzeroComponents(VEL.vy, 0, valvY),
         iZ = bsplvZ.nonzeroComponents(VEL.vz, 0, valvZ);
@@ -873,8 +876,6 @@ public:
         }
     }
 };
-
-void emptyDeleter(const potential::BasePotential*) {}
 
 }  // unnamed namespace
 
@@ -1139,92 +1140,56 @@ void computeTotalMass(
 }
 
 
-particles::ParticleArrayCar sampleActions(
-    const GalaxyModel& model, const size_t nSamp, std::vector<actions::Actions>* actsOutput)
-{
-    // first sample points from the action space:
-    // we use nAct << nSamp  distinct values for actions, and construct tori for these actions;
-    // then each torus is sampled with nAng = nSamp/nAct  distinct values of angles,
-    // and the action/angles are converted to position/velocity points
-    size_t nAng = std::min<size_t>(nSamp/100+1, 16);   // number of sample angles per torus
-    size_t nAct = nSamp / nAng + 1;
-
-    // do the sampling in actions space
-    double totalMass;
-    std::vector<actions::Actions> actions = df::sampleActions(
-        model.distrFunc, nAct, &totalMass);
-    assert(nAct == actions.size());
-    double pointMass = totalMass / (nAct*nAng);
-
-    // next sample angles from each torus in the above action sample.
-    // hack: ActionMapperTorus needs a shared pointer PtrPotential, but we have only a raw pointer
-    // to the potential in the GalaxyModel struct. If we create a PtrPotential with this raw pointer,
-    // it will get deleted when PtrPotential goes out of scope. To prevent this, we pass an additional
-    // argument specifying a no-op deleter.
-    potential::PtrPotential pot(&model.potential, emptyDeleter);
-    actions::ActionMapperTorus torus(pot);
-    particles::ParticleArrayCar points;
-    if(actsOutput!=NULL)
-        actsOutput->clear();
-    for(size_t t=0; t<nAct && points.size()<nSamp; t++) {
-        for(size_t a=0; a<nAng; a++) {
-            actions::Angles ang;
-            ang.thetar   = 2*M_PI*math::random();
-            ang.thetaz   = 2*M_PI*math::random();
-            ang.thetaphi = 2*M_PI*math::random();
-            coord::PosVelCar point = toPosVelCar(torus.map(actions::ActionAngles(actions[t], ang)));
-            points.add(point, pointMass * model.selFunc.value(point));
-            if(actsOutput!=NULL)
-                actsOutput->push_back(actions[t]);
-        }
-    }
-    return points;
-}
-
-
 particles::ParticleArrayCar samplePosVel(
-    const GalaxyModel& model, const size_t numSamples)
+    const GalaxyModel& model, const size_t numPoints,
+    math::SampleMethod method, math::PRNGState* state)
 {
     DFIntegrand6dim fnc(model, /*separate*/ false);
-    math::Matrix<double> result;      // sampled scaled coordinates/velocities
-    double totalMass, errorMass, tmp; // total normalization of the DF and its estimated error
     double xlower[6] = {0,0,0,0,0,0}; // boundaries of sampling region in scaled coordinates
     double xupper[6] = {1,1,1,1,1,1};
-    math::sampleNdim(fnc, xlower, xupper, numSamples, result, NULL, &totalMass, &errorMass);
-    const double pointMass = totalMass / result.rows();
+    math::Matrix<double> result;      // sampled scaled coordinates/velocities
+    std::vector<double> weights;
+    math::sampleNdim(fnc, xlower, xupper, numPoints, method, result, weights, NULL, NULL, state);
     particles::ParticleArrayCar points;
     points.data.reserve(result.rows());
     for(size_t i=0; i<result.rows(); i++) {
+        double tmp;
         double scaledvars[6] = {
             result(i,0), result(i,1), result(i,2),
             result(i,3), result(i,4), result(i,5)};
         // transform from scaled vars (array of 6 numbers) to real pos/vel
-        points.add(fnc.unscaleVars(scaledvars, tmp), pointMass);
+        points.add(fnc.unscaleVars(scaledvars, tmp), weights[i]);
     }
     return points;
 }
 
 
 particles::ParticleArray<coord::PosCyl> sampleDensity(
-    const potential::BaseDensity& dens, const size_t numPoints)
+    const potential::BaseDensity& dens, const size_t numPoints,
+    math::SampleMethod method, math::PRNGState* state)
 {
-    if(!isFinite(dens.totalMass()))   // safety precautions
-        throw std::runtime_error("sampleDensity: model has infinite mass");
-    potential::DensityIntegrandNdim fnc(dens, /*require the values of density to be non-negative*/true);
-    math::Matrix<double> result;      // sampled scaled coordinates
-    double totalMass, errorMass;      // total mass and its estimated error
+    potential::DensityIntegrandNdim fnc(dens, /*require the values of density to be non-negative*/ true);
     double xlower[3] = {0,0,0};       // boundaries of sampling region in scaled coordinates
     double xupper[3] = {1,1,1};
-    math::sampleNdim(fnc, xlower, xupper, numPoints, result, NULL, &totalMass, &errorMass);
-    const double pointMass = totalMass / result.rows();
+    math::Matrix<double> result;      // sampled scaled coordinates
+    std::vector<double> weights;
+    math::sampleNdim(fnc, xlower, xupper, numPoints, method, result, weights, NULL, NULL, state);
     particles::ParticleArray<coord::PosCyl> points;
     points.data.reserve(result.rows());
+    // if the density profile is axisymmetric, phi is not provided by the sampling routine,
+    // so needs to be assigned here; when using QRNG and returning all samples rather than
+    // an equally-weighted subset (to be used for high-accuracy integration), it is mandatory
+    // to use QRNG for the remaining phi coordinate too; otherwise can use a PRNG.
+    bool qrng = method & math::SM_RETURN_ALL_SAMPLES;
+    math::QuasiRandomSobol gen2(
+        /*dimension: 0 and 1 were already used in sampleNdim, so..*/ 2,
+        /*random state*/ state,
+        /*ensure enough bits for the given # of samples*/ std::max<int>(ceil(log2(result.rows())), 32));
     for(size_t i=0; i<result.rows(); i++) {
-        // if the system is axisymmetric, phi is not provided by the sampling routine
         double scaledvars[3] = {result(i,0), result(i,1), 
-            fnc.axisym ? math::random() : result(i,2)};
+            fnc.axisym ? (qrng ? gen2(i) : math::random(state)) : result(i,2)};
         // transform from scaled coordinates to the real ones, and store the point into the array
-        points.add(potential::unscaleCoords(scaledvars), pointMass);
+        points.add(potential::unscaleCoords(scaledvars), weights[i]);
     }
     return points;
 }

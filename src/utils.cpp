@@ -144,8 +144,10 @@ VerbosityLevel initVerbosityLevel()
         logfile.open(env);
     }
     env = std::getenv("LOGLEVEL");
-    if(env && env[0] >= '0' && env[0] <= '3')
+    if(env && env[0] >= '0' && env[0] <= '3' && env[1] == '\0')
         return static_cast<VerbosityLevel>(env[0]-'0');
+    if(env && env[0] == '-' && env[1] == '1' && env[2] == '\0')
+        return VL_DISABLE;
     return VL_MESSAGE;  // default
 }
 
@@ -215,20 +217,30 @@ std::vector<void(*)(int)> prevCtrlBreakHandler;
 
 CtrlBreakHandler::CtrlBreakHandler()
 {
-    // this class could be instantiated multiple times in nested routines,
-    // but the break flag is cleared only for the outermost one.
-    if(prevCtrlBreakHandler.empty())
-        ctrlBreakTriggered = false;
-    // store the previous signal handler on the stack, and set the new one
-    prevCtrlBreakHandler.push_back(signal(SIGINT, customCtrlBreakHandler));
+#ifdef _OPENMP
+#pragma omp critical(CtrlBreakHandler)
+#endif
+    {
+        // this class could be instantiated multiple times in nested routines,
+        // but the break flag is cleared only for the outermost one.
+        if(prevCtrlBreakHandler.empty())
+            ctrlBreakTriggered = false;
+        // store the previous signal handler on the stack, and set the new one (same for all threads)
+        prevCtrlBreakHandler.push_back(signal(SIGINT, customCtrlBreakHandler));
+    }
 }
 
 CtrlBreakHandler::~CtrlBreakHandler()
 {
-    // restore the previous handler once the instance of the class is destroyed
-    assert(!prevCtrlBreakHandler.empty());       // it must have been set in the constructor
-    signal(SIGINT, prevCtrlBreakHandler.back()); // restore the previous handler
-    prevCtrlBreakHandler.pop_back();             // and eliminate it from the stack
+#ifdef _OPENMP
+#pragma omp critical(CtrlBreakHandler)
+#endif
+    {
+        // restore the previous handler once the instance of the class is destroyed
+        assert(!prevCtrlBreakHandler.empty());       // it must have been set in the constructor
+        signal(SIGINT, prevCtrlBreakHandler.back()); // restore the previous handler
+        prevCtrlBreakHandler.pop_back();             // and eliminate it from the stack
+    }
 }
 
 bool CtrlBreakHandler::triggered() { return ctrlBreakTriggered; }

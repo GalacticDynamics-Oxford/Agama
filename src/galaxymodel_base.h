@@ -8,6 +8,7 @@
 #include "actions_base.h"
 #include "df_base.h"
 #include "particles_base.h"
+#include "math_sample.h"
 
 /// A complete galaxy model (potential, action finder and distribution function) and associated routines
 namespace galaxymodel{
@@ -349,46 +350,36 @@ void computeTotalMass(
 
 
 /** Generate N-body samples of the distribution function multiplied by the selection function
-    by sampling in action/angle space:
-    sample actions directly from DF and angles uniformly from [0:2pi]^3,
-    then use torus machinery to convert from action/angles to position/velocity.
-    Note that this routine is not able to sample uniformly weighted particles in the case
-    of a non-trivial selection function; instead, it samples uniformly in the action/angle space,
-    and then multiplies the weight of each output point by the value of the selection function,
-    retaining even points with zero weight.
-    \param[in]  model  is the galaxy model;
-    \param[in]  numPoints  is the required number of samples;
-    \param[out] actions (optional) will be filled with values of actions
-    corresponding to each point; if not needed may pass NULL as this argument.
-    \returns    a new array of particles (position/velocity/mass)
-    sampled from the distribution function.
-*/
-particles::ParticleArrayCar sampleActions(
-    const GalaxyModel& model, const size_t numPoints,
-    std::vector<actions::Actions>* actions=NULL);
-
-
-/** Generate N-body samples of the distribution function multiplied by the selection function
     by sampling in position/velocity space:
     use action finder to compute the actions corresponding to the given point,
     and evaluate the value of DF times SF at the given actions.
     The output points have uniform weights.
     \param[in]  model  is the galaxy model;
     \param[in]  numPoints  is the required number of samples;
+    \param[in]  method  (optional) is the mode of operation for the sampling routine 
+                (see the docstring of math::sampleNdim for details);
+    \param[in,out]  state  is the seed for the pseudo-random number generator;
+                if not provided (NULL), use the global state.
     \returns    a new array of particles (position/velocity/mass)
-    sampled from the distribution function;
+                sampled from the distribution function;
 */
 particles::ParticleArrayCar samplePosVel(
-    const GalaxyModel& model, const size_t numPoints);
+    const GalaxyModel& model, const size_t numPoints,
+    math::SampleMethod method=math::SM_DEFAULT, math::PRNGState* state=NULL);
 
 
 /** Sample the density profile by discrete points.
     \param[in]  dens  is the density model;
     \param[in]  numPoints  is the required number of sampling points;
-    \returns    a new array with the sampled coordinates and masses
+    \param[in]  method  (optional) is the mode of operation for the sampling routine 
+                (see the docstring of math::sampleNdim for details);
+    \param[in,out]  state  is the seed for the pseudo-random number generator;
+                if not provided (NULL), use the global state.
+    \returns    a new array with the sampled coordinates and masses.
 */
 particles::ParticleArray<coord::PosCyl> sampleDensity(
-    const potential::BaseDensity& dens, const size_t numPoints);
+    const potential::BaseDensity& dens, const size_t numPoints,
+    math::SampleMethod method=math::SM_DEFAULT, math::PRNGState* state=NULL);
 
 
 /// Helper class for providing a BaseDensity interface to a density computed via integration over DF

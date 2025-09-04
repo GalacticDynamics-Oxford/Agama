@@ -54,6 +54,11 @@ double unwrapAngle(double x, double xprev);
     integer multiples of M_PI/2 correspond to exactly zero values of sine or cosine */
 void sincos(double x, double& s, double& c);
 
+/** arctangent function, faster than the one from standard library (result in the range +-M_PI/2) */
+double atan(double x);
+
+/** four-quadrant version of arctangent(y/x), faster than the one from standard library */
+double atan2(double y, double x);
 
 /** Perform a binary search in an array of sorted numbers x_0 < x_1 < ... < x_N
     to locate the index of bin that contains a given value x.

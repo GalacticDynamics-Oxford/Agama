@@ -1,5 +1,4 @@
-
-import numpy, agama, gala.potential, time; from timeit import timeit
+import numpy, agama, gala.potential, time
 numpy.set_printoptions(linewidth=100, precision=8)
 numpy.random.seed(42)
 
@@ -20,17 +19,11 @@ gpot4=gala.potential.NFWPotential(m=1.2, r_s=3.4)
 Gpot4=agama.GalaPotential(gpot4)
 Apot4=agama.GalaPotential(type='nfw', mass=1.2, scaleradius=3.4)
 
-### this one fails probably because of some bug in handling vectorized inputs in gala.KuzminPotential
-#gpot5=gala.potential.KuzminPotential(m=1, a=1, units=None)   # pure-python potential
-gpot5=gala.potential.HarmonicOscillatorPotential(omega=1.0)  # another pure-python potential
-Gpot5=agama.GalaPotential(gpot5)
-Apot5=agama.GalaPotential(type='harmonic', omega=1.0)
-
 # some random test points
 points=numpy.random.normal(size=(5,3))  # positions
 pointv=numpy.random.normal(size=(20,6))  # positions and velocities
 
-def test(gpot, Gpot, Apot, test_hessian=False):
+def test(gpot, Gpot, Apot):
     '''
     gpot is the native gala potential;
     Gpot is the same one accessed through wrapper;
@@ -92,24 +85,21 @@ def test(gpot, Gpot, Apot, test_hessian=False):
     print("agama orbits G vs A: %.3g" % numpy.max(numpy.sum(abs(a_orb_G - a_orb_A), axis=0) / maxrad))
     print("gala vs agama: %.3g"       % numpy.max(numpy.sum(abs(g_orb_G - a_orb_G), axis=0) / maxrad))
     print("energy error in gala: %.3g, agama: %.3g" % (deltaEg, deltaEa))
-    # illustrate that the hessian is broken (?) - compute it once for all points, then for each point in a loop
-    if test_hessian:
-        print("Checking vectorization of hessian for G: the two arrays should be equivalent, but they are not")
-        print("Vectorized:\n", Gpot.hessian(points.T))
-        print("Pointwise:\n", numpy.dstack([Gpot.hessian(point) for point in points]))
-        print("Checking vectorization of hessian for A: the two arrays should be equivalent")
-        print("Vectorized:\n", Apot.hessian(points.T))
-        print("Pointwise:\n", numpy.dstack([Apot.hessian(point) for point in points]))
-
+    # check the equivalence of hessian evaluated in a vectorized call vs. in a loop one point at a time
+    hess_G_vec  = Gpot.hessian(points.T)
+    hess_G_loop = numpy.dstack([Gpot.hessian(point) for point in points])
+    hess_A_vec  = Apot.hessian(points.T)
+    hess_A_loop = numpy.dstack([Apot.hessian(point) for point in points])
+    if numpy.any(hess_G_vec != hess_G_loop) or numpy.any(hess_A_vec != hess_A_loop):
+        print("Hessian vectorization test failed")
 
 test(gpot1, Gpot1, Apot1)
 test(gpot2, Gpot2, Apot2)
 test(gpot3, Gpot3, Apot3)
 test(gpot4, Gpot4, Apot4)
-#test(gpot5, Gpot5, Apot5)  #### this one also fails because of hessian (and the absense of density method in gala)
 
 # now test potentials defined with units
-agama.setUnits(length=1, mass=1, velocity=977.792594852689)  # velocity unit = 1 kpc / 1 Myr
+agama.setUnits(length=1, mass=1, velocity=977.7922217536624)  # velocity unit = 1 kpc / 1 Myr
 gpot6=gala.potential.MilkyWayPotential()
 Gpot6=agama.GalaPotential(gpot6)
 Apot6=agama.GalaPotential(
@@ -119,4 +109,4 @@ Apot6=agama.GalaPotential(
     dict(type='nfw',    mass=5.4e11, scaleradius=15.62), # halo
     units=Gpot6.units)
 
-test(gpot6, Gpot6, Apot6, test_hessian=False)
+test(gpot6, Gpot6, Apot6)

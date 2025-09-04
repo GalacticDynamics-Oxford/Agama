@@ -271,8 +271,8 @@ Angles computeAngles(const coord::PosVelCyl& point,
     double r = sqrt(pow_2(point.R)+pow_2(point.z));
     double vtheta = (point.vR * point.z - point.vz * point.R) / r;
     // aux angles:  sin(psi) = cos(theta) / sin(i),  sin(chi) = cot(i) cot(theta)
-    double psi = atan2(point.z * L,  -point.R * vtheta * r);
-    double chi = atan2(point.z * point.vphi, -vtheta * r);
+    double psi = math::atan2(point.z * L,  -point.R * vtheta * r);
+    double chi = math::atan2(point.z * point.vphi, -vtheta * r);
     Angles ang;
     ang.thetar = integr<MODE_OMEGAR>(potential, E, L, R1, R2, r) * Omegar;
     double thr = ang.thetar;
@@ -318,7 +318,7 @@ coord::PosVelCyl mapPointFromActionAngles(const ActionAngles &aa,
     double psi = aa.thetaz + thz - thr * Omegaz / Omegar;
     double sinpsi, cospsi;
     math::sincos(psi, sinpsi, cospsi);
-    double chi      = aa.Jz != 0 ? atan2(fabs(aa.Jphi) * sinpsi, L * cospsi) : psi;
+    double chi      = aa.Jz != 0 ? math::atan2(fabs(aa.Jphi) * sinpsi, L * cospsi) : psi;
     double sini     = sqrt(1 - pow_2(aa.Jphi / L)); // inclination angle of the orbital plane
     double costheta = sini * sinpsi;                // z/r
     double sintheta = sqrt(1 - pow_2(costheta));    // R/r is always non-negative
