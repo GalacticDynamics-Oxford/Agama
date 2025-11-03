@@ -395,7 +395,20 @@ void createSphericalDF(
         }
     }
 
-    // 4a. tidy up
+    // 4a. output debugging information, if needed
+    if(utils::verbosityLevel >= utils::VL_VERBOSE) {
+        std::ofstream strm("SphericalDF.log");
+        strm << "# r            \trho(r)         \tQ=Phi(r)       \tf(Q)           \n";
+        for(unsigned int i=0; i<gridsize; i++) {
+            strm <<
+            utils::pp(gridr[i], 15) << '\t' <<
+            utils::pp(density(gridr[i]), 15) << '\t' <<
+            utils::pp(gridPhi[i], 15) << '\t' <<
+            utils::pp(gridf[i], 15) << '\n';
+        }
+    }
+
+    // 4b. tidy up
     for(unsigned int i=0; i<gridf.size(); ) {
         // make sure that the values are non-negative, and don't leave spurious orphaned points
         // at both ends, which may appear to have f>0 due to various inaccuracies,
@@ -409,17 +422,6 @@ void createSphericalDF(
             gridPhi.erase(gridPhi.begin()+i);
         } else {
             i++;
-        }
-    }
-
-    // 4b. output debugging information, if needed
-    if(utils::verbosityLevel >= utils::VL_VERBOSE) {
-        std::ofstream strm("SphericalDF.log");
-        strm << "# Q            \tf(Q)           \n";
-        for(unsigned int i=0; i<gridsize; i++) {
-            strm <<
-            utils::pp(gridPhi[i], 15) << '\t' <<
-            utils::pp(gridf[i],   15) << '\n';
         }
     }
 

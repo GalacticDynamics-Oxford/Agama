@@ -224,6 +224,8 @@ void computeSphHarmCoefs(const BaseDensityOrPotential& src,
     const DensitySphericalHarmonic* dsh = dynamic_cast<const DensitySphericalHarmonic*>(&src);
     if(dsh) {
         coefs[0].assign(ind.size(), std::vector<double>(numPointsRadius));
+        // the source density may have a higher lmax than ours, so extend the temp array if needed
+        shcoefs.resize(std::max(dsh->getCoefsSize(), ind.size()));
         for(unsigned int indR=0; indR<numPointsRadius; indR++) {
             dsh->getCoefsAtRadius(radii[indR], &shcoefs.front());
             for(unsigned int c=0; c<ind.size(); c++)
@@ -1166,7 +1168,10 @@ DensitySphericalHarmonic::DensitySphericalHarmonic(const std::vector<double> &_g
             for(unsigned int k=0; k<gridSizeR; k++)
                 tmparr[k] = logScaling ? log(coefs[0][k]) : coefs[0][k];
 
-            // attempt to determine the inner slope and limiting value at r=0 from 3 innermost points
+            // determine the asymptotic behaviour of the density profile at r-->0:
+            // first try to construct a three-parameter asymptotic form  rho = a * r^b + c
+            // from the three innermost points;  if this fails, use a simpler form  rho = a * r^b
+            // for which the coefficients will be determined after the spline is constructed.
             double innerCoef = NAN, derivLeft = NAN;
             if(gridSizeR >= 3)
                 math::findAsymptote(gridRadii[0], gridRadii[1], gridRadii[2],
@@ -1175,12 +1180,13 @@ DensitySphericalHarmonic::DensitySphericalHarmonic(const std::vector<double> &_g
                 // if the input density was positive everywhere, make sure that the extrapolation
                 // remains so even when the density declines towards small radii
                 if(logScaling && innerSlope>0 && centralValue<0) {
-                    centralValue = 0;
-                    innerSlope = log(coefs[0][1]/coefs[0][0]) / log(gridRadii[1]/gridRadii[0]);
+                    // extrapolation failed, defer the determination until the spline is constructed
+                    innerSlope = NAN;
+                } else {
+                    derivLeft = innerCoef * innerSlope * pow(gridRadii[0], innerSlope);
+                    if(logScaling)
+                        derivLeft /= coefs[0][0];
                 }
-                derivLeft = innerCoef * innerSlope * pow(gridRadii[0], innerSlope);
-                if(logScaling)
-                    derivLeft /= coefs[0][0];
             } else { // fit from 3 points failed, use a simpler power-law asymptotic rho ~ a*r^b
                 innerSlope = NAN;  // will be determined after the spline is constructed
             }

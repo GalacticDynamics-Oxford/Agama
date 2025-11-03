@@ -965,8 +965,8 @@ void writeDensityAzimuthalHarmonic(std::ostream& strm, const DensityAzimuthalHar
 
 /// write data (expansion coefs or components) for a single or composite density or potential to a stream.
 /// this implementation is fairly incomplete - it flattens out any hierarchy of composite objects,
-/// and is not able to save parameters of most elementary objects (this may be implemented in the future);
-/// it is primarily intended to store density/potential expansion coefficients
+/// ignores any modifiers, and is not able to save parameters of most elementary objects (this may be
+/// implemented in the future); it is primarily intended to store density/potential expansion coefficients
 void writeAnyDensityOrPotential(std::ostream& strm, const BaseDensity* dens,
     const units::ExternalUnits& converter, int& counter)
 {

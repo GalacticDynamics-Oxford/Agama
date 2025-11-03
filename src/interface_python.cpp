@@ -65,7 +65,7 @@
 #include "utils.h"
 #include "utils_config.h"
 // text string embedded into the python module as the __version__ attribute (including Github commit number)
-#define AGAMA_VERSION "1.0.154 compiled on " __DATE__
+#define AGAMA_VERSION "1.0.155 compiled on " __DATE__
 
 // older versions of numpy have different macro names
 // (will need to expand this list if other similar macros are used in the code)
@@ -86,6 +86,9 @@
 #define PyInt_FromLong PyLong_FromLong
 #else
 #define Py_hash_t long
+#endif
+#if (PY_MAJOR_VERSION < 3 || PY_MINOR_VERSION < 13)
+#define Py_HashPointer _Py_HashPointer
 #endif
 
 /// utility snippet for allocating temporary storage either on stack (if small) or on heap otherwise
@@ -2328,7 +2331,7 @@ Py_hash_t Density_hash(PyObject *self)
 {
     // use the smart pointer to the underlying C++ object, not the Python object itself,
     // to establish identity between two Python objects containing the same C++ class instance
-    return _Py_HashPointer(const_cast<void*>(static_cast<const void*>(((DensityObject*)self)->dens.get())));
+    return Py_HashPointer(const_cast<void*>(static_cast<const void*>(((DensityObject*)self)->dens.get())));
 }
 
 /// syntactic sugar: construct a composite density object by adding two density objects
@@ -4425,7 +4428,7 @@ Py_hash_t DistributionFunction_hash(PyObject *self)
 {
     // use the smart pointer to the underlying C++ object, not the Python object itself,
     // to establish identity between two Python objects containing the same C++ class instance
-    return _Py_HashPointer(const_cast<void*>(static_cast<const void*>
+    return Py_HashPointer(const_cast<void*>(static_cast<const void*>
         (((DistributionFunctionObject*)self)->df.get())));
 }
 

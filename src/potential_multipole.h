@@ -115,7 +115,8 @@ public:
     const std::vector<double>& getRadii() const { return gridRadii; }
 
     /** return the radii of spline nodes and the array of density expansion coefficients.
-        \param[out]  radii  will be filled 
+        \param[out]  radii  will contain the grid radii.
+        \param[out]  coefsArray  will be filled with the array of coefficients at these radii.
     */
     void getCoefs(std::vector<double> &radii, std::vector< std::vector<double> > &coefsArray) const;
 
@@ -124,6 +125,10 @@ public:
         by this routine, but its elements corresponding to empty harmonics are left uninitialized.
     */
     void getCoefsAtRadius(double radius, double coefs[]) const;
+
+    /** return the size of coefficients array, to be used for pre-allocating the output storage in
+        getCoefsAtRadii() */
+    inline unsigned int getCoefsSize() const { return ind.size(); }
 
 private:
     /// radial grid

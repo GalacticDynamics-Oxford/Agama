@@ -257,12 +257,16 @@ PtrPotential readPotential(
     For a composite potential or density, all components are stored in the same file
     one after another, under separate sections [Potential], [Potential1], etc.
     For potential/density types not in the above list, only the name is stored (no parameters).
+    NOTE: this routine currently does NOT guarantee that the potential/density is stored correctly
+    (in a way that can be loaded back to produce the original object) in all cases;
+    in particular, it ignores the potential modifiers and is unsuitable for potential/density types
+    that are not expansions, but gives no warning or error in these cases!
     \param[in] fileName is the output file;
     \param[in] density is the reference to density or potential object;
     \param[in] converter is the unit converter for transforming the density or potential
     coefficients from internal into dimensional units; can be a trivial converter;
-    \return    success or failure (the latter may also mean that export is 
-    not available for this type of potential/density).
+    \return    success or failure (the latter indicates I/O error; however, an unsuitable potential
+    or density type does not produce a failure, but is silently ignored).
 */
 bool writeDensity(
     const std::string& fileName,

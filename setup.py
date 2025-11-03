@@ -560,7 +560,7 @@ PyInit_agamatest(void) {
             filename = 'gsl.tar.gz'
             dirname  = 'gsl-2.8'
             try:
-                urlretrieve('https://ftp.gnu.org/gnu/gsl/gsl-2.8.tar.gz', filename)
+                urlretrieve('https://ftpmirror.gnu.org/gnu/gsl/gsl-2.8.tar.gz', filename)
                 if os.path.isfile(filename):
                     say('Unpacking GSL\n')
                     subprocess.call(['tar', '-zxf', filename])    # unpack the archive
@@ -638,9 +638,10 @@ PyInit_agamatest(void) {
             os.chdir(EXTRAS_DIR)
             say('Downloading Eigen\n')
             filename = 'Eigen.zip'
-            dirname  = 'eigen-3.3.9'
+            dirname  = 'eigen-3.4.1'
             try:
                 urlretrieve('https://gitlab.com/libeigen/eigen/-/archive/3.3.9/eigen-3.3.9.zip', filename)
+                urlretrieve('https://gitlab.com/libeigen/eigen/-/archive/3.4.1/eigen-3.4.1.zip', filename)
                 if os.path.isfile(filename):
                     say('Unpacking Eigen\n')
                     zipf = zipfile.ZipFile(filename, 'r')

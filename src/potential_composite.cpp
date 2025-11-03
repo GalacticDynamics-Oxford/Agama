@@ -766,9 +766,14 @@ void Scaled<BasePotential>::evalmanyDensitySph(const size_t npoints, const coord
 void Scaled<BasePotential>::evalCar(const coord::PosCar &pos,
     double* potential, coord::GradCar* deriv, coord::HessCar* deriv2, double time) const
 {
-    double s = 1 / scale(time), as1 = ampl(time) * s, as2 = as1 * s, as3 = as2 * s;
-    if(as1==0)
-        return;   // optimization: when amplitude is zero, no work is needed
+    double a = ampl(time);
+    if(a == 0) {   // when amplitude is zero, skip evaluating the potential
+        if(potential)  *potential = 0;
+        if(deriv)      coord::clear(*deriv);
+        if(deriv2)     coord::clear(*deriv2);
+        return;
+    }
+    double s = 1 / scale(time), as1 = a * s, as2 = as1 * s, as3 = as2 * s;
     pot->eval(coord::PosCar(pos.x * s, pos.y * s, pos.z * s), potential, deriv, deriv2, time);
     if(potential)  *potential *= as1;
     if(deriv)  {
@@ -789,9 +794,14 @@ void Scaled<BasePotential>::evalCar(const coord::PosCar &pos,
 void Scaled<BasePotential>::evalCyl(const coord::PosCyl &pos,
     double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2, double time) const
 {
-    double s = 1 / scale(time), as1 = ampl(time) * s, as2 = as1 * s, as3 = as2 * s;
-    if(as1==0)
+    double a = ampl(time);
+    if(a == 0) {   // when amplitude is zero, skip evaluating the potential
+        if(potential)  *potential = 0;
+        if(deriv)      coord::clear(*deriv);
+        if(deriv2)     coord::clear(*deriv2);
         return;
+    }
+    double s = 1 / scale(time), as1 = a * s, as2 = as1 * s, as3 = as2 * s;
     pot->eval(coord::PosCyl(pos.R * s, pos.z * s, pos.phi), potential, deriv, deriv2, time);
     if(potential)  *potential *= as1;
     if(deriv)  {
@@ -812,9 +822,14 @@ void Scaled<BasePotential>::evalCyl(const coord::PosCyl &pos,
 void Scaled<BasePotential>::evalSph(const coord::PosSph &pos,
     double* potential, coord::GradSph* deriv, coord::HessSph* deriv2, double time) const
 {
-    double s = 1 / scale(time), as1 = ampl(time) * s, as2 = as1 * s, as3 = as2 * s;
-    if(as1==0)
+    double a = ampl(time);
+    if(a == 0) {   // when amplitude is zero, skip evaluating the potential
+        if(potential)  *potential = 0;
+        if(deriv)      coord::clear(*deriv);
+        if(deriv2)     coord::clear(*deriv2);
         return;
+    }
+    double s = 1 / scale(time), as1 = a * s, as2 = as1 * s, as3 = as2 * s;
     pot->eval(coord::PosSph(pos.r * s, pos.theta, pos.phi), potential, deriv, deriv2, time);
     if(potential)  *potential *= as1;
     if(deriv)  {
