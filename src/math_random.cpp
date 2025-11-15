@@ -36,8 +36,9 @@ static inline int countr_one(uint64_t x) {
     return std::countr_one(x);
 #else   // naive approach; compilers are smart enough to optimize it
     int l = 0;
-    while((x & (1 << l)))
+    while((x & (1ULL << l)))
         l++;
+    return l;
 #endif
 }
 

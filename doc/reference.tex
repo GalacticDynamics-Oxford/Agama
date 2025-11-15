@@ -317,9 +317,9 @@ $\times\left\{ \begin{array}{ll} \delta(z)\qquad\qquad\mbox{if} & h=0 \\[1mm]
 \ppp{surfaceDensity}~($\Sigma_0$) or \ppp{mass}, \ppp{scaleRadius}~($R_\mathrm{d}$), \ppp{scaleHeight}~($h$), \ppp{innerCutoffRadius}~($R_\mathrm{cut}$), \ppp{sersicIndex}~($n$)\\
 
 \ttt{Spheroid} & $\rho = \rho_0  \left(\frac{\tilde r}{a}\right)^{-\gamma} \Big[ 1 + \big(\frac{\tilde r}{a}\big)^\alpha \Big]^{\frac{\gamma-\beta}{\alpha}}$ $\times \exp\Big[ -\big(\frac{\tilde r}{r_\mathrm{cut}}\big)^\xi\Big] $ &
-\ppp{densityNorm}~($\rho_0$) or \ppp{mass}, \ppp{alpha}~($\alpha$), \ppp{beta}~($\beta$), \ppp{gamma}~($\gamma$), \ppp{scaleRadius}~($a$), \ppp{axisRatioY}~($p$), \ppp{axisRatioZ}~($q$), \ppp{outerCutoffRadius}~($r_\mathrm{cut}$), \ppp{cutoffStrength}~($\xi$) \\[2mm]
+\ppp{densityNorm}~($\rho_0$) or \ppp{mass}, \ppp{alpha}~($\alpha$), \ppp{beta}~($\beta$), \ppp{gamma}~($\gamma$), \ppp{scaleRadius}~($a$), \ppp{axisRatioY}~($p$), \ppp{outerCutoffRadius}~($r_\mathrm{cut}$), \ppp{axisRatioZ}~($q$), \ppp{cutoffStrength}~($\xi$) \\[10mm]
 
-\ttt{Nuker} & \mbox{deprojection of $\Sigma={}$} \mbox{$\Sigma_0 \left(\frac{R}{a}\right)^{-\gamma} \Big[ \frac12 + \frac12\big(\frac{R}{a}\big)^\alpha \Big]^{\frac{\gamma-\beta}{\alpha}}$} $\times \exp\Big[ -\big(\frac{R}{r_\mathrm{cut}}\big)^\xi\Big] $  & \ppp{surfaceDensity}~($\Sigma_0$) or \ppp{mass}, \ppp{alpha}~($\alpha$), \ppp{beta}~($\beta$), \ppp{gamma}~($\gamma$), \ppp{scaleRadius}~($a$), \ppp{axisRatioY}~($p$), \ppp{axisRatioZ}~($q$), \ppp{outerCutoffRadius}~($r_\mathrm{cut}$), \ppp{cutoffStrength}~($\xi$) \\[2mm]
+\ttt{Nuker} & \mbox{deprojection of $\Sigma={}$} \mbox{$\Sigma_0 \left(\frac{R}{a}\right)^{-\gamma} \Big[ \frac12 + \frac12\big(\frac{R}{a}\big)^\alpha \Big]^{\frac{\gamma-\beta}{\alpha}}$} $\times \exp\Big[ -\big(\frac{R}{r_\mathrm{cut}}\big)^\xi\Big] $  & \ppp{surfaceDensity}~($\Sigma_0$) or \ppp{mass}, \ppp{alpha}~($\alpha$), \ppp{beta}~($\beta$), \ppp{gamma}~($\gamma$), \ppp{scaleRadius}~($a$), \ppp{axisRatioY}~($p$), \ppp{outerCutoffRadius}~($r_\mathrm{cut}$), \ppp{axisRatioZ}~($q$), \ppp{cutoffStrength}~($\xi$) \\[2mm]
 
 \ttt{Sersic} & \mbox{deprojection of} \mbox{$\Sigma = \Sigma_0 \exp\big[-b_n\,(R/a)^{1/n}\big]$} & \ppp{surfaceDensity}~($\Sigma_0$) or \ppp{mass}, \ppp{scaleRadius}~($a$), \ppp{sersicIndex}~($n$), \ppp{axisRatioY}~($p$), \ppp{axisRatioZ}~($q$) \\[2mm]
 
@@ -331,20 +331,19 @@ $\times\left\{ \begin{array}{ll} \delta(z)\qquad\qquad\mbox{if} & h=0 \\[1mm]
 
 \ttt{NFW} & $\Phi = -\frac{M}{r} \ln\left(1 + \frac{r}{a}\right)$ & \ppp{mass}~($M$ {\footnotesize is the mass enclosed in $\sim5.3a$, the total mass is $\infty$}), \ppp{scaleRadius}~($a$) \\[2mm]
 
-\ttt{MiyamotoNagai} & $\Phi = -\frac{M}{\sqrt{R^2 + \left(a + \sqrt{z^2+b^2}\right)^2}}$ & \ppp{mass}~($M$), \ppp{scaleRadius}~($a$), \ppp{scaleRadius2} or \ppp{scaleHeight}~($b$) \\[2mm]
+\ttt{MiyamotoNagai} & $\Phi = -\frac{M}{\sqrt{R^2 + \left(a + \sqrt{z^2+b^2}\right)^2}}$ & \ppp{mass}~($M$),~\ppp{scaleRadius}~($a$),~\ppp{scaleHeight}~($b$) \\[2mm]
 
-\ttt{PerfectEllipsoid}\!\!\!\!\! & $\rho = \frac{M}{\pi^2\,q\,a^3} \left[ 1 + \frac{R^2+(z/q)^2}{a^2} \right]^{-2}$ &  \ppp{mass}~($M$), \ppp{scaleRadius}~($a$), \ppp{axisRatioZ}~($q$) \\[2mm]
+\ttt{LongMurali} & $\Phi = \frac{1}{2\,l} \int_{-l}^l \Phi_{\rm MN}(x\!-\!t, y, z)\, {\rm d}t$\! & \ppp{mass}~($M$),~\ppp{scaleRadius}~($a$),~\ppp{scaleHeight}~($b$), \ppp{barLength}~($l$); \makebox[0cm][l]{\footnotesize $\Phi_{\rm MN}$ is Miyamoto--Nagai potential} \\[2mm]
 
-\ttt{Dehnen} & $\rho = \frac{M\,(3-\gamma)}{4\pi\,p\,q\,a^3} \left(\frac{\tilde r}a\right)^{-\gamma} \left(1+\frac{\tilde r}a\right)^{\gamma-4}$\!\! &  \ppp{mass}~($M$), \ppp{gamma}~($\gamma$), \ppp{axisRatioY}~($p$), \ppp{axisRatioZ}~($q$), \ppp{scaleRadius}~($a$) \\[2mm]
+\ttt{PerfectEllipsoid}\!\!\!\!\! & $\rho = \frac{M}{\pi^2\,q\,a^3} \left[ 1 + \frac{R^2+(z/q)^2}{a^2} \right]^{-2}$ &  \ppp{mass}~($M$),~\ppp{scaleRadius}~($a$),~\ppp{axisRatioZ}~($q$) \\[2mm]
 
-\ttt{Ferrers} & $\rho = \frac{105\,M}{32\pi\,p\,q\,a^3} \left[1 - \left(\frac{\tilde r}a\right)^2\right]^2$ & \ppp{mass}~($M$), \ppp{scaleRadius}~($a$), \ppp{axisRatioY}~($p$), \ppp{axisRatioZ}~($q$) \\[2mm]
+\ttt{Dehnen} & $\rho = \frac{M\,(3-\gamma)}{4\pi\,p\,q\,a^3} \left(\frac{\tilde r}a\right)^{-\gamma} \left(1+\frac{\tilde r}a\right)^{\gamma-4}$\!\! &  \ppp{mass}~($M$), \ppp{scaleRadius}~($a$), \ppp{gamma}~($\gamma$), \ppp{axisRatioY}~($p$), \ppp{axisRatioZ}~($q$) \\[4mm]
 
-\ttt{King} & specified by $f(E)$, see text & 
-%\ppp{mass}, \ppp{scaleRadius}, \ppp{W0}~($W_0$), \ppp{trunc}
-\ppp{mass}, \ppp{scaleRadius}~($r_\mathrm{c}$), \ppp{W0}, \ppp{trunc}~($g$)
-\\[1mm]
+\ttt{Ferrers} & $\rho = \frac{105\,M}{32\pi\,p\,q\,a^3} \left[1 - \left(\frac{\tilde r}a\right)^2\right]^2$ & \ppp{mass}~($M$), \ppp{scaleRadius}~($a$), \ppp{axisRatioY}~($p$), \ppp{axisRatioZ}~($q$) \\[4mm]
 
-\ttt{Logarithmic} & $\Phi = \frac{1}{2} v_0^2\,\ln(r_\mathrm{core}^2 + \tilde r^2)$ & \ppp{v0}~($v_0$), \ppp{scaleRadius}~($r_\mathrm{core}$), \ppp{axisRatioY}~($p$), \ppp{axisRatioZ}~($q$) \\[2mm]
+\ttt{King} & specified by $f(E)$, see text & \ppp{mass}, \ppp{scaleRadius}~($r_\mathrm{c}$), \ppp{W0}, \ppp{trunc}~($g$) \\[1mm]
+
+\ttt{Logarithmic} & $\Phi = \frac{1}{2} v_0^2\,\ln(r_\mathrm{core}^2 + \tilde r^2)$ & \ppp{v0}~($v_0$), \ppp{scaleRadius}~($r_\mathrm{core}$), \ppp{axisRatioY}~($p$), \ppp{axisRatioZ}~($q$) \\[4mm]
 
 \ttt{Harmonic} & $\Phi = \frac{1}{2} \Omega^2\,\tilde r^2$ & \ppp{Omega}~($\Omega$), \ppp{axisRatioY}~($p$), \ppp{axisRatioZ}~($q$) \\[2mm]
 
@@ -419,7 +418,8 @@ Parameters defining an analytic density or potential model (if \ppp{type} is a p
 \item \ppp{mass} [1] -- total mass of an analytic model%
 \footnote{Except the \ttt{NFW} profile, in which the total mass is formally infinite, and the parameter $M$ refers to the mass within $\sim 5.3a$, where $a$ is the scale radius. It is related to the so-called virial mass $M_\mathrm{vir}$ and so-called concentration $c$ by $M_\mathrm{vir}=M\,[\ln(1+c)-c/(c+1)]$. An NFW profile sharply cut at the virial radius is equivalent to setting \ppp{outerCutoffRadius} to the virial radius ($a\,c$) and \ppp{cutoffStrength} to a very large value (however, this may lead to numerical artifacts).}.
 \item \ppp{scaleRadius} [1] -- the first (sometimes the only) parameter with the dimension of length that defines the profile.
-\item \ppp{scaleHeight} [1] or \ppp{scaleRadius2} -- the second such parameter (e.g., for Miyamoto--Nagai or exponential disk models).
+\item \ppp{scaleHeight} [1] -- the second such parameter (for Miyamoto--Nagai or exponential disk models).
+\item \ppp{barLength} [0] -- extent of the bar in the Long--Murali model (when zero, it is equivalent to the Miyamoto--Nagai model).
 \item \ppp{outerCutoffRadius} [$\infty$] -- another length-scale parameter defining the radius of exponential truncation, used for \ttt{Spheroid} or \ttt{Nuker} models ($\infty$ means no cutoff).
 \item \ppp{innerCutoffRadius} [0] -- similar parameter for \ttt{Disk} that defines the radius of an inner hole.
 \item \ppp{surfaceDensity} [0] -- normalization of surface density (its value at $R=0$ for the exponential \ttt{Disk} or \ttt{Sersic} profiles (\textit{not} at the half-light radius!), or at $R=$\ppp{scaleRadius} for the \ttt{Nuker} profile).
@@ -1045,8 +1045,8 @@ Plotting the rotation curve of the above constructed potential and all its compo
 \texttt{Tcirc(E)} computes the characteristic time (period of a circular orbit with the given energy); for convenience it may also be called with an $N\times6$ input array of position/velocity coordinates: \texttt{Tcirc(points)}.\\[2mm]
 \texttt{Rcirc(E=...)} or \texttt{Rcirc(L=...)} return the radius of a circular orbit in the equatorial plane corresponding to the given energy or $z$-component of the angular momentum.\\[2mm]
 \texttt{Rmax(E)} returns the maximum radius accessible with the given energy, i.e., the root of $\Phi(R_\mathrm{max})=E$.\\[2mm]
-\texttt{Rperiapo(E, L)} returns the pericenter and apocenter radii for an orbit with the given energy and angular momentum; for convenience, it may also be called with an $N\times6$ input array of position/velocity coordinates, and of course, with a $N\times2$ array of $E,L$ values for multiple input points (all methods can accept vectorized input). This and the previous three functions operate with orbits in the equatorial plane and give exact results for spherical or axisymmetric potentials; otherwise the result refers to the axisymmetrized version of the potential and is therefore approximate. \\[2mm]
-\texttt{export(filename)} stores the potential into an INI file, which can be used later to read it back (by passing the filename as the parameter to the constructor). This operation only makes sense for the potential expansions (\ppp{Multipole} or \ppp{CylSpline}) without any modifiers; other potentials just store their name but nothing else (and hence are unusable or even incorrectly loaded back!) -- as explained above, due to the rearrangements of constituent parts during the construction of a multicomponent potential, it is not always possible to reconstruct the original parameters from the existing objects. Note that all components of a composite potential are stored in a single file, each one in its own section \texttt{[Potential]}, \texttt{[Potential1]}, etc.
+\texttt{Rperiapo(E, L)} returns the pericenter and apocenter radii for an orbit with the given energy and angular momentum; for convenience, it may also be called with an $N\times6$ input array of position/velocity coordinates, and of course, with a $N\times2$ array of $E,L$ values for multiple input points (all methods can accept vectorized input). This and the previous three functions do not integrate orbits, but merely solve the relevant equations for the given values of $E$ and $L$ in the equatorial plane of the axisymmetrized version of the potential; therefore, the results are exact for spherical or axisymmetric potentials, and approximate otherwise. \\[2mm]
+\texttt{export(filename)} stores the potential into an INI file, which can be used later to read it back (by passing the filename as the parameter to the constructor). This operation only makes sense for density or potential expansions (\ppp{DensitySphericalHarmonic}, \ppp{DensityAzimuthalHarmonic}, \ppp{BasisSet}, \ppp{Multipole}, \ppp{CylSpline}) without any modifiers; other potentials just store their name but nothing else (and hence are unusable or even incorrectly loaded back!) -- as explained above, due to the rearrangements of constituent parts during the construction of a multicomponent potential, it is not always possible to reconstruct the original parameters from the existing objects. Note that all components of a composite potential are stored in a single file, each one in its own section \texttt{[Potential]}, \texttt{[Potential1]}, etc.
 
 \paragraph{ActionFinder} is the \Python class constructed for the given potential:\\
 \texttt{af = agama.ActionFinder(pot, [interp=True|False])}\\
@@ -2889,7 +2889,7 @@ Vasiliev E., Valluri M., 2020, ApJ, 889, 39
 Vasiliev E., Belokurov V., Erkal D., 2021, MNRAS, 501, 2279
 
 \bibitem{Woudenberg2025}
-Woudenberg H., Helmi A., 2025, arXiv:2505.20143
+Woudenberg H., Helmi A., 2025, A\&A, 700, 240
 
 \bibitem{Zemp2011}
 Zemp M., Gnedin O., Gnedin N., Kravtsov A., 2011, ApJS, 197, 30

@@ -34,7 +34,9 @@ numpy, setuptools and wheel. The '--yes' flag cannot be directly passed to pip; 
   pip install . --config-settings --build-option=--yes
 or for older version of pip,
   pip install . --install-option=--yes
-One may also need to add another flag '--no-build-isolation' when installing via pip.
+One may also need to add another flag '--no-build-isolation' when installing via pip,
+otherwise the installation may fail with the message "Numpy not found", even if it is actually
+present in the current Python environment.
 Note that pip hides most of the messages printed during installation, but the questions
 requiring user input should nevertheless appear on the screen, although they may possibly be
 interleaved with other output from the compiler. Passing a '-v' flag to pip disables hiding
@@ -49,7 +51,8 @@ On Windows, the compiler (MSVC) requires a somewhat different treatment, but the
 is adapted for this situation (it runs a different build program, nmake, and uses Makefile.msvc
 instead of ordinary Makefile, still creating a Makefile.local automatically during the setup).
 Before running the setup script from Windows terminal, one needs to initialize the command-line
-build tools by running "vcvarsall.bat".
+build tools by running "vcvarsall.bat" (make sure that the build environment is using the same
+architecture as Python, most likely x86_64).
 
 The Makefile contains instructions for building both static and shared versions of the library
 (on Linux/MacOS: agama.a and agama.so, on Windows+MSVC: agama.lib and agama.pyd).
@@ -86,8 +89,8 @@ In the manual mode, follow these steps:
     - Cuba library for multidimensional integration (the alternative, which is actually preferred,
     is the Cubature library that is bundled with this distribution):
     http://www.feynarts.de/cuba/
-    Note: since Agama is compiled to a shared library, any external libraries to be statically linked
-    with it need to be compiled with -fPIC flag.
+    Note: since Agama is compiled to a shared library, any external libraries to be statically
+    linked with it need to be compiled with -fPIC flag.
 2.  You need to create a file called Makefile.local, which is included by the Makefile
     and contains path names and compiler flags specific to your own computer.
     An example is given in Makefile.local.template (you will need to change the pathnames).
@@ -127,6 +130,6 @@ or
 and should take no more than a few minutes, displaying "OK" or "FAILED" for each test program
 (or possibly "SKIPPED" for a few Python programs that rely on external libraries such as astropy or
 amuse, which is not a critical error).
-Of course one may run these tests individually (C++ programs compiled and placed into exe/ subfolder,
-or python scripts in the py/ subfolder), in which case they print out more information.
+Of course one may run these tests individually (C++ programs compiled and placed into exe/
+subfolder, or python scripts in the py/ subfolder), in which case they print out more information.
 They can also serve as the examples of usage, together with other (non-test) example programs.

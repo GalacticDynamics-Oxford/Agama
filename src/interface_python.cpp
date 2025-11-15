@@ -65,7 +65,7 @@
 #include "utils.h"
 #include "utils_config.h"
 // text string embedded into the python module as the __version__ attribute (including Github commit number)
-#define AGAMA_VERSION "1.0.155 compiled on " __DATE__
+#define AGAMA_VERSION "1.0.156 compiled on " __DATE__
 
 // older versions of numpy have different macro names
 // (will need to expand this list if other similar macros are used in the code)
@@ -1581,7 +1581,7 @@ PyObject* allocateOutput(npy_intp numPoints, double* buffer[3]=NULL, int C=0)
 #define DOCSTRING_DENSITY_PARAMS \
     "  mass=...   total mass of the model, if applicable.\n" \
     "  scaleRadius=...   scale radius of the model (if applicable).\n" \
-    "  scaleHeight=...   scale height of the model (currently applicable to MiyamotoNagai and Disk).\n" \
+    "  scaleHeight=...   scale height of the model (MiyamotoNagai, LongMurali and Disk models).\n" \
     "  p=...   or  axisRatioY=...   axis ratio y/x, i.e., intermediate to long axis " \
     "(applicable to triaxial potential models such as Dehnen and Ferrers, " \
     "and to Spheroid, Nuker or Sersic density models).\n" \
@@ -1591,6 +1591,7 @@ PyObject* allocateOutput(npy_intp numPoints, double* buffer[3]=NULL, int C=0)
     "  beta=...   outer density slope (Spheroid or Nuker).\n" \
     "  alpha=...  strength of transition from the inner to the outer slopes (Spheroid or Nuker).\n" \
     "  sersicIndex=...   profile shape parameter 'n' (Sersic or Disk).\n" \
+    "  barLength=...  length of the bar (LongMurali).\n" \
     "  innerCutoffRadius=...   radius of inner hole (Disk).\n" \
     "  outerCutoffRadius=...   radius of outer exponential cutoff (Spheroid).\n" \
     "  cutoffStrength=...   strength of outer exponential cutoff  (Spheroid).\n" \
@@ -1616,7 +1617,7 @@ static const char* docstringDensity =
     "An instance of Density class is constructed using the following keyword arguments:\n"
     "  type='...' or density='...'   the name of density profile (required), "
     "can be one of the following:\n"
-    "    Denhen, Plummer, PerfectEllipsoid, Ferrers, MiyamotoNagai, NFW, "
+    "    Denhen, Plummer, PerfectEllipsoid, Ferrers, MiyamotoNagai, LongMurali, NFW, "
     "Disk, Spheroid, Nuker, Sersic, King.\n"
     DOCSTRING_DENSITY_PARAMS
     "Most of these parameters have reasonable default values.\n"
@@ -2523,7 +2524,7 @@ static const char* docstringPotential =
     "Note that all keywords and their values are not case-sensitive.\n\n"
     "List of possible keywords for a single component:\n"
     "  type='...'   the type of potential, can be one of the following 'basic' types:\n"
-    "    Harmonic, Logarithmic, Plummer, MiyamotoNagai, NFW, Ferrers, Dehnen, "
+    "    Harmonic, Logarithmic, Plummer, MiyamotoNagai, LongMurali, NFW, Ferrers, Dehnen, "
     "PerfectEllipsoid, Disk, Spheroid, Nuker, Sersic, King, KeplerBinary, UniformAcceleration;\n"
     "    or one of the expansion types:  BasisSet, Multipole, CylSpline - "
     "in these cases, one should provide either a density model, file name, "

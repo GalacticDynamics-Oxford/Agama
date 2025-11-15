@@ -103,7 +103,7 @@ void PerfectEllipsoid::evalAxi(const coord::PosAxi& pos,
     // Phi = norm * M(rho,nu) * [Grho(rho) + Gnu(nu)]
     double Phi = norm * M * (psi * Fu + cosnu * Fv);
     if(value)
-        *value = psi == INFINITY ? 0 : Phi;
+        *value = psi == INFINITY ? -0.0 : Phi;
     if(!deriv && !deriv2)
         return;
     double

@@ -130,7 +130,7 @@ public:
             utils::pp(kld, 8) + "\r";
             values[0] = kld;
         }
-        catch(std::exception&e) {
+        catch(std::exception&) {
             values[0] = /*INFINITY*/ 1e100;
         }
     }

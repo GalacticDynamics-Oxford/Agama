@@ -78,8 +78,8 @@ void NFW::evalDeriv(double r,
 void MiyamotoNagai::evalCyl(const coord::PosCyl &pos,
     double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2, double /*time*/) const
 {
-    double zb    = sqrt(pow_2(pos.z) + pow_2(scaleRadiusB));
-    double azb2  = pow_2(scaleRadiusA + zb);
+    double zb    = sqrt(pow_2(pos.z) + pow_2(scaleHeight));
+    double azb2  = pow_2(scaleRadius + zb);
     double den2  = 1. / (pow_2(pos.R) + azb2);
     double denom = sqrt(den2);
     double Rsc   = pos.R * denom;
@@ -88,26 +88,94 @@ void MiyamotoNagai::evalCyl(const coord::PosCyl &pos,
         *potential = -mass * denom;
     if(deriv) {
         deriv->dR  = mass * den2 * Rsc;
-        deriv->dz  = mass * den2 * zsc * (1 + scaleRadiusA/zb);
+        deriv->dz  = mass * den2 * zsc * (1 + scaleRadius / zb);
         deriv->dphi= 0;
     }
     if(deriv2) {
         double mden3 = mass * denom * den2;
-        deriv2->dR2  = mden3 * (azb2*den2 - 2*pow_2(Rsc));
-        deriv2->dz2  = mden3 * ( (pow_2(Rsc) - 2*azb2*den2) * pow_2(pos.z/zb) +
-            pow_2(scaleRadiusB) * (scaleRadiusA/zb + 1) * (pow_2(Rsc) + azb2*den2) / pow_2(zb) );
-        deriv2->dRdz = mden3 * -3 * Rsc * zsc * (scaleRadiusA/zb + 1);
+        deriv2->dR2  = mden3 * (azb2 * den2 - 2*pow_2(Rsc));
+        deriv2->dz2  = mden3 * ( (pow_2(Rsc) - 2 * azb2 * den2) * pow_2(pos.z / zb) +
+            pow_2(scaleHeight) * (1 + scaleRadius / zb) * (pow_2(Rsc) + azb2 * den2) / pow_2(zb) );
+        deriv2->dRdz = mden3 * -3 * Rsc * zsc * (1 + scaleRadius / zb);
         deriv2->dRdphi = deriv2->dzdphi = deriv2->dphi2 = 0;
     }
 }
 
 double MiyamotoNagai::densityCyl(const coord::PosCyl &pos, double /*time*/) const
 {
-    double zb   = sqrt(pow_2(pos.z) + pow_2(scaleRadiusB));
-    double azb2 = pow_2(scaleRadiusA + zb);
-    return 1./4/M_PI * mass * pow_2(scaleRadiusB) *
-        (scaleRadiusA * pow_2(pos.R) + (scaleRadiusA + 3*zb) * azb2) /
-        (pow_3(zb) * sqrt(pow_2(pos.R) + azb2) * pow_2(pow_2(pos.R) + azb2));
+    double zb   = sqrt(pow_2(pos.z) + pow_2(scaleHeight));
+    double azb2 = pow_2(scaleRadius + zb), R2azb2 = pow_2(pos.R) + azb2;
+    return 1./4/M_PI * mass * pow_2(scaleHeight) *
+        (scaleRadius + 3*zb * azb2 / R2azb2) / (pow_3(zb) * R2azb2 * sqrt(R2azb2));
+}
+
+void LongMurali::evalCar(const coord::PosCar &pos,
+    double* potential, coord::GradCar* deriv, coord::HessCar* deriv2, double /*time*/) const
+{
+    double
+        zb  = sqrt(pow_2(pos.z) + pow_2(scaleHeight)),
+        yz2 = pow_2(pos.y) + pow_2(scaleRadius + zb),
+        Tm  = sqrt(yz2 + pow_2(pos.x - barLength)),
+        Tp  = sqrt(yz2 + pow_2(pos.x + barLength)),
+        iTm = 1 / Tm,
+        iTp = 1 / Tp,
+        // integrating terms with different powers in numerator (n) and denominator (p) over t=-l..l
+        // Inp = 1/(2l) \int_{-l}^{+l}  dt * (x-t)^n / ((x-t)^2 + yz2)^{p/2}
+        // expressions written in a form that avoids cancellation errors at large radii
+        I03 = 2.0  * (iTp + iTm) / (pow_2(Tp + Tm) - 4 * pow_2(barLength)),
+        I13 = 2.0  * pos.x * iTp * iTm / (Tp + Tm),
+        I05 = I03 / 3 * (pow_2(iTp) + pow_2(iTm) + iTp * iTm *
+            (0.5 * (pow_2(Tp) + pow_2(Tm)) + pow_2(pos.x) + pow_2(barLength)) /
+            (Tp * Tm + pow_2(pos.x) - pow_2(barLength)) ),
+        I15 = 1./3 * I13 * (pow_2(iTp) + pow_2(iTm) + iTp * iTm),
+        I25 = I03 - yz2 * I05;
+    if(potential) {
+        if(Tm == INFINITY) {
+            *potential = -0.0;
+        } else if(fabs(barLength) <= fabs(pos.x) * 7e-3) {
+            double ir2 = 1 / (pow_2(pos.x) + yz2);
+            // Taylor expansion for |x| >> barLength, accurate to ~1e-13 at the crossover point
+            *potential = -mass * sqrt(ir2) *
+                (1 + pow_2(barLength * ir2) * (1./3 * pow_2(pos.x) - 1./6 * yz2 +
+                     pow_2(barLength * ir2) * (1./5 * pow_2(pos.x) * (pow_2(pos.x) - 3 * yz2) +
+                     3./40 * pow_2(yz2))));
+        } else {  // normal case; valid even for max(|y,z|) >> barLength
+            double iyz = 1 / sqrt(yz2);
+            *potential = 0.5 * mass / barLength *
+                (asinh((pos.x - barLength) * iyz) - asinh((pos.x + barLength) * iyz));
+        }
+    }
+    if(deriv) {
+        deriv->dx = mass * I13;
+        deriv->dy = mass * I03 * pos.y;
+        deriv->dz = mass * I03 * pos.z * (1 + scaleRadius / zb);
+    }
+    if(deriv2) {
+        deriv2->dx2  = mass * (I03 - 3 * I25);
+        deriv2->dy2  = mass * (I03 - 3 * I05 * pow_2(pos.y));
+        deriv2->dz2  = mass * (I03 * (1 + scaleRadius / zb * pow_2(scaleHeight / zb))
+            - 3 * I05 * pow_2((1 + scaleRadius / zb) * pos.z));
+        deriv2->dxdy = mass * -3 * I15 * pos.y;
+        deriv2->dxdz = mass * -3 * I15 * pos.z * (1 + scaleRadius / zb);
+        deriv2->dydz = mass * -3 * I05 * pos.y * (1 + scaleRadius / zb) * pos.z;
+    }
+}
+
+double LongMurali::densityCar(const coord::PosCar &pos, double /*time*/) const
+{
+    double
+        zb  = sqrt(pow_2(pos.z) + pow_2(scaleHeight)),
+        yz2 = pow_2(pos.y) + pow_2(scaleRadius + zb),
+        Tm  = sqrt(yz2 + pow_2(pos.x - barLength)),
+        Tp  = sqrt(yz2 + pow_2(pos.x + barLength)),
+        iTm = 1 / Tm,
+        iTp = 1 / Tp,
+        I03 = 2.0  * (iTp + iTm) / (pow_2(Tp + Tm) - 4 * pow_2(barLength));
+    // transformed expression for the Hessian to avoid cancellation errors
+    return (1./4/M_PI) * mass * I03 * pow_2(scaleHeight / zb) *
+        (scaleRadius / zb + pow_2(scaleRadius + zb) * (pow_2(iTp) + pow_2(iTm) +
+            iTp * iTm * (0.5 * (pow_2(Tp) + pow_2(Tm)) + pow_2(pos.x) + pow_2(barLength)) /
+            (Tp * Tm + pow_2(pos.x) - pow_2(barLength)) ) );
 }
 
 void Logarithmic::evalCar(const coord::PosCar &pos,

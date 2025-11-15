@@ -401,6 +401,7 @@ int main() {
     addPot(pots, "type=Isochrone, mass=3, scaleRadius=2");
     addPot(pots, "type=NFW, mass=10, scaleRadius=10");
     addPot(pots, "type=MiyamotoNagai, mass=5, scaleRadius=2, scaleHeight=0.2");
+    addPot(pots, "type=LongMurali, mass=4, scaleRadius=1, scaleHeight=0.2, barLength=3");
     addPot(pots, "type=Logarithmic, v0=2, scaleRadius=0.01, p=0.8, q=0.5");
     addPot(pots, "type=Ferrers, mass=1, scaleRadius=0.9, p=0.8, q=0.5");
     addPot(pots, "type=Dehnen, mass=2, scaleRadius=1, gamma=1.5");

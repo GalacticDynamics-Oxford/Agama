@@ -18,15 +18,15 @@ TESTEXE = exe/$(TESTEXE:  = exe/)
 COMPILE_FLAGS_ALL = $(COMPILE_FLAGS_ALL) -I$(SRCDIR)
 
 # this is the default target (build all), if make is launched without parameters
-all: $(OBJDIR) $(EXEDIR) lib $(TESTEXE)
+all:  $(OBJDIR) $(EXEDIR) lib $(TESTEXE)
 
 # one may recompile just the library by running 'make lib'
-lib: $(LIBNAME_STATIC) $(LIBNAME_SHARED)
+lib:  $(LIBNAME_STATIC) $(LIBNAME_SHARED)
 
-$(LIBNAME_STATIC): $(OBJECTS) $(TORUSOBJ) Makefile Makefile.local Makefile.list
+$(LIBNAME_STATIC):  $(OBJECTS) $(TORUSOBJ) Makefile.msvc Makefile.local Makefile.list
 	lib.exe $(OBJECTS) $(TORUSOBJ) /out:$(LIBNAME_STATIC)
 
-$(LIBNAME_SHARED): $(OBJECTS) $(TORUSOBJ) Makefile Makefile.local Makefile.list
+$(LIBNAME_SHARED):  $(OBJECTS) $(TORUSOBJ) Makefile.msvc Makefile.local Makefile.list
 	link.exe $(OBJECTS) $(TORUSOBJ) $(LINK_FLAGS_ALL) $(LINK_FLAGS_LIB) $(LINK_FLAGS_LIB_AND_EXE_STATIC) /dll /out:$(LIBNAME_SHARED) /implib:agama_pyd.lib
 	del agama_pyd.lib
 	del agama_pyd.exp
@@ -39,8 +39,9 @@ $(TESTEXE): $(LIBNAME_STATIC) Makefile.local
 {src/torus}.cc{obj}.obj:
 	$(CC) $(COMPILE_FLAGS_ALL) $(COMPILE_FLAGS_LIB) -c $< -Foobj/
 
+# statically link against agama.lib
 {tests}.cpp{exe}.exe:
-	$(CC) -Fe: "$@" -Foobj/tmp.obj "$<" $(COMPILE_FLAGS_ALL) /link $(LINK_FLAGS_LIB_AND_EXE_STATIC) $(LIBNAME_STATIC)
+	$(CC) -Fe: "$@" -Foobj/tmp.obj "$<" $(COMPILE_FLAGS_ALL) /link $(LIBNAME_STATIC) $(LINK_FLAGS_ALL) $(LINK_FLAGS_LIB_AND_EXE_STATIC)
 
 $(OBJDIR):
 	mkdir $(OBJDIR)

@@ -82,12 +82,13 @@ enum PotentialType {
     // analytic potential models that can also be used as source density for a potential expansion
     PT_NFW              =   4194304, ///< spherical Navarro-Frenk-White profile:  `NFW`
     PT_MIYAMOTONAGAI    =   8388608, ///< axisymmetric Miyamoto-Nagai(1975) model:  `MiyamotoNagai`
-    PT_DEHNEN           =  16777216, ///< spherical, axisymmetric or triaxial Dehnen(1993) density model:  `Dehnen`
-    PT_FERRERS          =  33554432, ///< triaxial Ferrers model with finite extent:  `Ferrers`
-    PT_PLUMMER          =  67108864, ///< spherical Plummer model:  `Plummer`
-    PT_ISOCHRONE        = 134217728, ///< spherical isochrone model:  `Isochrone`
-    PT_PERFECTELLIPSOID = 268435456, ///< axisymmetric model of Kuzmin/de Zeeuw :  `PerfectEllipsoid`
-    PT_KING             = 536870912, ///< generalized King (lowered isothermal) model, represented by Multipole
+    PT_LONGMURALI       =  16777216, ///< triaxial Long&Murali(1992) bar model: `LongMurali'
+    PT_DEHNEN           =  33554432, ///< spherical, axisymmetric or triaxial Dehnen(1993) density model:  `Dehnen`
+    PT_FERRERS          =  67108864, ///< triaxial Ferrers model with finite extent:  `Ferrers`
+    PT_PLUMMER          = 134217728, ///< spherical Plummer model:  `Plummer`
+    PT_ISOCHRONE        = 268435456, ///< spherical isochrone model:  `Isochrone`
+    PT_PERFECTELLIPSOID = 536870912, ///< axisymmetric model of Kuzmin/de Zeeuw :  `PerfectEllipsoid`
+    PT_KING             =1073741824, ///< generalized King (lowered isothermal) model, represented by Multipole
 };
 
 /// parameters of various density/potential modifiers (not parsed or unit-converted);
@@ -121,8 +122,9 @@ struct AllParam: public ModifierParams
     double surfaceDensity;            ///< central surface density for Disk, Nuker or Sersic models
     double densityNorm;               ///< density normalization for double-power-law models
     double scaleRadius;               ///< scale radius
-    double scaleHeight;               ///< scale height or second scale radius
-    double innerCutoffRadius;         ///< central hole for disk profiles
+    double scaleHeight;               ///< scale height for Disk, MiyamotoNagai and LongMurali models
+    double barLength;                 ///< bar length for the LongMurali model
+    double innerCutoffRadius;         ///< central hole for the Disk model
     double outerCutoffRadius;         ///< truncation radius for double-power-law models
     double v0;                        ///< limiting circular velocity for Logarithmic potential
     double Omega;                     ///< frequency for Harmonic potential
@@ -155,8 +157,8 @@ struct AllParam: public ModifierParams
     AllParam(const units::ExternalUnits& converter) :
         ModifierParams(converter),
         potentialType(PT_UNKNOWN), densityType(PT_UNKNOWN), symmetryType(coord::ST_UNKNOWN),
-        mass(1.), surfaceDensity(NAN), densityNorm(NAN),
-        scaleRadius(1.), scaleHeight(1.), innerCutoffRadius(0.), outerCutoffRadius(INFINITY),
+        mass(1.), surfaceDensity(NAN), densityNorm(NAN), scaleRadius(1.), scaleHeight(1.),
+        barLength(0), innerCutoffRadius(0.), outerCutoffRadius(INFINITY),
         v0(1.), Omega(1.),
         axisRatioY(1.), axisRatioZ(1.),
         alpha(1.), beta(4.), gamma(1.),
@@ -193,6 +195,7 @@ PotentialType getPotentialTypeByName(const std::string& name)
     if(utils::stringsEqual(name, Multipole    ::myName())) return PT_MULTIPOLE;
     if(utils::stringsEqual(name, CylSpline    ::myName())) return PT_CYLSPLINE;
     if(utils::stringsEqual(name, MiyamotoNagai::myName())) return PT_MIYAMOTONAGAI;
+    if(utils::stringsEqual(name, LongMurali   ::myName())) return PT_LONGMURALI;
     if(utils::stringsEqual(name, "King"))                  return PT_KING;
     if(utils::stringsEqual(name, Evolving     ::myName())) return PT_EVOLVING;
     if(utils::stringsEqual(name, UniformAcceleration     ::myName())) return PT_UNIFORMACCELERATION;
@@ -333,7 +336,7 @@ AllParam parseParam(const utils::KeyValueMap& kvmap, const units::ExternalUnits&
     bool massProvided = kvmap.contains("mass");
     assignParam(param.mass,                popString(kvmap, keys, "mass", "",
         type & (PT_DISK | PT_SPHEROID | PT_NUKER | PT_SERSIC | PT_KEPLERBINARY |
-        PT_NFW | PT_MIYAMOTONAGAI | PT_DEHNEN | PT_FERRERS | PT_PLUMMER |
+        PT_NFW | PT_MIYAMOTONAGAI | PT_LONGMURALI | PT_DEHNEN | PT_FERRERS | PT_PLUMMER |
         PT_ISOCHRONE | PT_PERFECTELLIPSOID | PT_KING)),
         conv.massUnit);
     assignParam(param.surfaceDensity,      popString(kvmap, keys, "surfaceDensity", "Sigma0",
@@ -346,11 +349,14 @@ AllParam parseParam(const utils::KeyValueMap& kvmap, const units::ExternalUnits&
         conv.massUnit / pow_3(conv.lengthUnit));
     assignParam(param.scaleRadius,         popString(kvmap, keys, "scaleRadius", "rscale",
         type & (PT_DISK | PT_SPHEROID | PT_NUKER | PT_SERSIC | PT_LOG |
-        PT_NFW | PT_MIYAMOTONAGAI | PT_DEHNEN | PT_FERRERS | PT_PLUMMER |
+        PT_NFW | PT_MIYAMOTONAGAI | PT_LONGMURALI | PT_DEHNEN | PT_FERRERS | PT_PLUMMER |
         PT_ISOCHRONE | PT_PERFECTELLIPSOID | PT_KING)),
         conv.lengthUnit);
     assignParam(param.scaleHeight,         popString(kvmap, keys, "scaleHeight", "scaleRadius2",
-        type & (PT_DISK | PT_MIYAMOTONAGAI)),
+        type & (PT_DISK | PT_MIYAMOTONAGAI | PT_LONGMURALI)),
+        conv.lengthUnit);
+    assignParam(param.barLength,           popString(kvmap, keys, "barLength", "",
+        type & PT_LONGMURALI),
         conv.lengthUnit);
     assignParam(param.innerCutoffRadius,   popString(kvmap, keys, "innerCutoffRadius", "",
         type & PT_DISK),
@@ -1285,6 +1291,9 @@ PtrPotential createAnalyticPotential(const AllParam& param)
             throw std::invalid_argument("Non-axisymmetric Perfect Ellipsoid is not supported");
     case PT_KING:
         return createKingPotential(param.mass, param.scaleRadius, param.W0, param.trunc);
+    case PT_LONGMURALI:
+        return PtrPotential(new LongMurali(
+            param.mass, param.scaleRadius, param.scaleHeight, param.barLength));
     case PT_UNKNOWN:
         throw std::invalid_argument("Potential type not specified");
     default:

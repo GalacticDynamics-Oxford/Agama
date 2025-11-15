@@ -69,23 +69,51 @@ private:
 };
 
 /** Axisymmetric Miyamoto-Nagai potential:
-    \f$  \Phi(r) = - M / \sqrt{ R^2 + (A + \sqrt{z^2+b^2})^2 }  \f$. */
+    \f$  \Phi(r) = - M / \sqrt{ R^2 + (a + \sqrt{z^2+b^2})^2 }  \f$.
+    When a=0, this potential is equivalent to a spherical Plummer model with scale radius b.
+*/
 class MiyamotoNagai: public BasePotentialCyl{
 public:
-    MiyamotoNagai(double _mass, double _scaleRadiusA, double _scaleRadiusB) :
-        mass(_mass), scaleRadiusA(_scaleRadiusA), scaleRadiusB(_scaleRadiusB) {};
-    virtual coord::SymmetryType symmetry() const { return coord::ST_AXISYMMETRIC; }
+    MiyamotoNagai(double _mass, double _scaleRadius, double _scaleHeight) :
+        mass(_mass), scaleRadius(_scaleRadius), scaleHeight(_scaleHeight) {}
+    virtual coord::SymmetryType symmetry() const {
+        return scaleRadius==0 ? coord::ST_SPHERICAL : coord::ST_AXISYMMETRIC; }
     virtual std::string name() const { return myName(); }
     static std::string myName() { return "MiyamotoNagai"; }
     virtual double totalMass() const { return mass; }
 private:
-    const double mass;         ///< total mass  (M)
-    const double scaleRadiusA; ///< first scale radius  (A),  determines the extent in the disk plane
-    const double scaleRadiusB; ///< second scale radius (B),  determines the vertical extent
+    const double mass;        ///< total mass  (M)
+    const double scaleRadius; ///< scale radius (a),  determines the extent in the disk plane
+    const double scaleHeight; ///< scale height (b),  determines the vertical extent
 
     virtual void evalCyl(const coord::PosCyl &pos,
         double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2, double time) const;
     virtual double densityCyl(const coord::PosCyl &pos, double time) const;
+};
+
+/** Triaxial Long-Murali bar potential, obtained by convolving the Miyamoto-Nagai potential
+    \f$ \Phi_{MN} \f$  with a needle extending from x=-l to x=+l:
+    \f$  \Phi(x,y,z) = \frac{1}{2l} \int_{-l}^{l} dl\, \Phi_{MN}(x-l, y, z)  \f$.
+    It looks like a Miyamoto-Nagai disk with an embedded bar along the x axis; 
+    when l=0 and a!=0, this potential is equivalent to an axisymmetric Miyamoto-Nagai disk;
+    when a=0 and l!=0, the bar is symmetric w.r.t. rotation about the x axis, and there is no disk.
+*/
+class LongMurali: public BasePotentialCar{
+public:
+    LongMurali(double _mass, double _scaleRadius, double _scaleHeight, double _barLength) :
+        mass(_mass), scaleRadius(_scaleRadius), scaleHeight(_scaleHeight), barLength(_barLength) {}
+    virtual coord::SymmetryType symmetry() const {
+        return barLength==0 ?
+            (scaleRadius==0 ? coord::ST_SPHERICAL : coord::ST_AXISYMMETRIC) :
+            coord::ST_TRIAXIAL; }
+    virtual std::string name() const { return myName(); }
+    static std::string myName() { return "LongMurali"; }
+    virtual double totalMass() const { return mass; }
+private:
+    const double mass, scaleRadius, scaleHeight, barLength;
+    virtual void evalCar(const coord::PosCar &pos,
+        double* potential, coord::GradCar* deriv, coord::HessCar* deriv2, double time) const;
+    virtual double densityCar(const coord::PosCar &pos, double time) const;
 };
 
 /** Triaxial logarithmic potential:
