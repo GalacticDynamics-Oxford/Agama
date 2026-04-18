@@ -164,29 +164,34 @@ private:
     It is internally used by spherical-harmonic and azimuthal Fourier expansion potential classes,
     as an extrapolation to small or large radii beyond the definition region of the main potential.
     Each term with index {l,m} is given by
-    \f$  \Phi_{l,m}(r) = U_{l,m} * (r/r0)^{s_{l,m}}            + W_{l,m} * (r/r0)^v  \f$  if s!=v,
-    \f$  \Phi_{l,m}(r) = U_{l,m} * (r/r0)^{s_{l,m}} * ln(r/r0) + W_{l,m} * (r/r0)^v  \f$  if s==v.
+    \f$  \Phi_{l,m}(r) = W_{l,m} * (r/r0)^v + U_{l,m} * (r/r0)^{s_{l,m}} + Q * (r/r0)^2 \f$  if s!=v,
+    \f$  \Phi_{l,m}(r) = W_{l,m} * (r/r0)^v + U_{l,m} * (r/r0)^{s_{l,m}} * ln(r/r0)     \f$  if s==v.
     Here v=l for the inward extrapolation and v=-1-l for the outward extrapolation,
     so that the term W r^v represents the 'main' multipole component corresponding 
     to the Laplace equation, i.e. with zero density. The other term U r^s corresponds
-    to a power-law density profile of the given harmonic component (rho ~ r^{s-2}). 
+    to a power-law density profile of the given harmonic component (rho ~ r^{s-2}),
+    and the term Q r^2, optionally present only for v=0 and s>2 (i.e. for monopole at small radii),
+    allows one to represent a density profile with a finite central limit and radial gradient.
 */
 class PowerLawMultipole: public BasePotentialCyl {
 public:
     /** Create the potential from the three arrays: amplitudes of harmonic coefficients (U, W)
-        and the power-law slope of the coefficient U with nonzero Laplacian (S),
+        the power-law slope of the coefficient U with nonzero Laplacian (S),
+        the optional extra coefficient Q describing a profile with a finite central density,
         the reference radius r0 and the flag choosing between inward and outward extrapolation */
     PowerLawMultipole(double r0, bool inner,
         const std::vector<double>& S,
         const std::vector<double>& U,
-        const std::vector<double>& W);
+        const std::vector<double>& W,
+        const double Q = 0);
     virtual coord::SymmetryType symmetry() const { return ind.symmetry(); }
     virtual std::string name() const { return "PowerLaw"; }
 private:
-    const math::SphHarmIndices ind; ///< indexing scheme for sph.-harm.coefficients
-    double r0sq;                    ///< reference radius, squared
-    bool inner;                     ///< whether this is an inward or outward extrapolation
-    std::vector<double> S, U, W;    ///< sph.-harm.coefficients for extrapolation
+    const math::SphHarmIndices ind;    ///< indexing scheme for sph.-harm.coefficients
+    const double r0sq;                 ///< reference radius, squared
+    const bool inner;                  ///< whether this is an inward or outward extrapolation
+    const std::vector<double> S, U, W; ///< sph.-harm.coefficients for extrapolation
+    const double Q;                    ///< extra coefficient for the inward extrapolation of l=0 term
 
     virtual void evalCyl(const coord::PosCyl &pos,
         double* potential, coord::GradCyl* deriv, coord::HessCyl* deriv2, double /*time*/) const;

@@ -891,7 +891,7 @@ class KinemDatasetHist:
         Return: array of size num_aper x ghorder containing the values  v,sigma,h3..hM  in each aperture
         '''
         ghorder = 6
-        ind = tuple([1,2]+range(6,ghorder+4))  # indices of columns containing v,sigma,h3...hM in the matrix returned by ghMoments
+        ind = (1,2) + tuple(range(6, ghorder+4))  # indices of columns containing v,sigma,h3...hM in the matrix returned by ghMoments
         if LOSVD is None:
             ghm_val, ghm_err = ghMomentsErrors(degree=self.obs_degree, gridv=self.obs_gridv,
                 values=self.obs_val, errors=self.obs_err, ghorder=ghorder)
@@ -905,18 +905,12 @@ class KinemDatasetHist:
         Construct the interpolated LOSVD profiles from the histograms and their uncertainties (used in runPlot).
         Arguments:
           gridv:  grid for computing the profiles
-        Returns:  array of shape  3 x num_aper x len(gridv)  containing 16, 50 and 84th percentiles of LOSVDs in each aperture
+        Returns:  array of shape  3 x num_aper x len(gridv)  containing 16, 50 and 84th percentiles of LOSVDs in each aperture.
+        Note that for degree>=1 the uncertainties returned by this method are somewhat overestimated.
         '''
-        nboot = 100
-        result= _numpy.zeros((3, self.num_aper, len(gridv)))
-        for n in range(self.num_aper):
-            boots = _agama.bsplineInterp(
-                self.obs_degree, self.obs_gridv,
-                _numpy.column_stack([self.obs_val[n]] * nboot) +
-                _numpy.column_stack([self.obs_err[n]] * nboot) * _numpy.random.normal(size=(self.num_cons, nboot)),
-                gridv)
-            result[:,n] = _numpy.percentile(boots, axis=1, q=[16,50,84])
-        return result
+        return _agama.bsplineInterp(self.obs_degree, self.obs_gridv,
+            _numpy.dstack((self.obs_val - self.obs_err, self.obs_val, self.obs_val + self.obs_err)),
+            gridv).T
 
 
 

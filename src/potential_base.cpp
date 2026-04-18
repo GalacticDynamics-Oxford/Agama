@@ -57,7 +57,15 @@ double BasePotential::densityCyl(const coord::PosCyl &pos, double time) const
     double deriv2phi_over_R2 = deriv2.dphi2 / pow_2(pos.R);
     if(pos.R <= fabs(pos.z) * SQRT_DBL_EPSILON) {  // close to or exactly on the z axis
         derivR_over_R = deriv2.dR2;
-        deriv2phi_over_R2 = 0;
+        if(isZRotSymmetric(*this))
+            deriv2phi_over_R2 = 0;  // d2Phi/dphi2 is always zero in this case
+        else {
+            // to compute d2Phi/dphi2, we need to step out of z axis just a tiny bit
+            coord::HessCyl deriv2off;
+            coord::PosCyl posoff(fabs(pos.z) * SQRT_DBL_EPSILON, pos.z, pos.phi);
+            eval(posoff, NULL, NULL, &deriv2off, time);
+            deriv2phi_over_R2 = deriv2off.dphi2 / pow_2(posoff.R);
+        }
     }
     double result = (deriv2.dR2 + derivR_over_R + deriv2.dz2 + deriv2phi_over_R2);
     if(!(fabs(result) > EPSREL_DENSITY_DER * (fabs(deriv2.dR2) + fabs(derivR_over_R) +

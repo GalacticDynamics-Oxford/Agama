@@ -48,8 +48,8 @@ bool exceptionFlag = false;
     if(exceptionFlag) throw std::runtime_error(exceptionText); \
 }
 
-/// callback function invoked by GSL in case of error; stores the error text in a global variable
-/// (not thread-safe! assumed that these events don't occur often)
+/// callback function invoked by GSL in case of error; sets the error flag and stores the error text
+/// in a global variable (not thread-safe! assumed that these events don't occur often)
 static void GSLerrorHandler(const char *reason, const char* file, int line, int gsl_errno)
 {
     if( // list error codes that are non-critical and don't need to be reported
@@ -62,12 +62,16 @@ static void GSLerrorHandler(const char *reason, const char* file, int line, int 
     if(exceptionFlag)   // if the flag is already raised, do nothing
         return;
     exceptionFlag = true;
-    exceptionText = (
+    std::string text = (
         gsl_errno == GSL_ERANGE || gsl_errno == GSL_EOVRFLW ? "GSL range error" :
         gsl_errno == GSL_EDOM ? "GSL domain error" :
         gsl_errno == GSL_EINVAL ? "GSL invalid argument error" :
         "GSL error " + utils::toString(gsl_errno) ) +
         " in " + file + ", line " + utils::toString(line) + ": " + reason + "\n" + utils::stacktrace();
+#ifdef _OPENMP
+#pragma omp critical
+#endif
+        exceptionText = text;
 }
 
 // a hacky way to initialize our error handler on module startup

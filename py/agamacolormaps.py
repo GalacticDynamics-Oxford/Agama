@@ -9,14 +9,20 @@ except AttributeError:
     register_cmap = matplotlib.cm.register_cmap
 
 # "sauron" by Michele Cappellari & Eric Emsellem, which is based on "jet" (both thoroughly not recommended)
-f=[0.0, 0.17, 0.336, 0.414, 0.463, 0.502, 0.541, 0.590, 0.668, 0.834, 1.0]
-r=[0.01, 0.0, 0.4, 0.5, 0.3, 0.0, 0.7, 1.0, 1.0, 1.0, 0.9]
-g=[0.01, 0.0, 0.85,1.0, 1.0, 0.9, 1.0, 1.0, 0.85,0.0, 0.9]
-b=[0.01, 1.0, 1.0, 1.0, 0.7, 0.0, 0.0, 0.0, 0.0, 0.0, 0.9]
-register_cmap(cmap=matplotlib.colors.LinearSegmentedColormap('sauron',
-    { 'red': zip(f,r,r), 'green': zip(f,g,g), 'blue': zip(f,b,b) } ))
-register_cmap(cmap=matplotlib.colors.LinearSegmentedColormap('sauron_r',
-    { 'red': zip(f,r[::-1],r[::-1]), 'green': zip(f,g[::-1],g[::-1]), 'blue': zip(f,b[::-1],b[::-1]) } ))
+sauron = [
+(0.000, (0.01, 0.01, 0.01)),
+(0.170, (0.00, 0.00, 1.00)),
+(0.336, (0.40, 0.85, 1.00)),
+(0.414, (0.50, 1.00, 1.00)),
+(0.463, (0.30, 1.00, 0.70)),
+(0.502, (0.00, 0.90, 0.00)),
+(0.541, (0.70, 1.00, 0.00)),
+(0.590, (1.00, 1.00, 0.00)),
+(0.668, (1.00, 0.85, 0.00)),
+(0.834, (1.00, 0.00, 0.00)),
+(1.000, (0.90, 0.90, 0.90))]
+register_cmap(cmap=matplotlib.colors.LinearSegmentedColormap.from_list('sauron', sauron))
+register_cmap(cmap=matplotlib.colors.LinearSegmentedColormap.from_list('sauron_r', [(1-i,c) for i,c in sauron[::-1]]))
 
 # "circle" is a constant-brightness, perceptually uniform cyclic rainbow map
 # going from magenta through blue, green and red back to magenta.

@@ -495,20 +495,57 @@ void chooseGridRadii(const particles::ParticleArray<coord::PosCyl>& particles,
         ", particles span r=["+utils::toString(prmin)+":"+utils::toString(prmax)+"]");
 }
 
+/** helper class for finding the coefficient s in the four-parameter inward potential extrapolation */
+class DensityAsymptoteFinder: public math::IFunctionNoDeriv {
+    const double coef, ratio, dPhi1, dPhi2;
+public:
+    DensityAsymptoteFinder(double Phi1, double Phi2, double _dPhi1, double _dPhi2,
+        double r1, double r2) :
+        coef((Phi2 - Phi1) / r1), ratio(r2 / r1), dPhi1(_dPhi1), dPhi2(_dPhi2) {}
+    virtual double value(double s) const
+    {
+        double ratiosm1 = pow(ratio, s-1);
+        return coef * (ratiosm1 - ratio) +
+            (dPhi2 - dPhi1 * ratiosm1) * 0.5 * (pow_2(ratio) - 1) +
+            (dPhi1 * ratio - dPhi2) * (ratio * ratiosm1 - 1) / s;
+    }
+};
+
 /** helper function to determine the coefficients for potential extrapolation:
     assuming that 
-        Phi(r) = W * (r/r1)^v + U * (r/r1)^s              if s!=v, or
-        Phi(r) = W * (r/r1)^v + U * (r/r1)^s * ln(r/r1)   if s==v,
+        Phi(r) = W * (r/r1)^v + U * (r/r1)^s + Q * (r/r1)^2  if s!=v, or
+        Phi(r) = W * (r/r1)^v + U * (r/r1)^s * ln(r/r1)      if s==v,
     and given v and the values of Phi(r1), Phi(r2) and dPhi/dr(r1),
-    determine the coefficients s, U and W.
+    determine the coefficients s, U, W and Q (the latter only for v=0 and s>2).
     Here v = l for the inward and v = -l-1 for the outward extrapolation.
-    This corresponds to the density profile extrapolated as rho ~ r^(s-2).
+    This corresponds to the density profile extrapolated as rho ~ r^(s-2) + const,
+    the const term only active for the inward extrapolation of the monopole if s>2.
     A safety measure is to ensure that the slope of l>0 harmonics (s) is no smaller/larger
     than that of the l=0 (s0) for inward/outward extrapolation.
 */
 void computeExtrapolationCoefs(double Phi1, double Phi2, double dPhi1, double dPhi2,
-    double r1, double r2, int v, double s0, /*output*/ double& s, double& U, double& W)
+    double r1, double r2, int v, double s0, /*output*/ double& s, double& U, double& W, double& Q)
 {
+    if(v==0) {
+        // for the inward extrapolation of the monopole term, try a more accurate expression:
+        // Phi = W + U * (r/r1)^s + Q * (r/r1)^2  with four parameters W, U, s, Q
+        s = math::findRoot(DensityAsymptoteFinder(Phi1, Phi2, dPhi1, dPhi2, r1, r2),
+            /* s=2 is always a root, so the leftmost end of the interval is slightly larger than 2 */
+            2 + 3*SQRT_DBL_EPSILON,
+            /* if s is too high, the parameters cannot be reliably determined anyway */  8.0,
+            /* accuracy */ SQRT_DBL_EPSILON);
+        double ratiosm1 = pow(r2 / r1, s-1);
+        U = (dPhi2 * r1 - dPhi1 * r2) / (ratiosm1 - r2 / r1) / s;
+        Q = (dPhi1 * ratiosm1 - dPhi2) * r1 / (ratiosm1 - r2 / r1) * 0.5;
+        double rho0 = 6*Q, rho1 = 6*Q + s * (s+1) * U;  // density at r=0 and r=r1 up to a const
+        if(s == s && rho0 * rho1 > 0) {
+            // only accept this extrapolation if the density has the same sign at r=0 and r=r1
+            W = Phi1 - U - Q;
+            return;
+        }
+        // otherwise extrapolation failed, continue with the three-parameter expression by setting
+        Q = 0;
+    }
     double lnr = log(r2/r1);
     double num1 = r1*dPhi1, num2 = v*Phi1, den1 = Phi1, den2 = Phi2 * exp(-v*lnr);
     double A = lnr * (num1 - num2) / (den1 - den2);
@@ -547,19 +584,6 @@ void computeExtrapolationCoefs(double Phi1, double Phi2, double dPhi1, double dP
         U = r1*dPhi1 - v*Phi1;
         W = Phi1;
     }
-    if(v==0) {
-        // test an alternative hypothesis that Phi = W + U * (r/r1)^2 + V * (r/r1)^3,
-        // by comparing the predictions for dPhi/dr|_{r=r2} from the two alternative asymptotic forms
-        double dPhi2a = U * s * exp(s*lnr) / r2;
-        double dPhi2b = r2/r1 * (6 * r1 * (Phi2-Phi1) / (r2-r1) - dPhi1 * (2*r1+r2)) / (2*r2+r1);
-        if(fabs(dPhi2-dPhi2b) < fabs(dPhi2-dPhi2a)) {
-            // adopt a simpler extrapolation: Phi = W + U * (r/r1)^2, forget about the next term
-            // (impose a constant-density core instead of a weak cusp inferred by the default method)
-            s = 2;
-            U = 0.5 * r1 * dPhi1;
-            W = Phi1 - U;
-        }
-    }
 }
 
 /** construct asymptotic power-law potential for extrapolation to small or large radii
@@ -578,10 +602,8 @@ PtrPotential initAsympt(const std::vector<double>& radii,
     const std::vector<std::vector<double> >& dPhi, bool inner)
 {
     unsigned int nc = Phi.size();  // the number of sph-harm terms in the input arrays
-    // limit the number of terms to consider for extrapolation
-    const unsigned int lmax = 8;
-    nc = std::min<unsigned int>(nc, pow_2(lmax+1));
     std::vector<double> S(nc), U(nc), W(nc);
+    double Q = 0;
     // index1 is the endpoint element of each array (the first or the last element, depending on 'inner')
     // index2 is the next-to-endpoint element
     unsigned int index1 = inner? 0 : Phi[0].size()-1;
@@ -592,13 +614,16 @@ PtrPotential initAsympt(const std::vector<double>& radii,
         int l = math::SphHarmIndices::index_l(c);
         computeExtrapolationCoefs(Phi[c][index1], Phi[c][index2], dPhi[c][index1], dPhi[c][index2],
             radii[index1], radii[index2], inner ? l : -l-1, /*slope of the l=0 harmonic*/ S[0],
-            /*output*/ S[c], U[c], W[c]);
-        if(l==0)
+            /*output*/ S[c], U[c], W[c], Q);
+        if(l==0) {
             FILTERMSG(utils::VL_DEBUG, "Multipole",
-                std::string("Power-law index of ")+(inner?"inner":"outer")+
-                " density profile: "+utils::toString(S[c]-2));
+            "rho ~ " + utils::toString(0.25/M_PI * U[c] * S[c] * (S[c]+1) / pow(radii[index1], S[c])) +
+            "*r^" + utils::toString(S[c]-2) +
+            (Q!=0 ? (Q>=0 ? "+" : "") + utils::toString(1.5/M_PI * Q / pow_2(radii[index1])) : "") +
+            (inner ? " at r<" : " at r>") + utils::toString(radii[index1]));
+        }
     }
-    return PtrPotential(new PowerLawMultipole(radii[index1], inner, S, U, W));
+    return PtrPotential(new PowerLawMultipole(radii[index1], inner, S, U, W, Q));
 }
 
 
@@ -1173,19 +1198,23 @@ DensitySphericalHarmonic::DensitySphericalHarmonic(const std::vector<double> &_g
             // from the three innermost points;  if this fails, use a simpler form  rho = a * r^b
             // for which the coefficients will be determined after the spline is constructed.
             double innerCoef = NAN, derivLeft = NAN;
-            if(gridSizeR >= 3)
+            if(gridSizeR >= 3 && coefs[0][0] > 0 && coefs[0][1] > 0)
                 math::findAsymptote(gridRadii[0], gridRadii[1], gridRadii[2],
-                    coefs[0][0], coefs[0][1], coefs[0][2], innerCoef, innerSlope, centralValue);
+                    coefs[0][0], coefs[0][1], coefs[0][2],
+                    /*output: a*/ innerCoef, /*b*/ innerSlope, /*c*/ centralValue);
             if(isFinite(innerSlope + innerCoef + centralValue)) {  // rho = a*r^b+c
-                // if the input density was positive everywhere, make sure that the extrapolation
-                // remains so even when the density declines towards small radii
-                if(logScaling && innerSlope>0 && centralValue<0) {
-                    // extrapolation failed, defer the determination until the spline is constructed
-                    innerSlope = NAN;
-                } else {
+                // if the input density was positive in the inner part, make sure that
+                // the extrapolation remains so even when the density declines towards small radii
+                if( // density rises divergently towards r->0, but not pathologically steeply
+                    (innerSlope <= 0 && innerSlope > -2 && innerCoef >= 0) ||
+                    (innerSlope >= 0 && centralValue >= 0) ) // or has a nonnegative central limit
+                {   // extrapolation accepted, will be used to set the leftmost spline derivative
                     derivLeft = innerCoef * innerSlope * pow(gridRadii[0], innerSlope);
                     if(logScaling)
                         derivLeft /= coefs[0][0];
+                } else {
+                    // extrapolation failed, defer the determination until the spline is constructed
+                    innerSlope = NAN;
                 }
             } else { // fit from 3 points failed, use a simpler power-law asymptotic rho ~ a*r^b
                 innerSlope = NAN;  // will be determined after the spline is constructed
@@ -1205,8 +1234,10 @@ DensitySphericalHarmonic::DensitySphericalHarmonic(const std::vector<double> &_g
             }
             if(innerSlope!=innerSlope) {  // was not determined earlier from 3-point asymptote
                 centralValue = 0;
-                spl[0]->evalDeriv(gridLogR[0], NULL, &innerSlope);
-                if(!logScaling) {
+                spl[0]->evalDeriv(gridLogR[0], &innerCoef, &innerSlope);
+                if(logScaling) {
+                    innerCoef = exp(innerCoef) * pow(gridRadii[0], -innerSlope);
+                } else {
                     if(coefs[0][0] != 0)
                         innerSlope /= coefs[0][0];
                     else
@@ -1214,39 +1245,20 @@ DensitySphericalHarmonic::DensitySphericalHarmonic(const std::vector<double> &_g
                 }
             }
 
-            // We check (and correct if necessary) the logarithmic slope of density profile
-            // at the innermost and outermost grid radii, used in power-law extrapolation.
-            // slope = (1/rho) d(rho)/d(logr), is usually negative (at least at large radii).
-            // Note that the inner slope less than -2 leads to a divergent potential at origin,
-            // but the enclosed mass is still finite if slope is greater than -3;
-            // similarly, outer slope greater than -3 leads to a divergent total mass,
-            // but the potential tends to a finite limit as long as the slope is less than -2.
-            // Both these 'dangerous' semi-infinite regimes are allowed here,
-            // but likely may result in problems elsewhere.
-            if(!isFinite(innerSlope)) {
-                centralValue = coefs[0][0];
-                innerSlope = 0;
-            }
-            if(!isFinite(outerSlope))
-                outerSlope = coefs[0][gridSizeR-1]==0 ? 0 : -4.;
-            innerSlope = std::max(innerSlope, -2.8);
-            outerSlope = std::min(outerSlope, -2.2);
             FILTERMSG(utils::VL_DEBUG, "DensitySphericalHarmonic",
                 "rho ~ " + utils::toString(innerCoef) +
                 "*r^" + utils::toString(innerSlope) +
-                (centralValue>=0 ? "+" : "") + utils::toString(centralValue) +
+                (centralValue==0 ? "" : (centralValue>=0 ? "+" : "") + utils::toString(centralValue)) +
                 " at r<" + utils::toString(gridRadii[0]) + "; "
                 "rho ~ " + utils::toString(coefs[0][gridSizeR-1] / pow(gridRadii.back(), outerSlope)) +
                 "*r^" + utils::toString(outerSlope) +
                 " at r>" + utils::toString(gridRadii[gridSizeR-1]));
         } else {
             // values of l!=0 components are normalized to the value of l=0 component at each radius,
-            // if the latter are non-zero everywhere (i.e. when using log-scaling),
-            // and are extrapolated as constants beyond the extent of the grid
-            // (with zero endpoint derivatives)
+            // if the latter are non-zero everywhere (i.e. when using log-scaling)
             for(unsigned int k=0; k<gridSizeR; k++)
                 tmparr[k] = logScaling ? coefs[c][k] / coefs[0][k] : coefs[c][k];
-            spl[c].reset(new math::CubicSpline(gridLogR, tmparr, /*regularize*/false, 0, 0));
+            spl[c].reset(new math::CubicSpline(gridLogR, tmparr));
         }
     }
 }
@@ -1280,7 +1292,22 @@ void DensitySphericalHarmonic::getCoefsAtRadius(double r, double coefs[]) const
             unsigned int c = ind.index(l, m);
             if(c==0)
                 continue;
-            coefs[c] = spl[c]->value(logr) * coef0;
+            if(r >= rmin && r <= rmax) {
+                coefs[c] = spl[c]->value(logr) * coef0;
+            } else {
+                // extrapolate beyond the grid towards small or large radii
+                double val, der;
+                spl[c]->evalDeriv(logr, &val, &der);
+                // log-slope of the (l,m) harmonic: d log C_{lm} / d log r,
+                // constrained to be positive for the inward extrapolation (i.e. C_{lm}-->0 as r-->0)
+                // and negative for the outward extrapolation (C_{lm}-->0 as r-->infinity)
+                double slope = val!=0 ? der / val : 0;
+                if(r < rmin && slope > 0)
+                    val *= pow(r / rmin, slope);
+                if(r > rmax && slope < 0)
+                    val *= pow(r / rmax, slope);
+                coefs[c] = val * coef0;  // additional scaling by the value of C_{00} if needed
+            }
         }
 }
 
@@ -1531,15 +1558,16 @@ double Multipole::enclosedMass(double radius) const
 PowerLawMultipole::PowerLawMultipole(double _r0, bool _inner,
     const std::vector<double>& _S,
     const std::vector<double>& _U,
-    const std::vector<double>& _W) :
-    ind(math::getIndicesFromCoefs(_U)), r0sq(_r0*_r0), inner(_inner), S(_S), U(_U), W(_W) 
+    const std::vector<double>& _W,
+    double _Q) :
+    ind(math::getIndicesFromCoefs(_U)), r0sq(_r0*_r0), inner(_inner), S(_S), U(_U), W(_W), Q(_Q)
 {
     // safeguard against errors in slope determination -
     // ensure that all harmonics with l>0 do not asymptotically overtake the principal one (l=0).
     // update: this is now constrained in computeExtrapolationCoefs, hence the assertion.
     for(unsigned int c=1; c<S.size(); c++)
         if(U[c]!=0 && ((inner && S[c] < S[0]) || (!inner && S[c] > S[0])) )
-            assert(!"invalid slope for l>0 harmonics"); //S[c] = S[0];
+            assert(!"invalid slope for l>0 harmonics");
 }
 
 void PowerLawMultipole::evalCyl(const coord::PosCyl &pos,
@@ -1567,11 +1595,12 @@ void PowerLawMultipole::evalCyl(const coord::PosCyl &pos,
             double rs  = s!=v ? (s!=0 ? exp( dlogr * s ) : 1) : rv;  // (r/r0)^s
             double urs = u * rs * (s!=v || u==0 ? 1 : dlogr);  // if s==v, multiply by ln(r/r0)
             double wrv = w * rv;
-            Phi_lm[c] = urs + wrv;
+            double qr2 = v==0 ? Q * rsq / r0sq : 0;  // Q * (r/r0)^2, only for the inner monopole
+            Phi_lm[c] = urs + wrv + qr2;
             if(needGrad)
-                dPhi_lm[c] = urs*s + wrv*v + (s!=v ? 0 : u*rs);
+                dPhi_lm[c] = urs*s + wrv*v + (s!=v ? 0 : u*rs) + qr2*2;
             if(needHess)
-                d2Phi_lm[c] = urs*s*s + wrv*v*v + (s!=v ? 0 : 2*s*u*rs);
+                d2Phi_lm[c] = urs*s*s + wrv*v*v + (s!=v ? 0 : 2*s*u*rs) + qr2*4;
         }
     if(lmax == 0) {  // fast track
         if(potential)
@@ -1617,7 +1646,7 @@ double PowerLawMultipole::densityCyl(const coord::PosCyl &pos, double /*time*/) 
             double s=S[c], u=U[c], v = inner ? l : -l-1;
             double ursm2 = s!=2 ? u * exp( dlogr * (s-2) ) : u;  // u * (r/r0)^(s-2)
             if(s!=v)
-                rho_lm[c] = ursm2 * (s*(s+1) - l*(l+1));
+                rho_lm[c] = ursm2 * (s*(s+1) - l*(l+1)) + (v==0 ? 6*Q : 0);
             else
                 rho_lm[c] = ursm2 * (s*(s+1) * dlogr - s*(s-1) + 1);
         }
@@ -1647,9 +1676,9 @@ MultipoleInterp1d::MultipoleInterp1d(
 
     // compute the extrapolation coefficients at small r;
     // if s>0, the potential is finite at r=0 and equal to W
-    double s, U, W;
+    double s, U, W, Q;
     computeExtrapolationCoefs(Phi[0][0], Phi[0][1], dPhi[0][0], dPhi[0][1], radii[0], radii[1],
-        /*l*/0, /*unused*/NAN, /*output*/s, U, W);
+        /*l*/0, /*unused*/NAN, /*output*/s, U, W, Q);
     invPhi0 = s>0 ? 1./W : 0;
 
     // set up a logarithmic radial grid
@@ -1809,9 +1838,9 @@ MultipoleInterp2d::MultipoleInterp2d(
 
     // compute the extrapolation coefficients at small r;
     // if s>0, the potential is finite at r=0 and equal to W
-    double s, U, W;
+    double s, U, W, Q;
     computeExtrapolationCoefs(Phi[0][0], Phi[0][1], dPhi[0][0], dPhi[0][1], radii[0], radii[1],
-        /*l*/0, /*unused*/NAN, /*output*/s, U, W);
+        /*l*/0, /*unused*/NAN, /*output*/s, U, W, Q);
     invPhi0 = s>0 ? 1./W : 0;
 
     // set up a 2D grid in ln(r) and tau = cos(theta)/(sin(theta)+1):
@@ -2279,8 +2308,12 @@ shared_ptr<const BasisSet> BasisSet::create(
         throw std::invalid_argument("BasisSet: invalid choice of expansion order");
     if(!(eta>=0.5))
         throw std::invalid_argument("BasisSet: shape parameter eta should be >=0.5");
-    if(isUnknown(sym))
-        throw std::invalid_argument("BasisSet: symmetry is not specified");
+    if(isUnknown(sym)) {
+        if(lmax==0)
+            sym = coord::ST_SPHERICAL;
+        else
+            throw std::invalid_argument("BasisSet: symmetry is not specified");
+    }
     // if r0 is not provided, assign a plausible value automatically
     if(!(r0>0)) {
         std::vector<double> radii;

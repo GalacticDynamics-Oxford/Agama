@@ -7,6 +7,10 @@
 #if PY_MAJOR_VERSION >= 3
 #define PyString_AsString PyUnicode_AsUTF8
 #endif
+#define PY_ARRAY_UNIQUE_SYMBOL AgamaModule
+#define NO_IMPORT_ARRAY
+#define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
+#include <numpy/arrayobject.h>
 #endif
 
 #ifdef HAVE_GLPK
@@ -292,6 +296,8 @@ static PyObject
     *fnc_lapack_potrs = NULL,
     *fnc_kkt_getsolve = NULL,
     *fnc_kkt_runsolve = NULL,
+    *fnc_numpy_dot    = NULL,
+    *fnc_scipy_syrk   = NULL,
     /// pointers to various matrices, re-allocated every time the optimization solver is called
     *objectiveQuad    = NULL,
     *coefMatrix       = NULL,
@@ -311,6 +317,97 @@ static bool callPythonFunction(PyObject* fnc, PyObject* args)
     Py_XDECREF(result);
     Py_DECREF(args);
     return success;
+}
+
+/// choice between several implementations of the "syrk" function (matrix product of A * A.T)
+enum ImplType {
+    IMPL_BEST,
+    IMPL_CVXOPT,
+    IMPL_NUMPY,
+    IMPL_SCIPY
+};
+static ImplType defaultImpl = IMPL_BEST;  // initially unknown, will be determined on first call
+
+/// Compute the product of a matrix by its transpose (A * A.T) and store the result in another matrix.
+/// "mat" and "result" are assumed to be pointers to instances of CVXOPT matrix type with correct sizes.
+/// Use one of several possible BLAS backends, whichever is fastest.
+static bool callSyrk(PyObject* mat, PyObject* result, ImplType impl=IMPL_BEST)
+{
+    assert(MAT_NROWS(mat) == MAT_NROWS(result));
+    if(impl == IMPL_BEST)
+        impl = defaultImpl;
+    // When this routine is called for the first time, perform a benchmark of all three implementations
+    // and choose the fastest to be used for all subsequent calls (assuming that it remains fastest for
+    // all matrix sizes, although in practice we expect to always receive matrices of the same size).
+    if(impl == IMPL_BEST) {
+        utils::Timer timer;
+        bool result_cvxopt = callSyrk(mat, result, IMPL_CVXOPT);
+        double time_cvxopt = result_cvxopt ? timer.deltaSeconds() : INFINITY;
+        bool result_numpy  = callSyrk(mat, result, IMPL_NUMPY);
+        double time_numpy  = result_numpy ? timer.deltaSeconds() - time_cvxopt : INFINITY;
+        bool result_scipy  = callSyrk(mat, result, IMPL_SCIPY);
+        double time_scipy  = result_scipy ? timer.deltaSeconds() - time_cvxopt - time_numpy : INFINITY;
+        if(time_cvxopt <= fmin(time_numpy, time_scipy))
+            defaultImpl = IMPL_CVXOPT;
+        else if(time_numpy <= fmin(time_cvxopt, time_scipy))
+            defaultImpl = IMPL_NUMPY;
+        else if(time_scipy <= fmin(time_cvxopt, time_numpy))
+            defaultImpl = IMPL_SCIPY;
+        impl = defaultImpl;
+        const char* labels[4] = {"none", "cvxopt", "numpy", "scipy"};
+        PySys_WriteStdout("Benchmarking BLAS backends for matrix size=(%i,%i): "
+            "cvxopt=%.3g s, numpy=%.3g s, scipy=%.3g s => choosing %s\n",
+            MAT_NROWS(mat), MAT_NCOLS(mat), time_cvxopt, time_numpy, time_scipy, labels[(int)impl]);
+    }
+    if(impl == IMPL_BEST)
+        return false;  // by now should have decided; if not, that's an unrecoverable error
+    if(impl == IMPL_CVXOPT)
+        return callPythonFunction(fnc_blas_syrk, Py_BuildValue("OO", mat, result));
+    // otherwise use numpy or scipy
+    if((impl == IMPL_NUMPY && !fnc_numpy_dot) || (impl == IMPL_SCIPY && !fnc_scipy_syrk))
+        return false;  // not available (not a fatal error; will use cvxopt by default)
+    // cvxopt matrices are in Fortran order (column-major), while numpy/scipy can work with both
+    // Fortran and C (row-major) orders, but default to the latter.
+    // So we convert the input CVXOPT matrix "mat" to a row-major transposed numpy matrix "nmatT"
+    // without copying data, and then transpose it again to obtain "nmat" (column-major).
+    npy_intp dims[] = {MAT_NROWS(mat), MAT_NCOLS(mat)}, dimsT[] = {MAT_NCOLS(mat), MAT_NROWS(mat)};
+    PyObject* nmatT = PyArray_SimpleNewFromData(2, dimsT, NPY_DOUBLE, MAT_BUFD(mat));
+    PyObject* nmat = PyArray_Transpose((PyArrayObject*)nmatT, NULL);
+    PyArrayObject* result_mat = NULL;
+    if(impl == IMPL_NUMPY) {
+        result_mat = (PyArrayObject*)PyObject_CallFunction(fnc_numpy_dot, (char*)"OO", nmat, nmatT);
+        // numpy uses an optimized multiplication method that takes into account the identical
+        // nature of both input matrices (i.e. calls syrk under the hood),
+        // but somehow it produces a symmetric matrix, so its storage order does not matter
+    } else if(impl == IMPL_SCIPY) {
+        // scipy syrk function returns a matrix in the column-major order, but fills only one half
+        // of the resulting matrix, by default producing an upper-triangular matrix,
+        // while we need it to be lower-triangular (and still column-major) to follow the
+        // convention used in cvxopt, so request this with a keyword argument
+        PyObject* args = Py_BuildValue("dO", 1.0, nmat);
+        PyObject* kwargs = PyDict_New();
+        PyDict_SetItemString(kwargs, "lower", Py_True);
+        result_mat = (PyArrayObject*)PyObject_Call(fnc_scipy_syrk, args, kwargs);
+        Py_DECREF(kwargs);
+        Py_DECREF(args);
+    }
+    Py_DECREF(nmat);
+    Py_DECREF(nmatT);
+    if(!result_mat)
+        return false;
+    if(impl == IMPL_SCIPY && !PyArray_ISFARRAY_RO(result_mat)) {
+        // verify the assumption that scipy syrk returns a Fortran-style matrix;
+        // if this changes for some reason, we should discard it (or rather, do not use "lower").
+        Py_DECREF(result_mat);
+        PySys_WriteStdout("discarded scipy.linalg.blas.syrk due to a wrong storage order.\n");
+        return false;
+    }
+    // now copy the data from the numpy-style matrix to the cvxopt matrix
+    const double* result_data = (double*)(PyArray_DATA(result_mat));
+    assert(PyArray_DIM(result_mat, 0) == dims[0]);
+    std::copy(result_data, result_data + pow_2(dims[0]), MAT_BUFD(result));
+    Py_DECREF(result_mat);
+    return true;
 }
 
 /// helper routine to create a CVXOPT-compatible dense matrix of a special kind:
@@ -341,7 +438,7 @@ PyObject* initPyMatrixSelfProduct(const SelfProductMatrix<NumT>& S)
     }
 
     // 2. call the external function syrk from blas, computing the matrix K = Mscaled^T Mscaled
-    if(!callPythonFunction(fnc_blas_syrk, Py_BuildValue("(OO)", MTscaled, pyMatrix))) {
+    if(!callSyrk(MTscaled, pyMatrix)) {
         PyErr_Print();
         PyErr_SetString(PyExc_RuntimeError, "Error in syrk");
         Py_DECREF(MTscaled);
@@ -477,7 +574,7 @@ static PyObject* kkt_getsolve(PyObject* /*self*/, PyObject* args)
     Py_END_ALLOW_THREADS
 
     // call the external function syrk from blas, computing the matrix K = Ascaled Ascaled^T
-    if(!callPythonFunction(fnc_blas_syrk, Py_BuildValue("(OO)", matAscaled, matK))) {
+    if(!callSyrk(matAscaled, matK)) {
         PyErr_Print();
         PyErr_SetString(PyExc_RuntimeError, "Error in syrk");
         return NULL;
@@ -585,6 +682,19 @@ static void initCVXOPT()
     if(!fnc_solvers_lp || !fnc_blas_syrk || !fnc_lapack_potrs || !fnc_kkt_runsolve) {
         throw std::runtime_error("quadraticOptimizationSolve: error initializing CVXOPT python module");
     }
+
+    // additionally, try to import two other implementations of matrix product functions:
+    // from numpy and scipy. If any of these fail to import (should not happen for numpy,
+    // but possible for scipy), leave the pointers initialized to NULL.
+    // Upon first call to the syrk function, try all available implementations,
+    // measure the elapsed time, and choose the fastest for all subsequent calls.
+    PyObject *module_numpy = PyImport_ImportModule("numpy");
+    if(module_numpy)
+        fnc_numpy_dot = PyObject_GetAttrString(module_numpy, "dot");
+    PyObject *module_scipy_linalg_blas = PyImport_ImportModule("scipy.linalg.blas");
+    if(module_scipy_linalg_blas)
+        fnc_scipy_syrk = PyObject_GetAttrString(module_scipy_linalg_blas, "dsyrk");
+
     // never release the pointers to Python objects allocated above... not a big deal though
 }
 

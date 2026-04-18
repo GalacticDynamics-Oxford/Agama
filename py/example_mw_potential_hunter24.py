@@ -16,6 +16,8 @@ and can be reused later for doing orbit integrations and other purposes
 References: Sormani et al. 2022 (MNRAS Letters/514/L5); Hunter et al. 2024 (A&A/642/216)
 
 Authors: Mattia Sormani, Glen Hunter, Eugene Vasiliev
+
+See also example_mw_potential_khalil25.py for another non-axisymmetric potential.
 """
 import agama, numpy, matplotlib.pyplot as plt, scipy.special
 from example_mw_bar_potential import makeBarDensity

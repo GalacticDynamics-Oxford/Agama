@@ -30,6 +30,7 @@
 */
 #ifdef HAVE_PYTHON
 #include <Python.h>
+#define PY_ARRAY_UNIQUE_SYMBOL AgamaModule
 #define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
 #include <numpy/arrayobject.h>
 #include <structmember.h>
@@ -65,7 +66,7 @@
 #include "utils.h"
 #include "utils_config.h"
 // text string embedded into the python module as the __version__ attribute (including Github commit number)
-#define AGAMA_VERSION "1.0.156 compiled on " __DATE__
+#define AGAMA_VERSION "1.0.157 compiled on " __DATE__
 
 // older versions of numpy have different macro names
 // (will need to expand this list if other similar macros are used in the code)
@@ -2470,7 +2471,9 @@ static PyMethodDef Density_methods[] = {
       "Return the total mass of the density model.\n"
       "Returns: float number" },
     { "enclosedMass", Density_enclosedMass, METH_VARARGS,
-      "Return the mass enclosed within a given radius or a list of radii.\n"
+      "Return the estimate of the mass enclosed within a given radius or a list of radii.\n"
+      "Depending on the density type, it may be obtained by a direct integration over the 3d volume, "
+      "or by faster but more approximate methods.\n"
       "Returns: a single float number or an array of numbers" },
     { "principalAxes", Density_principalAxes, METH_VARARGS,
       "Determine the length and orientation of principal axes of the density profile "

@@ -8,8 +8,9 @@ Then we perform several iterations of recomputing the density profiles of compon
 and recomputing the total potential.
 Finally, we create N-body representations of all mass components: dark matter halo,
 stars (bulge, thin and thick disks and stellar halo combined), and gas disk.
-A modification of this script that creates a self-consistent three-component model
-(disk, bulge and halo) is given in example_self_consistent_model3.py
+Two slightly different modification of this script that both create a self-consistent
+three-component model (bulge, disk and halo) are given in example_self_consistent_model3.py
+and example_self_consistent_model_bdh.py
 This example is the Python counterpart of tests/example_self_consistent_model.cpp
 """
 import agama, numpy, sys, os

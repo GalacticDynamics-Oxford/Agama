@@ -1,6 +1,6 @@
 #!/usr/bin/python
 """
-Example of construction of a three-component disk-bulge-halo equilibrium model of a galaxy.
+Example of construction of a three-component bulge-disk-halo equilibrium model of a galaxy.
 The approach is explained in example_self_consistent_model.py;
 this example differs in that it has a somewhat simpler structure (only a single stellar disk
 component, no stellar halo or gas disk) and adds a central supermassive black hole.
@@ -11,6 +11,8 @@ This DF is then expressed in terms of actions and embedded into the 'real', non-
 potential, giving rise to a somewhat different density profile; however, it is close enough
 to the input one. Then a few more iterations are needed to converge towards a self-consistent
 model.
+See also example_self_consistent_model_bdh.py for a somewhat different implementation of
+the same task (construction of bulge+disk+halo models using the iterative method).
 """
 
 import agama, numpy, os, sys, matplotlib.pyplot as plt
