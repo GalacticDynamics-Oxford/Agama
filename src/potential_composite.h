@@ -94,18 +94,20 @@ private:
 
 /** Time-dependent potential represented by a collection of other potentials,
     either piecewise-constant or linearly interpolated in time */
-class Evolving: public BasePotentialCar {
+class Evolving: public BasePotentialCar, public BaseComposite<BasePotential> {
 public:
-    Evolving(const std::vector<double> _times,
-        const std::vector<PtrPotential> _instances,
-        bool _interpLinear=false);
+    Evolving(const std::vector<double> timestamps,
+        const std::vector<PtrPotential> instances,
+        bool interpLinear=false);
     virtual coord::SymmetryType symmetry() const { return sym; }
     virtual std::string name() const { return myName(); }
     static std::string myName() { return "Evolving"; }
-
+    /// provide access to underlying potential instances (but not their associated timestamps)
+    virtual unsigned int size() const { return instances.size(); }
+    virtual PtrPotential component(unsigned int index) const { return instances.at(index); }
 private:
     /// array of time stamps for a time-dependent potential
-    std::vector<double> times;
+    std::vector<double> timestamps;
     /// array of potentials corresponding to each moment of time (possibly just one)
     std::vector<PtrPotential> instances;
     /// use linear or nearest-point interpolation of a time-dependent potential

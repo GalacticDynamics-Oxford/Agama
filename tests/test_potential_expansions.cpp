@@ -1,5 +1,5 @@
 /** \file    test_potential_expansions.cpp
-    \date    2015-2023
+    \date    2015-2026
     \author  Eugene Vasiliev
 
     Test density/potential expansions (Multipole, CylSpline, BasisSet, DensitySphericalHarmonic, DensityAzimuthalHarmonic)
@@ -31,11 +31,47 @@ const bool output = utils::verbosityLevel >= utils::VL_VERBOSE;
 /// write potential coefs into file, load them back and create a new potential from these coefs
 PtrPotential writeRead(const potential::BasePotential& pot)
 {
+    // use some nontrivial unit conversion on import/export to test its correctness
+    const units::ExternalUnits eu(units::weird_units, 1*units::pc, 1*units::kms, 1e10*units::Msun);
     const char* coefFile = "test_potential_expansions.coef";
-    writePotential(coefFile, pot);
-    PtrPotential newpot = potential::readPotential(coefFile);
+    writePotential(coefFile, pot, eu);
+    PtrPotential newpot = potential::readPotential(coefFile, eu);
     std::remove(coefFile);
     return newpot;
+}
+
+/// test time interpolation for the BasisSet potential
+bool testTimeDependentBasisSet(const potential::BasePotential& pot)
+{
+    const potential::BasisSet& bs0 = dynamic_cast<const potential::BasisSet&>(pot);
+    double eta, r0;
+    std::vector< std::vector< std::vector<double> > > coefs;
+    std::vector<double> timestamps;
+    bs0.getCoefs(eta, r0, coefs, timestamps);
+    bool ok = coefs.size() == 1 && timestamps.empty();
+    timestamps.push_back(2.5);
+    timestamps.push_back(5.5);
+    coefs.push_back(coefs.back());
+    coefs.back()[0][0] *= 2;
+    const potential::BasisSet bs1(eta, r0, &coefs[1]);
+    const potential::BasisSet bs2(eta, r0, &coefs[0], timestamps);
+    PtrPotential bs3 = writeRead(bs2);
+    coord::PosCar point(1,2,3);
+    const double frac = 0.75, time = frac * timestamps[0] + (1-frac) * timestamps[1];
+    double v0, v1, v2, v3;
+    coord::GradCar g0, g1, g2, g3;
+    bs0. eval(point, &v0, &g0, NULL, time);
+    bs1. eval(point, &v1, &g1, NULL, time);
+    bs2. eval(point, &v2, &g2, NULL, time);
+    bs3->eval(point, &v3, &g3, NULL, time);
+    v0 = v0 * frac + v1 * (1-frac);
+    coord::combine(g0, g1, frac, 1-frac);
+    ok &= math::fcmp(v0, v2, 1e-15)==0 && coord::equalGrad(g0, g2, 1e-15);
+    // coarser tolerance because the bs3 potential is saved and loaded from a text file
+    ok &= math::fcmp(v0, v3, 1e-10)==0 && coord::equalGrad(g0, g3, 1e-10);
+    if(!ok)
+        std::cout << "Time-interpolated basis set failed \033[1;31m **\033[0m\n";
+    return ok;
 }
 
 /// create a triaxial Dehnen model (could use galaxymodel::sampleNbody in a general case)
@@ -485,7 +521,7 @@ int main() {
         static_cast<const potential::BaseDensity&>(test1_Dehnen0Sph),
         coord::ST_UNKNOWN, 0, 0, 20);
     PtrPotential test1b = potential::BasisSet::create(test1_Dehnen0Sph,
-    coord::ST_UNKNOWN, 0, 0, 16, 1.0);
+        coord::ST_UNKNOWN, 0, 0, 16, 1.0);
     ok &= testAverageError(*test1b, test1_Dehnen0Sph, 0.002);
     ok &= testAverageError(*test1m, test1_Dehnen0Sph, 0.002);
     ok &= testAverageError(*test1c, test1_Dehnen0Sph, 0.02);
@@ -512,26 +548,29 @@ int main() {
     PtrPotential test2b_clone = writeRead(*test2b);
     PtrPotential test2c_clone = writeRead(*test2c);
     ok &= testAverageError(*test2b, test2_Dehnen0Tri, 0.02);
-    ok &= testAverageError(*test2b, *test2b_clone, 1e-9);
+    ok &= testAverageError(*test2b, *test2b_clone, 1e-10);
     ok &= testAverageError(*test2m, test2_Dehnen0Tri, 0.01);
     ok &= testAverageError(*test2mn,test2_Dehnen0Trin,0.01);
     ok &= testAverageError(*test2d, test2_Dehnen0Tri, 0.02);
     ok &= testAverageError(*test2dn,test2_Dehnen0Trin,0.04);  // no log-scaling => somewhat worse error
     ok &= testAverageError(*test2c, test2_Dehnen0Tri, 0.02);
-    ok &= testAverageError(*test2c, *test2c_clone, 1e-3);
+    ok &= testAverageError(*test2c, *test2c_clone, 1e-4);
 
     // mildly triaxial, cuspy
     std::cout << "--- Triaxial Dehnen gamma=1.5 ---\n";
     PtrPotential test3b = potential::BasisSet::create(test3_Dehnen15Tri,
         coord::ST_UNKNOWN, 6, 6, 20, 2.0, 0.5);
-    ok &= testAverageError(*test3b, test3_Dehnen15Tri, 0.2);
+    ok &= testAverageError(*test3b, test3_Dehnen15Tri, 0.1);
     PtrPotential test3m = potential::Multipole::create(
         static_cast<const potential::BaseDensity&>(test3_Dehnen15Tri),
         coord::ST_UNKNOWN, 6, 6, 20);
     PtrPotential test3m_clone = writeRead(*test3m);
     //ok &= testAverageError(*test3b, test3_Dehnen15Tri, 0.02);
     ok &= testAverageError(*test3m, test3_Dehnen15Tri, 0.02);
-    ok &= testAverageError(*test3m, *test3m_clone, 1e-9);
+    ok &= testAverageError(*test3m, *test3m_clone, 1e-10);
+
+    // time interpolation for BasisSet
+    ok &= testTimeDependentBasisSet(*test3b);
 
     // strongly flattened exp.disk; the 'true' potential is not available,
     // so we compare two approximations: GalPot and CylSpline

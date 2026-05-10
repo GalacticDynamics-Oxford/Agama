@@ -65,17 +65,36 @@ static const double EPS_COEF = 1e-10;
 static const double SQRT_DBL_MIN = 1.4916681462400413e-154;
 static const double SQRT_DBL_MAX = 1.3407807929942597e+154;
 
+/** search a sorted array for a linear interpolator and determine the interpolation weights */
+inline void searchInterp(
+    /*input: value to search for*/ double val,
+    /*input: array to search in (sorted)*/ const std::vector<double>& arr,
+    /*output: index of the leftmost node*/ ptrdiff_t& index,
+    /*output: weight of this node (between 0 and 1)*/ double& weightLeft)
+{
+    ptrdiff_t size = arr.size();
+    index = math::binSearch(val, &arr.front(), size);
+    if(index<0) {
+        index = 0;
+        weightLeft = 1;
+    } else if(index>=size-1) {
+        index = size-1;
+        weightLeft = 1;
+    } else {
+        weightLeft = (arr[index+1] - val) / (arr[index+1] - arr[index]);
+    }
+}
+
 // Helper function to deduce symmetry from the list of non-zero coefficients;
 // combine the array of coefficients at different radii into a single array
 // and then call the corresponding routine from math::.
-// This routine is templated on the number of arrays that it handles:
-// each one should have identical number of elements (# of harmonic terms - (lmax+1)^2),
-// and each element of each array should have the same dimension (number of radial grid points).
-template<int N>
-math::SphHarmIndices getIndicesFromCoefs(const std::vector< std::vector<double> >* C[N])
+// This routine receives N>=1 arrays of coefficients, each one should have identical number
+// of elements (# of harmonic terms - (lmax+1)^2), and each element of each array should have
+// the same dimension (number of basis functions or radial grid points).
+math::SphHarmIndices getIndicesFromCoefs(int N, const std::vector< std::vector<double> >* const C[])
 {
     unsigned int numRadii=0, numCoefs=0;
-    bool correct=true;
+    bool correct = N>=1;
     for(int n=0; n<N; n++) {
         if(n==0) {
             numCoefs = C[n]->size();
@@ -104,13 +123,21 @@ math::SphHarmIndices getIndicesFromCoefs(const std::vector< std::vector<double> 
 inline math::SphHarmIndices getIndicesFromCoefs(const std::vector< std::vector<double> > &C)
 {
     const std::vector< std::vector<double> >* A = &C;
-    return getIndicesFromCoefs<1>(&A);
+    return getIndicesFromCoefs(1, &A);
 }
 inline math::SphHarmIndices getIndicesFromCoefs(
     const std::vector< std::vector<double> > &C1, const std::vector< std::vector<double> > &C2)
 {
     const std::vector< std::vector<double> >* A[2] = {&C1, &C2};
-    return getIndicesFromCoefs<2>(A);
+    return getIndicesFromCoefs(2, A);
+}
+inline math::SphHarmIndices getIndicesFromCoefs(int N, const std::vector<std::vector<double> > *C)
+{
+    // convert an input array of vectors into an array of pointers to these vectors
+    std::vector< const std::vector< std::vector<double> >* > A(N);
+    for(int k=0; k<N; k++)
+        A[k] = &C[k];
+    return getIndicesFromCoefs(N, &A.front());
 }
 
 // resize the array(s) of coefficients down to the requested order and eliminate all-zero terms.
@@ -2296,7 +2323,7 @@ shared_ptr<const BasisSet> BasisSet::create(const BaseDensity& src,
         nmax, eta, r0, /*output*/coefs);
     // resize the coefficients back to the requested order and symmetry
     restrictSphHarmCoefs<1>(lmax, mmax, symExp, &coefs);
-    return shared_ptr<const BasisSet>(new BasisSet(eta, r0, coefs));
+    return shared_ptr<const BasisSet>(new BasisSet(eta, r0, &coefs));
 }
 
 shared_ptr<const BasisSet> BasisSet::create(
@@ -2336,28 +2363,37 @@ shared_ptr<const BasisSet> BasisSet::create(
     std::vector<std::vector<double> > coefs;
     computePotentialCoefsBSE(particles,
         math::SphHarmIndices(lmax, mmax, sym), nmax, eta, r0, /*output*/coefs);
-    return shared_ptr<const BasisSet>(new BasisSet(eta, r0, coefs));
+    return shared_ptr<const BasisSet>(new BasisSet(eta, r0, &coefs));
 }
 
-BasisSet::BasisSet(double _eta, double _r0, const std::vector<std::vector<double> > &_coefs) :
-    ind(getIndicesFromCoefs(_coefs)), eta(_eta), r0(_r0), coefs(_coefs)
+BasisSet::BasisSet(double _eta, double _r0, const std::vector<std::vector<double> > _coefs[],
+    const std::vector<double> _timestamps) :
+    timestamps(_timestamps),
+    coefs(_coefs, _coefs + (timestamps.empty() ? 1 : timestamps.size())),
+    ind(getIndicesFromCoefs(coefs.size(), _coefs)), eta(_eta), r0(_r0)
 {
     if(!(eta>=0.5))
         throw std::invalid_argument("BasisSet: shape parameter eta should be >=0.5");
     if(!(r0>0))
         throw std::invalid_argument("BasisSet: scale radius for basis functions should be positive");
-    if(coefs.empty() || coefs[0].empty())
+    if(coefs.empty() || coefs[0].empty() || coefs[0][0].empty())
         throw std::invalid_argument("BasisSet: invalid coefficients array");
+    for(size_t i=1; i<timestamps.size(); i++)
+        if(!(timestamps[i] > timestamps[i-1]))
+            throw std::invalid_argument("BasisSet: timestamps should be monotonically increasing");
 }
 
-void BasisSet::getCoefs(double& _eta, double& _r0, std::vector<std::vector<double> > &_coefs) const
+void BasisSet::getCoefs(double& _eta, double& _r0, 
+    /*output*/ std::vector< std::vector<std::vector<double> > > &_coefs,
+    /*output*/ std::vector<double> &_timestamps) const
 {
     _eta = eta;
     _r0  = r0;
     _coefs = coefs;
+    _timestamps = timestamps;
 }
 
-double BasisSet::densitySph(const coord::PosSph &pos, double /*time*/) const
+double BasisSet::densitySph(const coord::PosSph &pos, double time) const
 {
     double sintheta, costheta,
     s = pos.r/r0,
@@ -2366,11 +2402,17 @@ double BasisSet::densitySph(const coord::PosSph &pos, double /*time*/) const
     zi = math::pow(s1eta+1, -eta);
     math::sincos(pos.theta, sintheta, costheta);
 
-    int nmax = coefs[0].size()-1;
+    int nmax = coefs[0][0].size()-1;
     int ncoefs = pow_2(ind.lmax + 1);
     int mstep = (ind.symmetry() & coord::ST_TRIAXIAL) == coord::ST_TRIAXIAL ? 2 : 1;
     double* rho_lm = static_cast<double*>(alloca(ncoefs * sizeof(double)));
     std::fill( rho_lm, rho_lm + ncoefs, 0);
+
+    // handle time interpolation of coefficients, if necessary
+    ptrdiff_t index; // index of the interval in which the current time lies
+    double weight;   // weight of the coefficients on the left side of this time interval
+    searchInterp(time, timestamps, /*output*/ index, weight);
+    const std::vector<std::vector<double> > *coefs_l = &coefs[index], *coefs_r = coefs_l + 1;
 
     double B = 1./(16*M_PI) * zi/r0 / pow_2(eta * pos.r) * (1-xi*xi);  // density basis function
     for(int l=0; l<=ind.lmax; l++) {
@@ -2387,8 +2429,13 @@ double BasisSet::densitySph(const coord::PosSph &pos, double /*time*/) const
             double N = (2*A + n) * (xi * Q - P) / (n+1) + xi * Q;  // next Gegenbauer polynomial
             P = Q;
             Q = N;
-            for(int c=cmin; c<=cmax; c+=mstep)
-                rho_lm[c] += Pnl * coefs[c][n];
+            if(weight == 1) {  // no time interpolation needed
+                for(int c=cmin; c<=cmax; c+=mstep)
+                    rho_lm[c] += Pnl * (*coefs_l)[c][n];
+            } else {
+                for(int c=cmin; c<=cmax; c+=mstep)
+                    rho_lm[c] += Pnl * ((*coefs_l)[c][n] * weight + (*(coefs_r))[c][n] * (1-weight));
+            }
         }
     }
 
@@ -2396,7 +2443,7 @@ double BasisSet::densitySph(const coord::PosSph &pos, double /*time*/) const
 }
 
 void BasisSet::evalSph(const coord::PosSph &pos,
-    double* potential, coord::GradSph* grad, coord::HessSph* hess, double /*time*/) const
+    double* potential, coord::GradSph* grad, coord::HessSph* hess, double time) const
 {
     bool needGrad = grad!=NULL || hess!=NULL;
     bool needHess = hess!=NULL;
@@ -2407,13 +2454,19 @@ void BasisSet::evalSph(const coord::PosSph &pos,
     zi = math::pow(s1eta+1, -eta);
 
     // temporary array created on the stack, without dynamic memory allocation
-    int nmax = coefs[0].size()-1;
+    int nmax = coefs[0][0].size()-1;
     int ncoefs = pow_2(ind.lmax + 1);
     int mstep = (ind.symmetry() & coord::ST_TRIAXIAL) == coord::ST_TRIAXIAL ? 2 : 1;
     double*   Phi_lm = static_cast<double*>(alloca(3 * ncoefs * sizeof(double)));
     double*  dPhi_lm = Phi_lm + ncoefs;    // part of the temporary array
     double* d2Phi_lm = Phi_lm + ncoefs*2;
     std::fill( Phi_lm, Phi_lm + ncoefs*3, 0);
+
+    // handle time interpolation of coefficients, if necessary
+    ptrdiff_t index; // index of the interval in which the current time lies
+    double weight;   // weight of the coefficients on the left side of this time interval
+    searchInterp(time, timestamps, /*output*/ index, weight);
+    const std::vector<std::vector<double> > *coefs_l = &coefs[index], *coefs_r = coefs_l + 1;
 
     double si = 0.5/eta / pos.r;
     double B = -zi/r0;   // potential basis function (updated as we loop over l)
@@ -2439,11 +2492,22 @@ void BasisSet::evalSph(const coord::PosSph &pos,
             // update the recurrence relation for Gegenbauer polynomials
             P = Q;
             Q = N / (n+1) + xi * Q;
-            for(int c=cmin; c<=cmax; c+=mstep) {
-                Phi_lm  [c] +=   Pnl * coefs[c][n];
-                dPhi_lm [c] +=  dPnl * coefs[c][n];
-                if(needHess)
-                    d2Phi_lm[c] += d2Pnl * coefs[c][n];
+            if(weight == 1) {  // no time interpolation needed
+                for(int c=cmin; c<=cmax; c+=mstep) {
+                    double cn = (*coefs_l)[c][n];
+                    Phi_lm  [c] +=   Pnl * cn;
+                    dPhi_lm [c] +=  dPnl * cn;
+                    if(needHess)
+                        d2Phi_lm[c] += d2Pnl * cn;
+                }
+            } else {  // linearly interpolate coefficients within the current time interval
+                for(int c=cmin; c<=cmax; c+=mstep) {
+                    double cn = (*coefs_l)[c][n] * weight + (*(coefs_r))[c][n] * (1-weight);
+                    Phi_lm  [c] +=   Pnl * cn;
+                    dPhi_lm [c] +=  dPnl * cn;
+                    if(needHess)
+                        d2Phi_lm[c] += d2Pnl * cn;
+                }
             }
         }
     }

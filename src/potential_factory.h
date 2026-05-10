@@ -1,7 +1,7 @@
 /** \file    potential_factory.h
     \brief   Creation and input/output of Potential instances
     \author  Eugene Vasiliev
-    \date    2010-2024
+    \date    2010-2026
 
     This file provides several utility function to manage instances of BaseDensity and BasePotential:
     creating a density or potential model from parameters provided in `utils::KeyValueMap` objects,
@@ -22,7 +22,7 @@ namespace potential {
 /** Create an instance of density according to the parameters contained in the key-value map.
     \param[in] params is the list of parameters (should contain either "file=", or
     "density=...", or "type=...");
-    \param[in] converter is the unit converter for transforming the dimensional quantities 
+    \param[in] converter is the unit converter for transforming the dimensional quantities
     in parameters (such as mass and radii) into internal units; can be a trivial converter.
     \return    a new instance of PtrDensity on success.
     \throw     std::invalid_argument or std::runtime_error or other density-specific
@@ -43,10 +43,10 @@ PtrDensity createDensity(
     If the parameter list contains modifier params such as "center=...", etc.,
     the input density or the previously constructed expansion will be wrapped into
     one or more modifiers according to the provided parameters.
-    \param[in] dens   is the input density model;
+    \param[in] dens   is the input density model.
     \param[in] converter (optional) is the unit converter for transforming dimensional quantities
-    in parameters (e.g. the grid node placement) into internal units;
-    \return    a new instance of PtrDensity on success:
+    in parameters (e.g. the grid node placement) into internal units.
+    \return    a new instance of PtrDensity on success.
     \throw     std::invalid_argument if the requested density is not of an expansion type,
     or any density-specific exception on failure (if some parameters are missing or invalid).
 */
@@ -55,13 +55,14 @@ PtrDensity createDensity(
     const PtrDensity& dens,
     const units::ExternalUnits& converter = units::ExternalUnits());
 
+
 /** Create an instance of potential according to the parameters contained in the key-value map.
     This is a shortcut to the more general routine that accepts a list of KeyValueMap's,
     and depending on the potential type, may produce an elementary or a composite potential,
     or wrap it into one or more modifiers.
-    \param[in] params is the list of parameters (should contain either "file=..." or "type=...");
-    \param[in] converter is the unit converter for transforming the dimensional quantities 
-    in parameters (such as mass and radii) into internal units; can be a trivial converter;
+    \param[in] params is the list of parameters (should contain either "file=..." or "type=...").
+    \param[in] converter is the unit converter for transforming the dimensional quantities
+    in parameters (such as mass and radii) into internal units; can be a trivial converter.
     \return    a new instance of PtrPotential on success.
     \throw     std::invalid_argument or std::runtime_error or other potential-specific exception
     on failure (e.g., if some of the parameters are invalid or missing, or refer to non-existent files)
@@ -71,13 +72,13 @@ PtrPotential createPotential(
     const units::ExternalUnits& converter = units::ExternalUnits());
 
 /** Create an instance of composite potential according to the parameters contained in the
-    array of key-value maps for each component. Note that there is no 1:1 correspondence 
-    between the parameters and the components of the resulting potential, since the parameters 
-    may contain several density models that would be used for initializing a single potential 
+    array of key-value maps for each component. Note that there is no 1:1 correspondence
+    between the parameters and the components of the resulting potential, since the parameters
+    may contain several density models that would be used for initializing a single potential
     expansion object (like in the case of GalPot), and components sharing the same set of modifiers
     will be grouped into separate composite potentials wrapped into corresponding modifiers.
     \param[in] params is the array of parameter lists, one per component.
-    \param[in] converter is the unit converter for transforming the dimensional quantities 
+    \param[in] converter is the unit converter for transforming the dimensional quantities
     in parameters (such as mass and radii) into internal units; can be a trivial converter.
     \return    a new instance of PtrPotential on success.
     \throw     std::invalid_argument or std::runtime_error or other potential-specific exception
@@ -94,9 +95,9 @@ PtrPotential createPotential(
     grid sizes, expansion orders, etc. may be provided as well);
     if the parameter list specifies any modifiers, the result will be wrapped into one or more
     corresponding modifier classes.
-    \param[in] dens   is the density model which will serve as the source to the potential;
+    \param[in] dens   is the density model which will serve as the source to the potential.
     \param[in] converter (optional) is the unit converter for transforming dimensional quantities
-    in parameters (e.g. the grid node placement) into internal units;
+    in parameters (e.g. the grid node placement) into internal units.
     \return    a new instance of PtrPotential on success.
     \throw     std::invalid_argument if the requested potential is not of an expansion type,
     or any potential-specific exception on failure (if some parameters are missing or invalid).
@@ -109,11 +110,11 @@ PtrPotential createPotential(
 /** Create an instance of potential expansion (e.g. Multipole) or a modified (shifted, rotated, etc.)
     potential for the user-provided potential model, with parameters contained in the key-value map.
     \param[in] params is the list of parameters ("type=..." specifies the expansion type,
-    type should be empty when creating a modifier on top of the provided potential);
+    type should be empty when creating a modifier on top of the provided potential).
     \param[in] pot    is the potential model which will be approximated with the potential expansion
-    or wrapped into a modifier;
+    or wrapped into a modifier.
     \param[in] converter (optional) is the unit converter for transforming dimensional quantities
-    in parameters (e.g. the grid nodes) into internal units;
+    in parameters (e.g. the grid nodes) into internal units.
     \return    a new instance of PtrPotential on success.
     \throw     std::invalid_argument if params.type does not specify an expansion or a modifier,
     or any potential-specific exception on failure (if some parameters are missing or invalid).
@@ -127,18 +128,36 @@ PtrPotential createPotential(
     \param[in] params  is the list of required parameters (e.g., the type of potential expansion,
     number of terms, prescribed symmetry, etc.).
     \param[in] particles  is the array of particle positions and masses.
-    \param[in] converter  is the unit converter for transforming the dimensional parameters 
-    (min/max radii of grid) into internal units; can be a trivial converter. 
-    Coordinates and masses of particles are _not_ transformed: if they are loaded from an external 
-    N-body snapshot file, the conversion is applied at that stage, and if they come from 
+    \param[in] converter  is the unit converter for transforming the dimensional parameters
+    (min/max radii of grid) into internal units; can be a trivial converter.
+    Coordinates and masses of particles are _not_ transformed: if they are loaded from an external
+    N-body snapshot file, the conversion is applied at that stage, and if they come from
     other routines in the library, they are already in internal units.
     \return    a new instance of PtrPotential on success.
     \throw     std::invalid_argument or std::runtime_error or other potential-specific exception
     on failure (e.g., if some of the parameters are invalid or missing).
 */
 PtrPotential createPotential(
-    const utils::KeyValueMap& params, 
+    const utils::KeyValueMap& params,
     const particles::ParticleArray<coord::PosCyl>& particles,
+    const units::ExternalUnits& converter = units::ExternalUnits());
+
+/** Create an evolving potential from a list of timestamps and potentials.
+    \param[in] params  contains other parameters, such as modifiers or the time interpolation method.
+    \param[in] timestamps  is the array of timestamps, sorted in increasing order.
+    \param[in] potentials  is the array of corresponding potential instances.
+    \param[in] converter  is the unit converter for transforming the optional dimensional modifiers
+    in the list of params.
+    Timestamps are _not_ transformed: if they come from other routines in the library,
+    they should already be internal units.
+    \return    a new instance of PtrPotential on success.
+    \throw     std::invalid_argument or std::runtime_error on failure (e.g. timestamps are not
+    monotonic, or interpolation method is invalid).
+*/
+PtrPotential createPotential(
+    const utils::KeyValueMap& params,
+    const std::vector<double>& timestamps,
+    const std::vector<PtrPotential>& potentials,
     const units::ExternalUnits& converter = units::ExternalUnits());
 
 
@@ -180,12 +199,12 @@ math::LogLogSpline readMassProfile(const std::string& fileName);
     It reads the parameters from a text file and converts them into the internal unit system,
     using the conversion factors in the provided `units::ExternalUnits` object,
     then constructs the potential using `createGalaxyPotential()` routine.
-    Standard GalPot units are Kpc and Msun, so to simplify matters, one may instead use 
+    Standard GalPot units are Kpc and Msun, so to simplify matters, one may instead use
     the overloaded function `readGalaxyPotential()` that takes the instance of internal units
     as the second argument, and creates a converter from standard GalPot to these internal units.
-    \param[in]  filename  is the name of parameter file;
-    \param[in]  converter provides the conversion from GalPot to internal units;
-    \return     a new instance of PtrPotential;
+    \param[in]  filename  is the name of parameter file.
+    \param[in]  converter provides the conversion from GalPot to internal units.
+    \return     a new instance of PtrPotential.
     \throw      a std::runtime_error exception if file is not readable
     or does not contain valid parameters.
 */
@@ -194,14 +213,14 @@ PtrPotential readGalaxyPotential(
     const units::ExternalUnits& converter);
 
 /** Utility function providing a legacy interface compatible with the original GalPot (deprecated).
-    It reads the parameters from a text file and converts them into the internal unit system, 
+    It reads the parameters from a text file and converts them into the internal unit system,
     then constructs the potential using `createGalaxyPotential()` routine.
     This function creates the instance of unit converter from standard GalPot units (Kpc and Msun)
-    into the provided internal units, and calls the overloaded function `readGalaxyPotential()` 
-    with this converter object as the second argument. 
-    \param[in]  filename is the name of parameter file;
-    \param[in]  unit     is the specification of internal unit system;
-    \return     a new instance of PtrPotential;
+    into the provided internal units, and calls the overloaded function `readGalaxyPotential()`
+    with this converter object as the second argument.
+    \param[in]  filename is the name of parameter file.
+    \param[in]  unit     is the specification of internal unit system.
+    \return     a new instance of PtrPotential.
     \throw      a std::runtime_error exception if file is not readable
     or does not contain valid parameters.
 */
@@ -217,12 +236,12 @@ inline PtrPotential readGalaxyPotential(
 /** Create an elementary or a composite density from parameters provided in the INI file.
     The file must have one or more sections with names starting from Density,
     and each section should contain the parameters for an analytic density profile or
-    coefficients of DensitySphericalHarmonic or DensityAzimuthalHarmonic models 
+    coefficients of DensitySphericalHarmonic or DensityAzimuthalHarmonic models
     previously stored by writeDensity().
-    \param[in] iniFileName specifies the file to read;
-    \param[in] converter is the unit converter for transforming the density coefficients;
-    from dimensional into internal units; can be a trivial converter;
-    \return    a new instance of PtrDensity on success;
+    \param[in] iniFileName specifies the file to read.
+    \param[in] converter is the unit converter for transforming the density coefficients
+    from dimensional into internal units; can be a trivial converter.
+    \return    a new instance of PtrDensity on success.
     \throw     std::invalid_argument or std::runtime_error or other density-specific exception
     on failure (e.g., if the file does not exist, or does not contain valid coefficients).
 */
@@ -249,7 +268,7 @@ PtrPotential readPotential(
 
 
 /** Write density or potential expansion coefficients to a text (INI) file.
-    The potential must be one of the following expansion classes: 
+    The potential must be one of the following expansion classes:
     `BasisSet`, `Multipole`, `CylSpline`,
     or the density may be `DensitySphericalHarmonic` or `DensityAzimuthalHarmonic`.
     The coefficients stored in a file may be later loaded by `readPotential()` or
@@ -261,10 +280,10 @@ PtrPotential readPotential(
     (in a way that can be loaded back to produce the original object) in all cases;
     in particular, it ignores the potential modifiers and is unsuitable for potential/density types
     that are not expansions, but gives no warning or error in these cases!
-    \param[in] fileName is the output file;
-    \param[in] density is the reference to density or potential object;
+    \param[in] fileName is the output file.
+    \param[in] density is the reference to density or potential object.
     \param[in] converter is the unit converter for transforming the density or potential
-    coefficients from internal into dimensional units; can be a trivial converter;
+    coefficients from internal into dimensional units; can be a trivial converter.
     \return    success or failure (the latter indicates I/O error; however, an unsuitable potential
     or density type does not produce a failure, but is silently ignored).
 */

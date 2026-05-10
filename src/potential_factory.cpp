@@ -100,12 +100,16 @@ struct ModifierParams {
     std::string orientation; ///< orientation of the principal axes specified by Euler angles
     std::string rotation;    ///< name of a file with time-dependent rotation about the z axis, or a single value
     std::string scale;       ///< name of a file with time-dependent amplitude and length scale modulation, or 2 values
+
     ModifierParams(const units::ExternalUnits& _converter) : converter(_converter) {}
+
     // helper functions for comparing the values of modifier params
     bool operator == (const ModifierParams& x) const
     { return center==x.center && orientation==x.orientation && rotation==x.rotation && scale==x.scale; }
+
     bool operator != (const ModifierParams& x) const
     { return !(*this==x); }
+
     bool empty() const
     { return center.empty() && orientation.empty() && rotation.empty() && scale.empty(); }
 };
@@ -139,6 +143,7 @@ struct AllParam: public ModifierParams
     double binary_sma;                ///< binary semimajor axis (orbit size)
     double binary_ecc;                ///< binary eccentricity
     double binary_phase;              ///< orbital phase of the binary
+    bool timeInterpLinear;            ///< time interpolation method for Evolving
     // parameters of potential expansions
     unsigned int gridSizeR; ///< number of radial grid points in Multipole and CylSpline potentials
     unsigned int gridSizez; ///< number of grid points in z-direction for CylSpline potential
@@ -152,7 +157,6 @@ struct AllParam: public ModifierParams
     double r0;              ///< scale radius of the basis functions for BasisSet
     bool fixOrder;          ///< whether to limit the internal SH density expansion to the output order
     std::string file;       ///< name of a file with coordinates of points, or coefficients of expansion
-    double lengthUnit;      ///< dimensional length unit for Logarithmic (taken from ExternalUnits)
     /// default constructor initializes the fields to some reasonable values
     AllParam(const units::ExternalUnits& converter) :
         ModifierParams(converter),
@@ -164,8 +168,9 @@ struct AllParam: public ModifierParams
         alpha(1.), beta(4.), gamma(1.),
         modulationAmplitude(0.), cutoffStrength(2.), sersicIndex(NAN), W0(NAN), trunc(1.),
         binary_q(0), binary_sma(0), binary_ecc(0), binary_phase(0),
+        timeInterpLinear(false),
         gridSizeR(25), gridSizez(25), nmax(12), lmax(6), mmax(6), rmin(0), rmax(0), zmin(0), zmax(0),
-        smoothing(1.), eta(1.0), r0(0), fixOrder(false), lengthUnit(1)
+        smoothing(1.), eta(1.0), r0(0), fixOrder(false)
     {}
 };
 
@@ -400,6 +405,9 @@ AllParam parseParam(const utils::KeyValueMap& kvmap, const units::ExternalUnits&
         type & PT_KEPLERBINARY));
     assignParam(param.binary_phase,        popString(kvmap, keys, "binary_phase", "",
         type & PT_KEPLERBINARY));
+    // this parameter is only relevant for the Evolving potential
+    assignParam(param.timeInterpLinear,    popString(kvmap, keys, "interpLinear", "linearInterp",
+        param.potentialType == PT_EVOLVING));
     // parameters for the potential expansions
     assignParam(param.gridSizeR,           popString(kvmap, keys, "gridSizeR", "",
         param.potentialType & (PT_DENS_SPHHARM | PT_DENS_CYLGRID | PT_MULTIPOLE | PT_CYLSPLINE)));
@@ -410,7 +418,7 @@ AllParam parseParam(const utils::KeyValueMap& kvmap, const units::ExternalUnits&
     assignParam(param.lmax,                popString(kvmap, keys, "lmax", "",
         param.potentialType & (PT_DISK | PT_SPHEROID | PT_NUKER | PT_SERSIC |
         PT_DENS_SPHHARM | PT_BASISSET | PT_MULTIPOLE)));
-    param.mmax = param.lmax;  // update the default value before atttempting to parse the user-provided one
+    param.mmax = param.lmax;  // update the default value before attempting to parse the user-provided one
     assignParam(param.mmax,                popString(kvmap, keys, "mmax", "",
         param.potentialType & (PT_DISK | PT_SPHEROID | PT_NUKER | PT_SERSIC |
         PT_DENS_SPHHARM | PT_DENS_CYLGRID | PT_BASISSET | PT_MULTIPOLE | PT_CYLSPLINE)));
@@ -443,14 +451,8 @@ AllParam parseParam(const utils::KeyValueMap& kvmap, const units::ExternalUnits&
         "Parameter 'symmetry' is only allowed for density or potential expansions constructed from "
         "an N-body snapshot or from a user-defined density or potential model"));
 
-    // this parameter is allowed only for the Evolving potential, and will be parsed later
-    popString(kvmap, keys, "interpLinear", "linearInterp", param.potentialType == PT_EVOLVING);
-
     // this parameter may or may not be used; whether it is allowed will be determined later
     param.file = popString(kvmap, keys, "file");
-
-    // this parameter is used only for the Logarithmic potential, but is not user-assignable
-    param.lengthUnit = conv.lengthUnit;
 
     // modifier params (not parsed or unit-converted at this stage; allowed for any model)
     param.center     = popString(kvmap, keys, "center");
@@ -686,24 +688,37 @@ bool parseAzimuthalHarmonics(std::vector<std::string>& lines, const AllParam& pa
     return true;
 }
 
-/// parse the array of coefficients and create a BasisSet potential
+/// parse the array of coefficients and create a (possibly time-dependent) BasisSet potential
 PtrPotential createBasisSetFromCoefs(std::vector<std::string>& lines, const AllParam& params)
 {
-    std::vector< std::vector<double> > coefs;
+    std::vector<std::vector< std::vector<double> > > coefs;
+    std::vector<double> timestamps;
     std::vector< double > indices;
-    bool ok = lines.size() >= params.nmax+3 &&
-        lines[0] == "#Phi" && lines[1].size()>1 && lines[1][0] == '#';
-    if(ok) {
-        lines.erase(lines.begin());
-        ok &= parseSphericalHarmonics(lines, params, params.nmax+1, /*output*/ indices, coefs);
-        for(size_t i=0; i<indices.size(); i++)
-            ok &= indices[i] == i;  // should be a sequence of integers from 0 to nmax inclusive
+    bool ok = true;
+    while(ok && !lines.empty()) {
+        ok &= lines.size() >= params.nmax+3 &&
+            ((lines[0].size() == 4 && lines[0].substr(0, 4) == "#Phi") ||
+             (lines[0].size() >  7 && lines[0].substr(0, 7) == "#Phi t=")) &&
+            ((lines[1].size() >  1 && lines[1][0] == '#'));
+        if(ok) {
+            if(lines[0].size() > 7)  // parse the timestamp for this block of coefficients, if provided
+                timestamps.push_back(utils::toDouble(lines[0].substr(7)) * params.converter.timeUnit);
+            lines.erase(lines.begin());  // remove the line with #Phi
+            coefs.resize(coefs.size() + 1);
+            ok &= parseSphericalHarmonics(lines, params, params.nmax+1, /*output*/ indices, coefs.back());
+            for(size_t i=0; i<indices.size(); i++)
+                ok &= indices[i] == i;  // should be a sequence of integers from 0 to nmax inclusive
+            for(unsigned int i=0; ok && i<coefs.back().size(); i++)
+                math::blas_dmul(pow_2(params.converter.velocityUnit), coefs.back()[i]);
+        }
+        if(lines.size() > 0 && lines[0].empty())  // empty line separating blocks at different timestamps
+            lines.erase(lines.begin());
     }
+    ok &= (timestamps.empty() && coefs.size() == 1) ||
+         (!timestamps.empty() && coefs.size() == timestamps.size());
     if(!ok)
         throw std::runtime_error("Error loading BasisSet potential");
-    for(unsigned int i=0; i<coefs.size(); i++)
-        math::blas_dmul(pow_2(params.converter.velocityUnit), coefs[i]);
-    return PtrPotential(new BasisSet(params.eta, params.r0, coefs));
+    return PtrPotential(new BasisSet(params.eta, params.r0, &coefs[0], timestamps));
 }
 
 /// parse the array of coefficients and create a Multipole potential
@@ -863,20 +878,32 @@ void writePotentialBasisSet(std::ostream& strm, const BasisSet& pot,
     const units::ExternalUnits& converter)
 {
     double eta, r0;
-    std::vector< std::vector<double> > coefs;
-    pot.getCoefs(eta, r0, coefs);
-    assert(coefs.size() > 0 && coefs[0].size() > 0);
+    std::vector< std::vector< std::vector<double> > > coefs;
+    std::vector<double> timestamps;
+    pot.getCoefs(eta, r0, coefs, timestamps);
+    assert(coefs.size() > 0 && coefs[0].size() > 0 && coefs[0][0].size() > 0);
+    assert((timestamps.empty() && coefs.size() == 1) || (timestamps.size() == coefs.size()));
     // convert units
     r0 /= converter.lengthUnit;
     for(unsigned int i=0; i<coefs.size(); i++)
-        math::blas_dmul(1/pow_2(converter.velocityUnit), coefs[i]);
-    strm << "nmax=" << (coefs[0].size()-1) << "\n";
-    strm << "lmax=" << static_cast<int>(sqrt(coefs.size()*1.0)-1) << "\n";
+        for(unsigned int j=0; j<coefs[i].size(); j++)
+            math::blas_dmul(1/pow_2(converter.velocityUnit), coefs[i][j]);
+    strm << "nmax=" << (coefs[0][0].size()-1) << "\n";
+    strm << "lmax=" << static_cast<int>(sqrt(coefs[0].size()*1.0)-1) << "\n";
     strm << "eta="  << utils::toString(eta,15) << "\n";
     strm << "r0="   << utils::toString(r0, 15) << "\n";
     strm << "symmetry=" << getSymmetryNameByType(pot.symmetry()) << "\n";
-    strm << "Coefficients\n#Phi\n";
-    writeSphericalHarmonics(strm, math::createUniformGrid(coefs[0].size(), 0, coefs[0].size()-1), coefs);
+    strm << "Coefficients\n";
+    std::vector<double> grid = math::createUniformGrid(coefs[0][0].size(), 0, coefs[0][0].size()-1);
+    for(size_t i=0; i<coefs.size(); i++) {
+        if(timestamps.empty())
+            strm << "#Phi\n";
+        else
+            strm << "#Phi t=" + utils::toString(timestamps[i] / converter.timeUnit, 15) + "\n";
+        writeSphericalHarmonics(strm, grid, coefs[i]);
+        if(i<coefs.size())
+            strm << "\n";
+    }
 }
 
 void writePotentialMultipole(std::ostream& strm, const Multipole& pot,
@@ -1064,7 +1091,7 @@ inline std::string errorTimeDependentArray(int K, const std::string& str)
     \tparam K  is the dimension of the vector quantity (1,2,3...)
 */
 template<int K>
-static void readTimeDependentArray(
+void readTimeDependentArray(
     const std::string& str, /*units:*/ double timeUnit, double valueUnit,
     /*output*/ math::CubicSpline spl[K])
 {
@@ -1255,7 +1282,7 @@ PtrPotential createAnalyticPotential(const AllParam& param)
     switch(param.potentialType) {
     case PT_LOG:
         return PtrPotential(new Logarithmic(
-            param.v0, param.scaleRadius, param.axisRatioY, param.axisRatioZ, param.lengthUnit));
+            param.v0, param.scaleRadius, param.axisRatioY, param.axisRatioZ, param.converter.lengthUnit));
     case PT_HARMONIC:
         return PtrPotential(new Harmonic(param.Omega, param.axisRatioY, param.axisRatioZ));
     case PT_KEPLERBINARY:
@@ -1413,8 +1440,54 @@ PtrPotential createPotentialExpansion(const AllParam& param, const utils::KeyVal
         "in density=..., or a table of coefficients (when loading from a file)");
 }
 
+/// create a (possibly optimized) time-dependent potential from the list of potential instances
+PtrPotential createEvolvingPotentialFromList(const AllParam& param,
+    const std::vector<double>& timestamps, const std::vector<PtrPotential>& potentials)
+{
+    // there is a possibility of an optimization if all potentials are of some expansion type
+    // (currently only BasisSet), in which case the linear interpolation in time is performed
+    // at the level of coefficients rather than entire potentials
+    bool allBasisSet = param.timeInterpLinear == true;  // if using nearest point, don't bother
+    // first check the type of all potentials
+    for(size_t i=0; allBasisSet && i<potentials.size(); i++)
+        allBasisSet &= (dynamic_cast<const BasisSet*>(potentials[i].get()) != NULL);
+    // if they are all of BasisSet type, try to construct a time-interpolated BasisSet potential
+    if(allBasisSet) {
+        double eta, r0, alleta = NAN, allr0 = NAN;
+        std::vector< std::vector<std::vector<double> > > coefs, allCoefs(potentials.size());
+        std::vector<double> ts;
+        for(size_t i=0; allBasisSet && i<potentials.size(); i++) {
+            dynamic_cast<const BasisSet*>(potentials[i].get())->getCoefs(eta, r0, coefs, ts);
+            if(!ts.empty())  // potential is already time-dependent, this is unsupported
+                allBasisSet = false;
+            else {
+                assert(coefs.size() == 1);
+                allCoefs[i] = coefs[0];
+            }
+            if(i == 0) {
+                alleta = eta;
+                allr0  = r0;
+            } else if(eta != alleta || r0 != allr0) {
+                allBasisSet = false;  // cannot interpolate between potentials with different params
+            }
+        }
+        if(allBasisSet) {
+            try{
+                return PtrPotential(new BasisSet(alleta, allr0, &allCoefs.front(), timestamps));
+            }
+            catch(std::exception& ex) {
+                // this may fail if the number of coefficients differs between instances;
+                // in this case continue with the default plan of creating a generic Evolving potential
+                FILTERMSG(utils::VL_WARNING, "createEvolvingPotential",
+                    std::string("Creating an Evolving BasisSet failed: ") + ex.what());
+            }
+        }
+    }
+    return PtrPotential(new Evolving(timestamps, potentials, param.timeInterpLinear));
+}
+
 /// create a time-dependent list of potentials
-static PtrPotential createEvolvingPotential(
+PtrPotential createEvolvingPotentialFromINI(const AllParam& param,
     const utils::KeyValueMap& kvmap, const units::ExternalUnits& converter)
 {
     // dump the content of the INI section into an array of strings, and search for Timestamps
@@ -1429,10 +1502,8 @@ static PtrPotential createEvolvingPotential(
     if(startLine < 0)
         throw std::runtime_error(
             "Evolving potential needs a list of timestamps and filenames after the line 'Timestamps'");
-
-    bool interpLinear = kvmap.getBoolAlt("interpLinear", "linearInterp", false);
     std::vector<std::string> fields;
-    std::vector<double> times;
+    std::vector<double> timestamps;
     std::vector<PtrPotential> potentials;
     // attempt to parse the remaining lines in this INI section
     // as time stamps and names of corresponding potential files
@@ -1444,7 +1515,7 @@ static PtrPotential createEvolvingPotential(
         if(numFields < 2 ||
             !((fields[0][0]>='0' && fields[0][0]<='9') || fields[0][0]=='-' || fields[0][0]=='+'))
             continue;
-        times.push_back(utils::toDouble(fields[0]) * converter.timeUnit);
+        timestamps.push_back(utils::toDouble(fields[0]) * converter.timeUnit);
         try {
             potentials.push_back(potential::readPotential(fields[1], converter));
         }
@@ -1452,7 +1523,7 @@ static PtrPotential createEvolvingPotential(
             throw std::runtime_error("Error reading the potential from "+fields[1]+": "+e.what());
         }
     }
-    return PtrPotential(new Evolving(times, potentials, interpLinear));
+    return createEvolvingPotentialFromList(param, timestamps, potentials);
 }
 
 /** create and instance of UniformAcceleration potential from the time-dependent values in a file */
@@ -1732,7 +1803,7 @@ PtrPotential createPotential(
             break;
         }
         case PT_EVOLVING: {
-            bunch.componentsPot.push_back(createEvolvingPotential(kvmap[i], converter));
+            bunch.componentsPot.push_back(createEvolvingPotentialFromINI(param, kvmap[i], converter));
             break;
         }
         // 6. the remaining alternative is an elementary potential, or an error
@@ -1801,7 +1872,6 @@ PtrPotential createPotential(
     PtrPotential result = createPotentialExpansionFromSource(param, dens);
     applyModifiers(result, param);
     return result;
-
 }
 
 // create a potential expansion from the user-provided source potential
@@ -1841,6 +1911,19 @@ PtrPotential createPotential(
 {
     const AllParam param = parseParam(kvmap, converter);
     PtrPotential result = createPotentialExpansionFromParticles(param, particles);
+    applyModifiers(result, param);
+    return result;
+}
+
+// create an evolving potential from a list of timestamps and potentials, plus other parameters
+PtrPotential createPotential(
+    const utils::KeyValueMap& kvmap,
+    const std::vector<double>& timestamps,
+    const std::vector<PtrPotential>& potentials,
+    const units::ExternalUnits& converter)
+{
+    const AllParam param = parseParam(kvmap, converter);
+    PtrPotential result = createEvolvingPotentialFromList(param, timestamps, potentials);
     applyModifiers(result, param);
     return result;
 }

@@ -1,7 +1,7 @@
 /** \file   interface_python.cpp
     \brief  Python interface for the Agama library
     \author Eugene Vasiliev
-    \date   2014-2025
+    \date   2014-2026
 
     This is a Python extension module that provides the interface to
     some of the classes and functions from the Agama C++ library.
@@ -66,7 +66,7 @@
 #include "utils.h"
 #include "utils_config.h"
 // text string embedded into the python module as the __version__ attribute (including Github commit number)
-#define AGAMA_VERSION "1.0.157 compiled on " __DATE__
+#define AGAMA_VERSION "1.0.158 compiled on " __DATE__
 
 // older versions of numpy have different macro names
 // (will need to expand this list if other similar macros are used in the code)
@@ -1601,6 +1601,7 @@ PyObject* allocateOutput(npy_intp numPoints, double* buffer[3]=NULL, int C=0)
     "  densityNorm=...   normalization of density profile (Spheroid).\n" \
     "  W0=...  dimensionless central potential in King models.\n" \
     "  trunc=...  truncation strength in King models.\n" \
+    "Modifiers:\n" \
     "  center=...  offset of the potential from origin, can be either " \
     "a triplet of numbers, or an array of time-dependent offsets " \
     "(t,x,y,z, and optionally vx,vy,vz) provided directly or as a file name.\n" \
@@ -1888,7 +1889,7 @@ potential::PtrDensity Density_initFromDict(PyObject* namedArgs)
 }
 
 /// attempt to construct a composite density from a tuple of Density-like objects
-/// or dictionariess with density parameters
+/// or dictionaries with density parameters
 potential::PtrDensity Density_initFromTuple(PyObject* tuple)
 {
     // if we have one string parameter, it could be the file name
@@ -2533,6 +2534,11 @@ static const char* docstringPotential =
     "in these cases, one should provide either a density model, file name, "
     "or an array of particles.\n"
     DOCSTRING_DENSITY_PARAMS
+    "A time-dependent type='Evolving' potential can be created with the following arguments:\n"
+    "  timestamps=...   dictionary with potential instances indexed by corresponding timestamps, "
+    "e.g., {t1: pot1, t2: pot2, ...}\n"
+    "  interpLinear=...   an optional flag requesting that the potential is linearly interpolated "
+    "in time (by default it uses the potential from the nearest timestamp).\n"
     "Parameters for potential expansions:\n"
     "  density=...   the density model for a potential expansion.\n"
     "  It may be a string with the name of density profile (most of the elementary potentials "
@@ -2756,10 +2762,38 @@ PyObject* createPotentialObject(const potential::PtrPotential& pot)
     return (PyObject*)pot_obj;
 }
 
+potential::PtrPotential Potential_createEvolving(utils::KeyValueMap& params, PyObject* timestamps_obj)
+{
+    if(!PyDict_Check(timestamps_obj))
+        throw std::invalid_argument("'timestamps' should be a dict");
+    std::vector< std::pair<double, PyObject*> > array;
+    PyObject *key, *value;
+    Py_ssize_t pos = 0;
+    while(PyDict_Next(timestamps_obj, &pos, &key, &value)) {
+        double keynum = toDouble(key);
+        if(!isFinite(keynum))  // cannot be parsed as a float
+            throw std::runtime_error("Invalid key in 'timestamps': " + toString(key));
+        array.push_back(std::pair<double, PyObject*>(keynum, value));
+    }
+    std::sort(array.begin(), array.end());
+    std::vector<double> times;
+    std::vector<potential::PtrPotential> potentials;
+    for(size_t i=0; i<array.size(); i++) {
+        times.push_back(array[i].first * conv->timeUnit);
+        potential::PtrPotential pot = getPotential(array[i].second, &params);
+        if(!pot)
+            throw std::runtime_error("'timestamps' should contain instances of Potential, but has " +
+                toString(array[i].second));
+        potentials.push_back(pot);
+    }
+    return potential::createPotential(params, times, potentials, *conv);
+}
+
 /// attempt to construct an elementary potential from the parameters provided in dictionary
 potential::PtrPotential Potential_initFromDict(PyObject* namedArgs)
 {
     NamedArgs nargs(namedArgs);
+    PyObject* timestamps_obj = nargs.pop("timestamps");
     // check if the arguments contain an array of particles, and if so,
     // convert it to an equivalent C++ class and remove from dict to avoid putting it into KeyValueMap
     PyObject* particles_obj = nargs.pop("particles");
@@ -2768,6 +2802,8 @@ potential::PtrPotential Potential_initFromDict(PyObject* namedArgs)
     PyObject* pot_obj  = nargs.get("potential");
     // convert the remaining items in the Python dictionary into a KeyValueMap
     utils::KeyValueMap params(nargs);
+    if(utils::stringsEqual(params.getString("type"), "Evolving") && timestamps_obj)
+        return Potential_createEvolving(params, timestamps_obj);
     if(particles_obj) {
         if(params.contains("file"))
             throw std::invalid_argument("Cannot provide both 'particles' and 'file' arguments");

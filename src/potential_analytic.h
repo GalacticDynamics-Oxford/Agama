@@ -1,7 +1,7 @@
 /** \file    potential_analytic.h
     \brief   Several common analytic potential models
     \author  Eugene Vasiliev
-    \date    2009-2015
+    \date    2009-2025
 */
 #pragma once
 #include "potential_base.h"

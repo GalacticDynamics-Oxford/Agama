@@ -415,19 +415,19 @@ std::string Composite::name() const
 }
 
 
-Evolving::Evolving(const std::vector<double> _times,
+Evolving::Evolving(const std::vector<double> _timestamps,
     const std::vector<PtrPotential> _instances,
     bool _interpLinear)
 :
-    times(_times), instances(_instances), interpLinear(_interpLinear)
+    timestamps(_timestamps), instances(_instances), interpLinear(_interpLinear)
 {
-    if(times.size() != instances.size())
+    if(timestamps.size() != instances.size())
         throw std::length_error("Evolving: input arrays are not equal in length");
-    if(times.size() == 0)
+    if(timestamps.size() == 0)
         throw std::invalid_argument("Evolving: empty list of potentials");
     sym = instances[0]->symmetry();
-    for(size_t i=1; i<times.size(); i++) {
-        if(!(times[i] > times[i-1]))
+    for(size_t i=1; i<timestamps.size(); i++) {
+        if(!(timestamps[i] > timestamps[i-1]))
             throw std::invalid_argument("Evolving: times must be sorted in increasing order");
         coord::SymmetryType isym = instances[i]->symmetry();
         if(isUnknown(isym) || isUnknown(sym))
@@ -442,7 +442,7 @@ void Evolving::evalCar(const coord::PosCar &pos,
 {
     ptrdiff_t index;
     double weight;
-    searchInterp(time, times, interpLinear, /*output*/ index, weight);
+    searchInterp(time, timestamps, interpLinear, /*output*/ index, weight);
     instances[index]->eval(pos, potential, deriv, deriv2, time);
     if(weight!=1) {
         // evaluate the potential at the other time stamp and interpolate between them
@@ -464,7 +464,7 @@ double Evolving::densityCar(const coord::PosCar &pos, double time) const
 {
     ptrdiff_t index;
     double weight;
-    searchInterp(time, times, interpLinear, /*output*/ index, weight);
+    searchInterp(time, timestamps, interpLinear, /*output*/ index, weight);
     double result = instances[index]->density(pos, time);
     if(weight!=1)
         result = weight * result + (1-weight) * instances[index+1]->density(pos, time);
