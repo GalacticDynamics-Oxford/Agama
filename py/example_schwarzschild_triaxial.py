@@ -62,25 +62,11 @@ for i,d in enumerate(delta2):
     if abs(d)>1e-8:  print("KinemConstraint %i not satisfied: %.4g" % (i, d))
 
 # export an N-body model
-nbody=100000
-status,result = agama.sampleOrbitLibrary(nbody, trajs, weights)
-if not status:
-    # this may occur if there was not enough recorded trajectory points for some high-weight orbits:
-    # in this case their indices and the required numbers of points are returned in the result tuple.
-    # This cannot happen if orbits are represented by interpolator objects rather than pre-recorded arrays.
-    indices,trajsizes = result
-    print("reintegrating %i orbits; max # of sampling points is %i" % (len(indices), max(trajsizes)))
-    trajs[indices] = agama.orbit(potential=pot, ic=initcond[indices], time=inttimes[indices], \
-        trajsize=trajsizes)
-    status,result = agama.sampleOrbitLibrary(nbody, trajs, weights)
-    if not status: print("Failed to produce output N-body model")
-agama.writeSnapshot("schwarzschild_model_nbody.txt", result, 'text')   # one could also use numpy.savetxt
+nbody = 100000
+result = agama.sampleOrbitLibrary(nbody, trajs, weights)
+agama.writeSnapshot("example_schwarzschild_triaxial.txt", result, 'text')   # one could also use numpy.savetxt
 
-# also store the entire Schwarzschild model in a numpy binary archive
-numpy.savez_compressed("schwarzschild_model_data", ic=initcond, inttime=inttimes, weight=weights, \
-    data1=data1, data2=data2, cons1=rhs1)
-
-# store the orbit initial conditions and weights in a text file
-numpy.savetxt("schwarzschild_model_orbits", \
-    numpy.column_stack((initcond, weights, weightprior, inttimes)), \
-    header='x y z vx vy vz weight prior inttime')
+# optionally, store the orbit initial conditions and weights in a text file
+#numpy.savetxt("schwarzschild_model_orbits", \
+#    numpy.column_stack((initcond, weights, weightprior, inttimes)), \
+#    header='x y z vx vy vz weight prior inttime')

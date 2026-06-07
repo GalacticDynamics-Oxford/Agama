@@ -169,8 +169,8 @@ if Nstars < 1e6:
     print("To increase the resolution and reduce the Poisson noise in maps, run the script "
         "with a larger number of orbits, e.g. 1e6 (provide the number in the command line)")
 
-fc = numpy.vstack(agama.orbit(potential=potTotal, ic=ic, time=Tcurr-Trewind,
-    timestart=Trewind, trajsize=1)[:,1])
+fc = agama.orbit(potential=potTotal, ic=ic, time=Tcurr-Trewind, timestart=Trewind, trajsize=1,
+    separateTime=True)[1].reshape(len(ic), 6)
 
 # present-day positions and Solar reflex-corrected velocities of these stars
 # in the heliocentric system (for an observer at rest w.r.t. the Galactic center)

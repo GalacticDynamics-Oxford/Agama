@@ -142,7 +142,8 @@ while time < tend:
     pot_total = agama.Potential(pot_host,
         agama.Potential(potential=pot_sat, center=numpy.column_stack((time_center, orbit_center))))
     # compute the trajectories of all particles moving in the combined potential of the host galaxy and the moving satellite
-    r_xv = numpy.vstack(agama.orbit(ic=r_xv, potential=pot_total, time=tupd, timestart=time, trajsize=1)[:,1])
+    r_xv = agama.orbit(ic=r_xv, potential=pot_total, time=tupd, timestart=time, trajsize=1,
+        separateTime=True)[1].reshape(len(r_xv), 6)
     # update the potential of the satellite (using a spherical monopole approximation)
     pot_sat = agama.Potential(type='multipole', particles=(r_xv[:,0:3] - r_center[0:3], mass), symmetry='s')
     # determine which particles remain bound to the satellite

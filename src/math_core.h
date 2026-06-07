@@ -88,6 +88,23 @@ inline double hermiteInterp(double x, double x1, double x2,
          + pow_2(t)   * ( (3-2*t) * y2 + (t-1) * dy2 * (x2-x1) );
 }
 
+/** compute the coefficients c of a polynomial of degree N from its values at N+1 points:
+    P(x) = c_0 + c_1 x + c_2 x^2 + ... + c_N x^N;  P(x_i) = y_i, i=0..N
+    Adapted from the implementation of the algorithm of Bjorck & Pereyra (1970) by John Burkardt.
+    NB: the alternative version given in Numerical Recipes has *much* worse accuracy!
+*/
+inline void vandermonde(int N, /*input*/ const double x[], const double y[], /*output*/ double c[])
+{
+    for(int i=0; i<=N; i++)
+        c[i] = y[i];
+    for(int i=0; i<N; i++)
+        for(int j=N; j>i; j--)
+            c[j] = (c[j] - c[j-1]) / (x[j] - x[j-i-1]);
+    for(int i=N-1; i>=0; i--)
+        for(int j=i; j<N; j++)
+            c[j] -= x[i] * c[j+1];
+}
+
 
 /** Class for computing running average and dispersion for a sequence of numbers */
 class Averager {

@@ -1,6 +1,6 @@
 /** \file    math_gausshermite.h
     \brief   Gauss-Hermite expansion
-    \date    2017-2019
+    \date    2017-2026
     \author  Eugene Vasiliev
 
 */

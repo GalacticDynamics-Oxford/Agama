@@ -244,7 +244,7 @@ def get_DF_integrator(potential, integration_time):
         Vy0 = Vr.flatten() * numpy.sin(theta) + Vphi.flatten() * numpy.cos(theta)
         Vz0 = 0.0
         xv = numpy.column_stack([x0 + Vx0*0, y0 + Vx0*0, z0 + Vx0*0, Vx0, Vy0, Vz0 + Vx0*0])
-        return df(af(numpy.vstack(agama.orbit(potential=potential, ic=xv, time=integration_time, trajsize=1)[:,1]))).reshape(120 + 1, 120 + 1)
+        return df(af(agama.orbit(potential=potential, ic=xv, time=integration_time, trajsize=1, separateTime=True)[1].reshape(-1, 6))).reshape(120 + 1, 120 + 1)
     return DF_integrator
 
 # Setting up the distribution function

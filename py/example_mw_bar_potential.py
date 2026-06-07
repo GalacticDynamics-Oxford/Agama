@@ -175,6 +175,7 @@ def makePotentialModel():
 
 
 if __name__ == '__main__':
+    numpy.seterr(all='ignore')  # disable overflow warnings
     agama.setUnits(length=1, mass=1, velocity=1)  # 1 kpc, 1 Msun, 1 km/s
     pot = makePotentialModel()
     pot.export('Portail17.ini')
@@ -206,7 +207,7 @@ if __name__ == '__main__':
     ic[:,4] += 220
     bar_angle = -25.0 * numpy.pi/180  # orientation of the bar w.r.t. the Sun
     Omega = -39.0  # km/s/kpc - the value is negative since the potential rotates clockwise
-    orbits = agama.orbit(potential=pot, ic=ic, time=10., trajsize=1000, Omega=Omega)[:,1]
+    orbits = agama.orbit(potential=pot, ic=ic, time=10., trajsize=1000, Omega=Omega, separateTime=True)[1]
     sina, cosa = numpy.sin(bar_angle), numpy.cos(bar_angle)
     rmax = 10.0   # plotting range
     cmap = plt.get_cmap('mist')

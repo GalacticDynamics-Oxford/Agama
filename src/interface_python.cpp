@@ -66,7 +66,7 @@
 #include "utils.h"
 #include "utils_config.h"
 // text string embedded into the python module as the __version__ attribute (including Github commit number)
-#define AGAMA_VERSION "1.0.158 compiled on " __DATE__
+#define AGAMA_VERSION "1.0.159 compiled on " __DATE__
 
 // older versions of numpy have different macro names
 // (will need to expand this list if other similar macros are used in the code)
@@ -128,6 +128,38 @@ PyObject* createCubicSpline(const std::vector<double>& x, const std::vector<doub
 // with -fno-strict-aliasing. To avoid this, we use a dirty typecast.
 void* forget_about_type(void* x) { return x; }
 #define Py_INCREFx(x) Py_INCREF(forget_about_type(x))
+
+
+/// RAII-style support of Python reference counting machinery (in a limited context):
+/// a thin wrapper for a raw pointer to any Python object (PyObject, PyArrayObject, etc.)
+/// that provides transparent conversion to the underlying raw pointer
+/// and is automatically Py_XDECREF'ed when going out of scope (no matter if it was NULL or not).
+/// It can be used only for wrapping newly created objects that stay within the local scope
+/// and need to be disposed of at the end of the block
+/// (including temporary objects within function calls).
+template<typename PyType>
+class PyRef {
+    PyType* obj;  // underlying pointer to a Py***Object
+    // disable empty and copy/move constructors and assignment operators by marking them private;
+    // an instance of this class can only be initialized once
+    PyRef();
+    PyRef(const PyRef<PyType>& other);
+    PyRef<PyType>& operator=(const PyRef<PyType>& other);
+#if __cplusplus >= 201103L
+    PyRef(PyRef<PyType>&& other);
+    PyRef<PyType>& operator=(PyRef<PyType>&& other);
+#endif
+public:
+    /// construct from any Python object* that is a new (NOT borrowed) reference, or NULL
+    PyRef(PyType* _obj) : obj(_obj) {}
+    /// decrease the reference counter of this object, triggering its disposal if no longer needed
+    ~PyRef() { Py_XDECREF(obj); }
+    /// transparent access to the underlying raw pointer
+    /// (importantly, it should be not DECREF'ed by the calling code!)
+    inline operator PyType*() const { return obj; }
+};
+typedef PyRef<PyObject> PyObjectRef;
+typedef PyRef<PyArrayObject> PyArrayObjectRef;
 
 
 //  -------------------------------
@@ -369,40 +401,28 @@ public:
         {
             if(!initialized && tqdmClass) {
                 // when first reached here, try to create an instance of a fancy progress bar.
-                PyObject
-                    *args  = PyTuple_New(0),
-                    *kwargs= PyDict_New(),
-                    *count = PyInt_FromLong(numTotal),
-                    *value = PyInt_FromLong(numCompleted),
-                    *unit  = PyString_FromString(unitStr);
-                PyDict_SetItemString(kwargs, "total", count);
-                PyDict_SetItemString(kwargs, "initial", value);
-                PyDict_SetItemString(kwargs, "unit", unit);
-                PyDict_SetItemString(kwargs, "leave", Py_False);
-                tqdmInstance = PyObject_Call(tqdmClass, args, kwargs);
-                Py_DECREF(args);
-                Py_DECREF(kwargs);
-                Py_DECREF(count);
-                Py_DECREF(value);
-                Py_DECREF(unit);
+                PyObjectRef kwargs(PyDict_New());
+                PyDict_SetItemString(kwargs, "total",   PyObjectRef(PyInt_FromLong(numTotal)));
+                PyDict_SetItemString(kwargs, "initial", PyObjectRef(PyInt_FromLong(numCompleted)));
+                PyDict_SetItemString(kwargs, "unit",    PyObjectRef(PyString_FromString(unitStr)));
+                PyDict_SetItemString(kwargs, "leave",   Py_False);
+                tqdmInstance = PyObject_Call(tqdmClass, PyObjectRef(PyTuple_New(0)), kwargs);
                 if(!tqdmInstance)
                     // failure to create an instance of progress bar is not critical, suppress the error
                     PyErr_Clear();
                 prevNumCompleted = numCompleted;
             }
             initialized = true;  // mark tqdm initialization as complete, even if it failed
-            PyObject* result = NULL;
+            bool printed = false;
             if(tqdmInstance) {
-                result = PyObject_CallMethod(tqdmInstance, const_cast<char*>("update"),
-                    const_cast<char*>("i"), numCompleted-prevNumCompleted);
+                PyObjectRef result(PyObject_CallMethod(tqdmInstance, const_cast<char*>("update"),
+                    const_cast<char*>("i"), numCompleted-prevNumCompleted));
+                printed = result != NULL;
                 prevNumCompleted = numCompleted;
             }
-            if(result)  // successfully shown a progress bar using tqdm
-                Py_DECREF(result);
-            else {  // otherwise print a simple progress indicator to python stderr
+            if(!printed)  // if tqdm didn't work, print a simple progress indicator to python stderr
                 PySys_WriteStderr("%li/%li %ss complete\r",
                     (long int)numCompleted, (long int)numTotal, unitStr);
-            }
         }
     }
 
@@ -411,9 +431,10 @@ public:
     {
         if(!initialized)
             return;
-        if(tqdmInstance) {  // clean up the progress bar
-            PyObject* result = PyObject_CallMethod(tqdmInstance, const_cast<char*>("close"), NULL);
-            Py_XDECREF(result);
+        if(tqdmInstance) {
+            // clean up the progress bar by calling close() and immediately DECREF'ing its result
+            PyObjectRef(PyObject_CallMethod(tqdmInstance, const_cast<char*>("close"), NULL));
+            // and then delete the progress bar object itself
             Py_DECREF(tqdmInstance);
         } else {  // overwrite the previously printed text (numCompleted/numTotal) with spaces
             int numSpaces = 2 * (log10(numTotal)+1) + 12 + strlen(unitStr);
@@ -444,23 +465,22 @@ bool checkCallable(PyObject* fnc, int dim)
     {
         const int Npoints= 2;  // number of input points
         npy_intp dims[]  = {Npoints, dim};
-        PyObject* args   = PyArray_ZEROS(2, dims, NPY_DOUBLE, /*fortran order*/0);
-        PyObject* result = PyObject_CallFunctionObjArgs(fnc, args, NULL);
-        Py_DECREF(args);
+        PyArrayObjectRef result((PyArrayObject*)PyObject_CallFunctionObjArgs(fnc,
+            /*args*/ (PyObject*)PyObjectRef(PyArray_ZEROS(2, dims, NPY_DOUBLE, /*fortran order*/0)),
+            /*end args*/ NULL));
         if(result == NULL) {
             return false;  // callable but incorrect; keep the error message set by the above call
         }
         bool success = false;
-        if(PyArray_Check(result)) {
-            int type = PyArray_TYPE((PyArrayObject*) result);
-            success  = PyArray_NDIM((PyArrayObject*) result)==1 &&
-                PyArray_DIM((PyArrayObject*) result, 0) == Npoints &&
+        if(PyArray_Check((PyObject*)(void*)result)) {
+            int type = PyArray_TYPE(result);
+            success  = PyArray_NDIM(result)==1 &&
+                PyArray_DIM(result, 0) == Npoints &&
                 (type==NPY_FLOAT || type==NPY_DOUBLE || type==NPY_BOOL);
             if(!success)  // callable but incorrect result - report this
                 PyErr_SetString(PyExc_TypeError, "Invalid array returned by the user-provided function");
         } else
             PyErr_SetString(PyExc_TypeError, "User-provided function should return an array");
-        Py_DECREF(result);
         return success;
     }
     else
@@ -476,10 +496,7 @@ std::string toString(PyObject* obj)
         return std::string(PyString_AsString(obj));
 #if PY_MAJOR_VERSION==2
     if(PyUnicode_Check(obj)) {
-        PyObject* str = PyUnicode_AsUTF8String(obj);
-        std::string result(PyString_AsString(str));
-        Py_DECREF(str);
-        return result;
+        return PyString_AsString(PyObjectRef(PyUnicode_AsUTF8String(obj)));
     }
 #endif
     if(PyNumber_Check(obj)) {
@@ -496,19 +513,13 @@ std::string toString(PyObject* obj)
         std::string str = "[";
         for(Py_ssize_t i=0; i<size; i++) {
             if(i>0) str += ",";
-            PyObject* elem = PySequence_GetItem(obj, i);
-            str += toString(elem);
-            Py_XDECREF(elem);
+            str += toString(PyObjectRef(PySequence_GetItem(obj, i)));
         }
         str += "]";
         return str;
     }
-    PyObject* s = PyObject_Str(obj);
-    if(!s)
-        return "";
-    std::string str = PyString_AsString(s);
-    Py_DECREF(s);
-    return str;
+    PyObjectRef s(PyObject_Str(obj));
+    return s ? PyString_AsString(s) : "";
 }
 
 /// return an integer representation of a Python object, or a default value in case of error
@@ -525,10 +536,9 @@ int toInt(PyObject* obj, int defaultValue=-1)
         return value;
     }
     // it wasn't a number, but may be it can be converted to a number
-    PyObject* l = PyNumber_Long(obj);
+    PyObjectRef l(PyNumber_Long(obj));
     if(l) {
         int value = PyInt_AsLong(l);
-        Py_DECREF(l);
         return value;
     }
     if(PyErr_Occurred())
@@ -549,10 +559,9 @@ double toDouble(PyObject* obj, double defaultValue=NAN)
         }
         return value;
     }
-    PyObject* d = PyNumber_Float(obj);
+    PyObjectRef d(PyNumber_Float(obj));
     if(d) {
         double value = PyFloat_AsDouble(d);
-        Py_DECREF(d);
         return value;
     }
     if(PyErr_Occurred())
@@ -601,7 +610,8 @@ inline DataType& pyArrayElem(void* arr, npy_intp ind1, npy_intp ind2, npy_intp i
 
 /// convert a Python array of floats to std::vector, or return an empty vector in case of error;
 /// if the argument is a string instead of a proper array (e.g. if it comes from an ini file),
-/// it will be parsed as if it were a python expression, like "numpy.linspace(0.,1.,21)"
+/// it will be parsed as if it were a python expression, like "numpy.linspace(0.,1.,21)".
+/// WARNING: this is a potential security risk, but we expect the user to be non-malicious...
 std::vector<double> toDoubleArray(PyObject* obj)
 {
     if(!obj)
@@ -613,18 +623,16 @@ std::vector<double> toDoubleArray(PyObject* obj)
             return std::vector<double>();
         }
     }
-    PyObject *arr = PyArray_FROM_OTF(obj, NPY_DOUBLE, 0/*no special requirements*/);
-    if(!arr || PyArray_NDIM((PyArrayObject*)arr) != 1) {
-        Py_XDECREF(arr);
+    PyArrayObjectRef arr((PyArrayObject*)PyArray_FROM_OTF(obj, NPY_DOUBLE, NPY_ARRAY_ALIGNED));
+    if(!arr || PyArray_NDIM(arr) != 1) {
         if(PyErr_Occurred())
             PyErr_Clear();
         return std::vector<double>();
     }
-    int size = PyArray_DIM((PyArrayObject*)arr, 0);
+    int size = PyArray_DIM(arr, 0);
     std::vector<double> vec(size);
     for(int i=0; i<size; i++)
         vec[i] = pyArrayElem<double>(arr, i);
-    Py_DECREF(arr);
     return vec;
 }
 
@@ -652,7 +660,7 @@ PyObject* toPyArray(const std::vector<float>& vec)
     return arr;
 }
 
-/// convert a C++ matrix into a NumPy 2d array
+/// convert a C++ matrix into a 2d NumPy array
 PyObject* toPyArray(const math::IMatrix<double>& mat)
 {
     npy_intp size[] = { static_cast<npy_intp>(mat.rows()), static_cast<npy_intp>(mat.cols()) };
@@ -713,18 +721,18 @@ inline bool noNamedArgs(PyObject* namedArgs)
 }
 
 /** Helper class for parsing named arguments in a case-insensitive way.
-    It is created from a Python dictionary, and converts its keys into C++ strings,
-    while keeping values as PyObject* pointers (borrowed references), creating a list of arguments.
+    It is created from a Python dictionary, with keys represented by C-style NULL-terminated strings
+    and values by PyObject* pointers (borrowed references), creating a list of arguments.
     One can retrieve ("get") its elements with specific keys (a non-existent argument does not
     raise an error), or "pop" elements, removing them from the list of arguments.
     Once all known named arguments have been retrieved, one can convert the remaining ones
-    into KeyValueMap (i.e. convert all values into strings), which clears this list (it remains
-    the job of downstream code to verify that this KeyValueMap contains only known keys).
+    into KeyValueMap (i.e. convert all keys and values into strings), which clears this list
+    (it remains the job of downstream code to verify that this KeyValueMap contains only known keys).
     When the object is destroyed while retaining any argument that have not been parsed,
     this raises a Python exception with the list of unknown named arguments.
 */
 class NamedArgs {
-    std::vector<std::pair<std::string, PyObject*> > args;
+    std::vector<std::pair<const char*, PyObject*> > args;
 public:
     /// Create the list of elements, checking for duplicate keys
     NamedArgs(PyObject* namedArgs)
@@ -735,15 +743,15 @@ public:
         PyObject *key, *value;
         Py_ssize_t pos = 0;
         while(PyDict_Next(namedArgs, &pos, &key, &value)) {
-            std::string keystr = toString(key);
+            assert(PyString_Check(key));
+            const char* keystr = PyString_AsString(key);
             // check that the key is not duplicated (using case-insensitive comparison)
             for(size_t i=0; i<args.size(); i++) 
                 if(utils::stringsEqual(args[i].first, keystr)) {
-                    PyErr_SetString(PyExc_TypeError,
-                        ("Duplicate parameter " + args[i].first + " and " + keystr).c_str());
+                    PyErr_Format(PyExc_TypeError, "Duplicate parameter %s and %s", args[i].first, keystr);
                     return;
                 }
-            args.push_back(std::pair<std::string, PyObject*>(keystr, value));
+            args.push_back(std::pair<const char*, PyObject*>(keystr, value));
         }
     }
 
@@ -777,7 +785,7 @@ public:
         return params;
     }
 
-    /// Retrieve an argument without removing it from the list
+    /// Retrieve an argument (as a borrowed reference) without removing it from the list
     PyObject* get(const char* key) const
     {
         for(size_t i=0; i<args.size(); i++)
@@ -786,7 +794,7 @@ public:
         return NULL;
     }
 
-    /// Retrieve an argument and remove it from the list
+    /// Retrieve an argument (as a borrowed reference) and remove it from the list
     PyObject* pop(const char* key)
     {
         for(size_t i=0; i<args.size(); i++)
@@ -812,16 +820,15 @@ public:
         }
         // it may be an array or something that could be converted to an array
         if(PySequence_Check(obj) && !PyString_Check(obj)) {
-            PyObject *arr = PyArray_FROM_OTF(obj, NPY_DOUBLE, 0/*no special requirements*/);
-            if(arr && PyArray_NDIM((PyArrayObject*)arr) == 1) {
-                npy_intp size = PyArray_DIM((PyArrayObject*)arr, 0);
+            PyArrayObjectRef arr((PyArrayObject*)PyArray_FROM_OTF(obj, NPY_DOUBLE, NPY_ARRAY_ALIGNED));
+            if(arr && PyArray_NDIM(arr) == 1) {
+                npy_intp size = PyArray_DIM(arr, 0);
                 if(size==1 || size==numPoints) {
                     result.resize(size);
                     for(npy_intp i=0; i<size; i++)
                         result[i] = pyArrayElem<double>(arr, i);
                 }
             }
-            Py_XDECREF(arr);
         } else if(PyNumber_Check(obj)) {
             // it may be a single number
             double value = PyFloat_AsDouble(obj);
@@ -996,19 +1003,12 @@ PyObject* getUnits(PyObject* /*self*/, PyObject* /*args*/)
     PyObject* result = PyDict_New();
     if(conv->lengthUnit == 1 && conv->velocityUnit == 1 && conv->timeUnit == 1 && conv->massUnit == 1)
         return result;   // no unit conversion was set up
-    // otherwise populate the dictionary with elements
-    PyObject* length   = PyFloat_FromDouble(conv->lengthUnit   * unit.to_Kpc);
-    PyObject* velocity = PyFloat_FromDouble(conv->velocityUnit * unit.to_kms);
-    PyObject* time     = PyFloat_FromDouble(conv->timeUnit     * unit.to_Myr);
-    PyObject* mass     = PyFloat_FromDouble(conv->massUnit     * unit.to_Msun);
-    PyDict_SetItemString(result, "length",   length);
-    PyDict_SetItemString(result, "velocity", velocity);
-    PyDict_SetItemString(result, "time",     time);
-    PyDict_SetItemString(result, "mass",     mass);
-    Py_DECREF(length);
-    Py_DECREF(velocity);
-    Py_DECREF(time);
-    Py_DECREF(mass);
+    // otherwise populate the dictionary with elements: create temporary PyObject's from double,
+    // assign them to the dict (this does not steal the reference) and immediately dispose of them
+    PyDict_SetItemString(result, "length",   PyObjectRef(PyFloat_FromDouble(conv->lengthUnit   * unit.to_Kpc)));
+    PyDict_SetItemString(result, "velocity", PyObjectRef(PyFloat_FromDouble(conv->velocityUnit * unit.to_kms)));
+    PyDict_SetItemString(result, "time",     PyObjectRef(PyFloat_FromDouble(conv->timeUnit     * unit.to_Myr)));
+    PyDict_SetItemString(result, "mass",     PyObjectRef(PyFloat_FromDouble(conv->massUnit     * unit.to_Msun)));
     return result;
 }
 
@@ -1037,6 +1037,27 @@ inline coord::PosVelCar convertPosVel(const double input[]) {
         input[3] * conv->velocityUnit,
         input[4] * conv->velocityUnit,
         input[5] * conv->velocityUnit);
+}
+
+/// same as above, but taking a 1d or 2d NumPy array of doubles as input;
+/// the array needs not be contiguous in memory, hence each element is accessed independently
+inline coord::PosVelCar convertPosVel(PyArrayObject* input, size_t index) {
+    if(PyArray_NDIM(input) == 1)
+        return coord::PosVelCar(
+            pyArrayElem<double>(input, 0) * conv->lengthUnit,
+            pyArrayElem<double>(input, 1) * conv->lengthUnit,
+            pyArrayElem<double>(input, 2) * conv->lengthUnit,
+            pyArrayElem<double>(input, 3) * conv->velocityUnit,
+            pyArrayElem<double>(input, 4) * conv->velocityUnit,
+            pyArrayElem<double>(input, 5) * conv->velocityUnit);
+    else  // assuming NDIM=2, this should be ensured by the calling code
+        return coord::PosVelCar(
+            pyArrayElem<double>(input, index, 0) * conv->lengthUnit,
+            pyArrayElem<double>(input, index, 1) * conv->lengthUnit,
+            pyArrayElem<double>(input, index, 2) * conv->lengthUnit,
+            pyArrayElem<double>(input, index, 3) * conv->velocityUnit,
+            pyArrayElem<double>(input, index, 4) * conv->velocityUnit,
+            pyArrayElem<double>(input, index, 5) * conv->velocityUnit);
 }
 
 /// helper function for converting actions to internal units
@@ -1084,8 +1105,9 @@ void convertParticlesStep1(PyObject* particles_obj,
     PyObject *coord_obj, *mass_obj;
     if(!PyArg_ParseTuple(particles_obj, "OO", &coord_obj, &mass_obj))
         throw std::invalid_argument(errorstr);
-    coord_arr = (PyArrayObject*)PyArray_FROM_OTF(coord_obj, NPY_DOUBLE, NPY_ARRAY_IN_ARRAY);
-    mass_arr  = (PyArrayObject*)PyArray_FROM_OTF(mass_obj,  NPY_DOUBLE, NPY_ARRAY_IN_ARRAY);
+    // accept input arrays that are not contiguous without creating an unnecessary copy
+    coord_arr = (PyArrayObject*)PyArray_FROM_OTF(coord_obj, NPY_DOUBLE, NPY_ARRAY_ALIGNED);
+    mass_arr  = (PyArrayObject*)PyArray_FROM_OTF(mass_obj,  NPY_DOUBLE, NPY_ARRAY_ALIGNED);
     npy_intp nbody = 0;
     if( coord_arr == NULL || mass_arr == NULL ||      // input should contain valid arrays
         PyArray_NDIM(mass_arr) != 1 ||                // the second one should be 1d array
@@ -1109,12 +1131,16 @@ particles::ParticleArray<ParticleT> convertParticlesStep2(
     particles::ParticleArray<ParticleT> result;
     result.data.reserve(nbody);
     for(npy_intp i=0; i<nbody; i++) {
-        const double *xv = &pyArrayElem<double>(coord_arr, i, 0);
         result.add(coord::PosVelCar(
-            xv[0] * conv->lengthUnit, xv[1] * conv->lengthUnit, xv[2] * conv->lengthUnit,
-            haveVel? xv[3] * conv->velocityUnit : 0.,
-            haveVel? xv[4] * conv->velocityUnit : 0.,
-            haveVel? xv[5] * conv->velocityUnit : 0.),
+            // index each element separately, since they may not be contiguous in memory
+            pyArrayElem<double>(coord_arr, i, 0) * conv->lengthUnit,
+            pyArrayElem<double>(coord_arr, i, 1) * conv->lengthUnit,
+            pyArrayElem<double>(coord_arr, i, 2) * conv->lengthUnit,
+            // velocities will be discarded by result.add if ParticleT is only Pos***, not PosVel***,
+            // but the code retrieves them anyway (if they were provided at all)
+            haveVel? pyArrayElem<double>(coord_arr, i, 3) * conv->velocityUnit : 0.,
+            haveVel? pyArrayElem<double>(coord_arr, i, 4) * conv->velocityUnit : 0.,
+            haveVel? pyArrayElem<double>(coord_arr, i, 5) * conv->velocityUnit : 0.),
             pyArrayElem<double>(mass_arr, i) * conv->massUnit);
     }
     Py_DECREF(coord_arr);
@@ -1257,6 +1283,9 @@ public:
         }
 
         // otherwise convert the input to an array and analyze its shape
+        // (if the input was a NumPy array but with a non-trivial slicing, i.e. non-contiguous,
+        // a copy will be made, since the derived classes expect the input buffer to be contiguous -
+        // this may need to be redesigned so that processPoint retrieves array elements individually)
         inputArray = (PyArrayObject*) PyArray_FROM_OTF(inputObject,  NPY_DOUBLE, NPY_ARRAY_IN_ARRAY);
         if(inputArray == NULL) {
             PyErr_SetString(PyExc_TypeError, "Input does not contain a valid array");
@@ -1616,7 +1645,8 @@ PyObject* allocateOutput(npy_intp numPoints, double* buffer[3]=NULL, int C=0)
 static const char* docstringDensity =
     "Density is a class representing a variety of density profiles "
     "that do not necessarily have a corresponding potential defined.\n"
-    "An instance of Density class is constructed using the following keyword arguments:\n"
+    "An instance of Density class is constructed using the following keyword arguments "
+    "(both names and values are not case-sensitive):\n"
     "  type='...' or density='...'   the name of density profile (required), "
     "can be one of the following:\n"
     "    Denhen, Plummer, PerfectEllipsoid, Ferrers, MiyamotoNagai, LongMurali, NFW, "
@@ -1680,14 +1710,14 @@ typedef struct {
 /// Helper class for providing a BaseDensity interface
 /// to a Python function that returns density at one or several point
 class DensityWrapper: public potential::BaseDensity{
-    PyObject* fnc;
+    PyObjectRef fnc;
     const coord::SymmetryType sym;
     const std::string fncname;
 public:
     DensityWrapper(PyObject* _fnc, coord::SymmetryType _sym):
         fnc(_fnc), sym(_sym), fncname(toString(fnc))
     {
-        Py_INCREF(fnc);
+        Py_INCREF(fnc);  // will be automatically DECREF'ed in the destructor
         FILTERMSG(utils::VL_DEBUG, "Agama",
             "Created a C++ density wrapper for Python function " + fncname +
             " (symmetry: " + potential::getSymmetryNameByType(sym) + ")");
@@ -1698,7 +1728,6 @@ public:
     {
         FILTERMSG(utils::VL_DEBUG, "Agama",
             "Deleted a C++ density wrapper for Python function " + fncname);
-        Py_DECREF(fnc);
     }
     virtual coord::SymmetryType symmetry() const { return sym; }
     virtual std::string name() const { return fncname; };
@@ -1750,16 +1779,17 @@ public:
         PyAcquireGIL lock;
         bool typeerror   = false;
         npy_intp dims[]  = { (npy_intp)npoints, 3};
-        PyObject* args   = PyArray_SimpleNewFromData(2, dims, NPY_DOUBLE, xyz);
-        PyObject* result = PyObject_CallFunctionObjArgs(fnc, args, NULL);
-        Py_DECREF(args);
+        PyObjectRef result(PyObject_CallFunctionObjArgs(fnc,
+            /*args*/ (PyObject*)PyObjectRef(PyArray_SimpleNewFromData(2, dims, NPY_DOUBLE, xyz)),
+            /*end args*/ NULL));
         if(result == NULL) {
             PyErr_Print();
+            throw std::runtime_error("Call to user-defined density function failed");
         } else if(PyArray_Check(result) &&
-            PyArray_NDIM((PyArrayObject*)result) == 1 &&
-            PyArray_DIM ((PyArrayObject*)result, 0) == (npy_intp)npoints)
+            PyArray_NDIM((PyArrayObject*)(void*)result) == 1 &&
+            PyArray_DIM ((PyArrayObject*)(void*)result, 0) == (npy_intp)npoints)
         {
-            int type = PyArray_TYPE((PyArrayObject*) result);
+            int type = PyArray_TYPE((PyArrayObject*)(void*)result);
             for(size_t p=0; p<npoints; p++) {
                 switch(type) {
                     case NPY_DOUBLE: values[p] = pyArrayElem<double>(result, p) * mult; break;
@@ -1767,18 +1797,12 @@ public:
                     default: values[p] = NAN; typeerror = true;
                 }
             }
-        }
-        else if(npoints==1 && PyNumber_Check(result)) {
+        } else if(npoints==1 && PyNumber_Check(result)) {
             // in case of a single input point, the user function might return a single number
             values[0] = PyFloat_AsDouble(result) * mult;
-        }
-        else {
+        } else
             typeerror = true;
-        }
-        Py_XDECREF(result);
-        if(result == NULL)
-            throw std::runtime_error("Call to user-defined density function failed");
-        else if(typeerror)
+        if(typeerror)
             throw std::runtime_error("Invalid data type returned by user-defined density function");
     }
 };
@@ -1842,10 +1866,9 @@ PyObject* createDensityObject(const potential::PtrDensity& dens)
 /// attempt to construct a spherically-symmetric density from a cumulative mass profile
 potential::PtrDensity Density_initFromCumulMass(PyObject* cumulMass)
 {
-    PyArrayObject *cumulMassArr = (PyArrayObject*)
-        PyArray_FROM_OTF(cumulMass, NPY_DOUBLE, NPY_ARRAY_IN_ARRAY);
+    PyArrayObjectRef cumulMassArr(
+        (PyArrayObject*)PyArray_FROM_OTF(cumulMass, NPY_DOUBLE, NPY_ARRAY_ALIGNED));
     if(cumulMassArr == NULL || PyArray_NDIM(cumulMassArr) != 2 || PyArray_DIM(cumulMassArr, 1) != 2) {
-        Py_XDECREF(cumulMassArr);
         throw std::invalid_argument("'cumulmass' does not contain a valid Nx2 array");
     }
     int size = PyArray_DIM(cumulMassArr, 0);
@@ -1854,7 +1877,6 @@ potential::PtrDensity Density_initFromCumulMass(PyObject* cumulMass)
         radius[i] = pyArrayElem<double>(cumulMassArr, i, 0) * conv->lengthUnit;
         mass  [i] = pyArrayElem<double>(cumulMassArr, i, 1) * conv->massUnit;
     }
-    Py_DECREF(cumulMassArr);
     std::vector<double> dens = potential::densityFromCumulativeMass(radius, mass);
     return potential::PtrDensity(new potential::DensitySphericalHarmonic(
         radius, std::vector<std::vector<double> >(1, dens)));
@@ -2166,10 +2188,9 @@ PyObject* Density_principalAxes(PyObject* self, PyObject* args)
 {
     if(args!=NULL && PyTuple_Check(args) && PyTuple_Size(args)==0) {
         // call with no arguments is equivalent to INFINITY as an argument
-        args = PyFloat_FromDouble(INFINITY);
-        PyObject* result = FncDensityPrincipalAxes(args, *((DensityObject*)self)->dens).run(1);
-        Py_DECREF(args);
-        return result;
+        return FncDensityPrincipalAxes(
+            PyObjectRef(PyFloat_FromDouble(INFINITY)),
+            *((DensityObject*)self)->dens).run(1);
     }
     return FncDensityPrincipalAxes(args, *((DensityObject*)self)->dens).run(/*chunk*/1);
 }
@@ -2621,14 +2642,14 @@ static const char* docstringPotential =
 /// to a Python function that returns the value of a potential at one or several point
 /// (with 1st and 2nd derivatives estimated by finite differences).
 class PotentialWrapper: public potential::BasePotentialCar{
-    PyObject* fnc;
+    PyObjectRef fnc;
     const coord::SymmetryType sym;
     const std::string fncname;
 public:
     PotentialWrapper(PyObject* _fnc, coord::SymmetryType _sym):
         fnc(_fnc), sym(_sym), fncname(toString(fnc))
     {
-        Py_INCREF(fnc);
+        Py_INCREF(fnc);  // will be automatically DECREF'ed in the destructor
         FILTERMSG(utils::VL_DEBUG, "Agama",
             "Created a C++ potential wrapper for Python function " + fncname +
             " (symmetry: " + potential::getSymmetryNameByType(sym) + ")");
@@ -2639,7 +2660,6 @@ public:
     {
         FILTERMSG(utils::VL_DEBUG, "Agama",
             "Deleted a C++ potential wrapper for Python function " + fncname);
-        Py_DECREF(fnc);
     }
     virtual coord::SymmetryType symmetry() const { return sym; }
     virtual std::string name() const { return fncname; };
@@ -2671,7 +2691,7 @@ public:
             { 1, 1, 1} };
         double xyz[3*NPOINTS], val[NPOINTS];
         unconvertPos(pos, xyz);
-        // if 1st derivatives are needed, they will be estimated by finite differencing with this stepsize
+        // if derivatives are needed, they will be estimated by finite differencing with this stepsize
         double eps = fmax(sqrt(pow_2(xyz[0])+pow_2(xyz[1])+pow_2(xyz[2])) * 5e-4 /* ~DBLEPS^(1/5) */,
             SQRT_DBL_EPSILON);
         int npoints = deriv2 ? NPOINTS : deriv ? 13 : 1;
@@ -2681,21 +2701,20 @@ public:
             xyz[d*3+2] = xyz[2] + OFFSETS[d][2] * eps;
         }
         npy_intp dims[]  = {npoints, 3};
-        PyObject *result = NULL;
         bool typeerror   = false;
-        // open a critical section for accessing Python C API
-        {
+        {   // open a critical section for accessing Python C API
             PyAcquireGIL lock;
-            PyObject* args = PyArray_SimpleNewFromData(2, dims, NPY_DOUBLE, xyz);
-            result = PyObject_CallFunctionObjArgs(fnc, args, NULL);
-            Py_DECREF(args);
+            PyObjectRef result(PyObject_CallFunctionObjArgs(fnc,
+                /*args*/ (PyObject*)PyObjectRef(PyArray_SimpleNewFromData(2, dims, NPY_DOUBLE, xyz)),
+                /*end args*/ NULL));
             if(result == NULL) {
                 PyErr_Print();
-            } else if(PyArray_Check(result) && PyArray_NDIM((PyArrayObject*)result)==1 &&
-                PyArray_DIM((PyArrayObject*)result, 0)==dims[0])
+                throw std::runtime_error("Call to user-defined potential function failed");
+            } else if(PyArray_Check(result) && PyArray_NDIM((PyArrayObject*)(void*)result)==1 &&
+                PyArray_DIM((PyArrayObject*)(void*)result, 0)==dims[0])
             {
                 for(int i=0; i<dims[0]; i++) {
-                    switch(PyArray_TYPE((PyArrayObject*) result)) {
+                    switch(PyArray_TYPE((PyArrayObject*)(void*)result)) {
                         case NPY_DOUBLE: val[i] = pyArrayElem<double>(result, i); break;
                         case NPY_FLOAT:  val[i] = pyArrayElem<float >(result, i); break;
                         default: typeerror = true;
@@ -2706,11 +2725,8 @@ public:
                 val[0] = PyFloat_AsDouble(result);
             else
                 typeerror = true;
-            Py_XDECREF(result);
         }
-        if(result == NULL)
-            throw std::runtime_error("Call to user-defined potential function failed");
-        else if(typeerror)
+        if(typeerror)
             throw std::runtime_error("Invalid data type returned by user-defined potential function");
         if(potential)
             *potential = val[0] * pow_2(conv->velocityUnit);
@@ -2721,13 +2737,13 @@ public:
             deriv->dz = (val[9] - val[12]- 8*val[10]+ 8*val[11])* mul;
         }
         if(deriv2) {  // 5-point rule for d2f/dx_i^2 (4th order), and 8-point for mixed derivs (2nd order)
-            double mul = 1./12 / pow_2(eps) * pow_2(conv->velocityUnit / conv->lengthUnit);
-            deriv2->dx2 = (-val[1] + 16*val[2] - 30*val[0] + 16*val[3] - val[4]) * mul;
-            deriv2->dy2 = (-val[5] + 16*val[6] - 30*val[0] + 16*val[7] - val[8]) * mul;
-            deriv2->dz2 = (-val[9] + 16*val[10]- 30*val[0] + 16*val[11]- val[12])* mul;
-            deriv2->dxdy= (val[13]-val[14]-val[15]+val[16]+val[17]-val[18]-val[19]+val[20]) * mul*1.5;
-            deriv2->dxdz= (val[13]-val[15]-val[17]+val[19]+val[14]-val[16]-val[18]+val[20]) * mul*1.5;
-            deriv2->dydz= (val[13]-val[17]-val[14]+val[18]+val[15]-val[19]-val[16]+val[20]) * mul*1.5;
+            double mul = 1./8 / pow_2(eps) * pow_2(conv->velocityUnit / conv->lengthUnit);
+            deriv2->dx2 = (-val[1] + 16*val[2] - 30*val[0] + 16*val[3] - val[4]) * (2./3*mul);
+            deriv2->dy2 = (-val[5] + 16*val[6] - 30*val[0] + 16*val[7] - val[8]) * (2./3*mul);
+            deriv2->dz2 = (-val[9] + 16*val[10]- 30*val[0] + 16*val[11]- val[12])* (2./3*mul);
+            deriv2->dxdy= (val[13]-val[14]-val[15]+val[16]+val[17]-val[18]-val[19]+val[20]) * mul;
+            deriv2->dxdz= (val[13]-val[15]-val[17]+val[19]+val[14]-val[16]-val[18]+val[20]) * mul;
+            deriv2->dydz= (val[13]-val[17]-val[14]+val[18]+val[15]-val[19]-val[16]+val[20]) * mul;
         }
     }
 };
@@ -2868,9 +2884,13 @@ potential::PtrPotential Potential_initFromTuple(PyObject* tuple)
     // first check the types of tuple elements
     for(Py_ssize_t i=0; i<PyTuple_Size(tuple); i++) {
         PyObject* item = PyTuple_GET_ITEM(tuple, i);
-        if(PyDict_Check(item))  // a dictionary with param=value pairs
+        if(PyDict_Check(item)) {
+            // a dictionary with param=value pairs: convert to KeyValueMap and use it
+            // to initialize a potential from several components; this assumes that each component
+            // is a built-in density/potential type, and would not work with particles or user-defined
+            // density/potential functions, as these are not representable in the KeyValueMap
             paramsArr.push_back(NamedArgs(item));
-        else {
+        } else {
             // could be an existing Potential object or a compatible user-defined function
             potential::PtrPotential pot = getPotential(item);
             if(pot) {
@@ -4073,11 +4093,11 @@ void DistributionFunction_dealloc(DistributionFunctionObject* self)
 /// Helper class for providing a BaseDistributionFunction interface
 /// to a Python function that returns the value of DF at a point in action space
 class DistributionFunctionWrapper: public df::BaseDistributionFunction{
-    PyObject* fnc;   ///< Python object providing the __call__ interface to evaluate the DF
+    PyObjectRef fnc;   ///< Python object providing the __call__ interface to evaluate the DF
 public:
     DistributionFunctionWrapper(PyObject* _fnc): fnc(_fnc)
     {
-        Py_INCREF(fnc);
+        Py_INCREF(fnc);  // will be automatically DECREF'ed in the destructor
         FILTERMSG(utils::VL_DEBUG, "Agama",
             "Created a C++ df wrapper for Python function " + toString(fnc));
     }
@@ -4085,7 +4105,6 @@ public:
     {
         FILTERMSG(utils::VL_DEBUG, "Agama",
             "Deleted a C++ df wrapper for Python function " + toString(fnc));
-        Py_DECREF(fnc);
     }
     // non-vectorized form
     virtual void evalDeriv(const actions::Actions &J,
@@ -4105,14 +4124,14 @@ public:
         PyAcquireGIL lock;
         bool typeerror  = false;
         npy_intp dims[] = { (npy_intp)npoints, 3};
-        PyObject *args  = PyArray_SimpleNewFromData(2, dims, NPY_DOUBLE, act);
+        PyObjectRef args(PyArray_SimpleNewFromData(2, dims, NPY_DOUBLE, act));
         PyObject *result = NULL, *result_der = NULL;
         if(deriv) {
-            args = Py_BuildValue("(N)", args);
-            PyObject* kw = PyDict_New();
+            PyObjectRef kw(PyDict_New());
             PyDict_SetItemString(kw, "der", Py_True);
-            PyObject* tup = PyObject_Call(fnc, args, kw);
-            Py_DECREF(kw);
+            PyObjectRef tup(PyObject_Call(fnc,
+                PyObjectRef(Py_BuildValue("(O)", (PyObject*)args)),
+                kw));
             if(tup == NULL) {
                 // do nothing here; the error will be reported further down
             } else if(PyTuple_Check(tup) && PyTuple_Size(tup) == 2) {
@@ -4120,16 +4139,12 @@ public:
                 result_der = PyTuple_GetItem(tup, 1);
                 Py_INCREF(result);
                 Py_INCREF(result_der);
-                Py_DECREF(tup);
             } else {
-                Py_XDECREF(tup);
-                Py_DECREF(args);
                 throw std::runtime_error("User-defined distribution function should return a tuple "
                     "of two arrays (DF values and derivatives) when called with 'der=True'");
             }
         } else
-            result = PyObject_CallFunctionObjArgs(fnc, args, NULL);
-        Py_DECREF(args);
+            result = PyObject_CallFunctionObjArgs(fnc, (PyObject*)args, /*end args*/ NULL);
 
         // parse and unit-convert the returned array of DF values
         if(result == NULL) {
@@ -4182,6 +4197,7 @@ public:
                 }
             } else
                 typeerror = true;
+            Py_XDECREF(result_der);
         }
         if(result == NULL)
             throw std::runtime_error("Call to user-defined distribution function failed");
@@ -4319,15 +4335,13 @@ df::PtrDistributionFunction getDistributionFunction(PyObject* df_obj)
 
     // otherwise this may be a tuple, list or another sequence of DistributionFunction-like objects
     if(PySequence_Check(df_obj) && !PyString_Check(df_obj)) {
-        PyObject* tuple = PySequence_Tuple(df_obj);
+        PyObjectRef tuple(PySequence_Tuple(df_obj));
         if(tuple) {
             try{
                 df::PtrDistributionFunction result = DistributionFunction_initFromTuple(tuple);
-                Py_DECREF(tuple);
                 return result;
             }
             catch(std::exception &ex) {
-                Py_DECREF(tuple);
                 FILTERMSG(utils::VL_WARNING, "Agama", ex.what());
             }
         } else {
@@ -4610,11 +4624,11 @@ PyObject* SelectionFunction_value(SelectionFunctionObject* self, PyObject* args,
 /// Helper class for providing a BaseSelectionFunction interface to a user-defined Python function
 /// that returns the value of a selection function at one or more points in x,v space
 class SelectionFunctionWrapper: public galaxymodel::BaseSelectionFunction{
-    PyObject* fnc;    ///< Python object providing the selection function
+    PyObjectRef fnc;    ///< Python object providing the selection function
 public:
     SelectionFunctionWrapper(PyObject* _fnc): fnc(_fnc)
     {
-        Py_INCREF(fnc);
+        Py_INCREF(fnc);  // will be automatically DECREF'ed in the destructor
         FILTERMSG(utils::VL_DEBUG, "Agama",
             "Created a C++ selection function wrapper for Python function " + toString(fnc));
     }
@@ -4622,7 +4636,6 @@ public:
     {
         FILTERMSG(utils::VL_DEBUG, "Agama",
             "Deleted a C++ selection function wrapper for Python function " + toString(fnc));
-        Py_DECREF(fnc);
     }
     virtual double value(const coord::PosVelCar& pv) const
     {
@@ -4638,16 +4651,17 @@ public:
         PyAcquireGIL lock;
         bool typeerror   = false;
         npy_intp dims[]  = { (npy_intp)npoints, 6};
-        PyObject* args   = PyArray_SimpleNewFromData(2, dims, NPY_DOUBLE, posvel);
-        PyObject* result = PyObject_CallFunctionObjArgs(fnc, args, NULL);
-        Py_DECREF(args);
+        PyObjectRef result(PyObject_CallFunctionObjArgs(fnc, 
+            /*args*/ (PyObject*)PyObjectRef(PyArray_SimpleNewFromData(2, dims, NPY_DOUBLE, posvel)),
+            /*end args*/ NULL));
         if(result == NULL) {
             PyErr_Print();
+            throw std::runtime_error("Call to user-defined selection function failed");
         } else if(PyArray_Check(result) &&
-            PyArray_NDIM((PyArrayObject*)result) == 1 &&
-            PyArray_DIM ((PyArrayObject*)result, 0) == (npy_intp)npoints)
+            PyArray_NDIM((PyArrayObject*)(void*)result) == 1 &&
+            PyArray_DIM ((PyArrayObject*)(void*)result, 0) == (npy_intp)npoints)
         {
-            int type = PyArray_TYPE((PyArrayObject*) result);
+            int type = PyArray_TYPE((PyArrayObject*)(void*)result);
             for(size_t p=0; p<npoints; p++) {
                 switch(type) {
                     case NPY_DOUBLE: values[p] = pyArrayElem<double>(result, p); break;
@@ -4656,18 +4670,12 @@ public:
                     default: values[p] = NAN; typeerror = true;
                 }
             }
-        }
-        else if(npoints==1 && PyNumber_Check(result)) {
+        } else if(npoints==1 && PyNumber_Check(result)) {
             // in case of a single input point, the user function might return a single number
             values[0] = PyFloat_AsDouble(result);
-        }
-        else {
+        } else
             typeerror = true;
-        }
-        Py_XDECREF(result);
-        if(result == NULL)
-            throw std::runtime_error("Call to user-defined selection function failed");
-        else if(typeerror)
+        if(typeerror)
             throw std::runtime_error("Invalid data type returned from user-defined selection function");
         // otherwise return the result in values[]
     }
@@ -4814,9 +4822,8 @@ int GalaxyModel_init(GalaxyModelObject* self, PyObject* args, PyObject* namedArg
         return -1;
     }
     if(af_obj==NULL) {  // no action finder provided - create one internally
-        PyObject *args = Py_BuildValue("(O)", pot_obj);
-        self->af_obj = (ActionFinderObject*)PyObject_CallObject((PyObject*)ActionFinderTypePtr, args);
-        Py_DECREF(args);
+        self->af_obj = (ActionFinderObject*)PyObject_CallFunctionObjArgs(
+            (PyObject*)ActionFinderTypePtr, /*args*/ pot_obj, /*end args*/ NULL);
         if(!self->af_obj)
             return -1;
     } else {  // use an existing action finder and increase its refcount
@@ -6215,7 +6222,8 @@ PyObject* Spline_value(SplineObject* self, PyObject* args, PyObject* namedArgs)
         }
     }
 
-    // otherwise the input should be an array, and the output will be an array of the same shape
+    // otherwise the input should be a contiguous array of any shape and size,
+    // and the output will be an array of the same shape, initialized by copying the input array
     PyArrayObject *arr = (PyArrayObject*)
         PyArray_FROM_OTF(ptx, NPY_DOUBLE, NPY_ARRAY_OUT_ARRAY | NPY_ARRAY_ENSURECOPY);
     if(arr == NULL) {
@@ -6226,10 +6234,11 @@ PyObject* Spline_value(SplineObject* self, PyObject* args, PyObject* namedArgs)
 
     // if `conv` is provided, it must be a single number or an array of the same shape as input `x`,
     // or another instance of Spline (in this case, the variable 'conv' is already initialized)
-    PyArrayObject *sigma_arr = NULL;
+    PyArrayObjectRef sigma_arr(conv_obj && !conv ?
+        (PyArrayObject*)PyArray_FROM_OTF(conv_obj, NPY_DOUBLE, NPY_ARRAY_IN_ARRAY) :
+        NULL);
     npy_intp sigma_size = 0;
     if(conv_obj && !conv) {
-        sigma_arr = (PyArrayObject*)PyArray_FROM_OTF(conv_obj, NPY_DOUBLE, NPY_ARRAY_IN_ARRAY);
         bool shape_ok = sigma_arr!=NULL;
         if(shape_ok && ((sigma_size = PyArray_SIZE(sigma_arr)) != 1)) {
             shape_ok &= sigma_size == size && PyArray_NDIM(arr) == PyArray_NDIM(sigma_arr);
@@ -6237,7 +6246,6 @@ PyObject* Spline_value(SplineObject* self, PyObject* args, PyObject* namedArgs)
                 shape_ok &= PyArray_DIMS(arr)[d] == PyArray_DIMS(sigma_arr)[d];
         }
         if(!shape_ok) {
-            Py_XDECREF(sigma_arr);
             Py_DECREF(arr);
             PyErr_SetString(PyExc_TypeError, "Argument `sigma`, if provided, "
                 "must be a single number or an array with the same shape as `x`");
@@ -6263,7 +6271,6 @@ PyObject* Spline_value(SplineObject* self, PyObject* args, PyObject* namedArgs)
         else
             x = splEval(*self->spl, x, der);
     }
-    Py_XDECREF(sigma_arr);
     return PyArray_Return(arr);
 }
 
@@ -6653,31 +6660,31 @@ PyObject* Orbit_value(OrbitObject* self, PyObject* args, PyObject* namedArgs)
         PyErr_SetString(PyExc_TypeError, "Function takes a single argument");
         return NULL;
     }
+
     PyObject* t_obj = PyTuple_GET_ITEM(args, 0);
-    PyArrayObject *t_arr = NULL, *result = NULL;
+    bool t_is_scalar = PyFloat_Check(t_obj) || PyInt_Check(t_obj) || PyLong_Check(t_obj);
+    PyArrayObjectRef t_arr(t_is_scalar ? NULL :
+        (PyArrayObject*)PyArray_FROM_OTF(t_obj, NPY_DOUBLE, NPY_ARRAY_ALIGNED));
+    PyArrayObject *result = NULL;
     npy_intp size = 1;
     double t = NAN;
-    if(PyFloat_Check(t_obj) || PyInt_Check(t_obj) || PyLong_Check(t_obj)) {
+    if(t_is_scalar) {
         t = PyFloat_AsDouble(t_obj);
         if(PyErr_Occurred())
             return NULL;
         npy_intp dims[1] = {6};
         result = (PyArrayObject*)PyArray_SimpleNew(1, dims, NPY_DOUBLE);
     } else {
-        t_arr = (PyArrayObject*)PyArray_FROM_OTF(t_obj, NPY_DOUBLE, 0);
         if(!t_arr || PyArray_NDIM(t_arr) != 1) {
             PyErr_SetString(PyExc_TypeError, "Input should be a single number or a 1d array");
-            Py_XDECREF(t_arr);
             return NULL;
         }
         size = PyArray_DIM(t_arr, 0);
         npy_intp dims[2] = {size, 6};
         result = (PyArrayObject*)PyArray_SimpleNew(2, dims, NPY_DOUBLE);
     }
-    if(!result) {
-        Py_XDECREF(t_arr);
+    if(!result)
         return NULL;
-    }
 
     double* data = static_cast<double*>(PyArray_DATA(result));
     double tmin = splx.xmin(), tmax = splx.xmax();  // NaN if the spline is empty
@@ -6703,7 +6710,6 @@ PyObject* Orbit_value(OrbitObject* self, PyObject* args, PyObject* namedArgs)
                 data[i*6+c] = NAN;
         }
     }
-    Py_XDECREF(t_arr);
     return PyArray_Return(result);
 }
 
@@ -6778,170 +6784,178 @@ static PyTypeObject OrbitType = {
     (initproc)Orbit_init
 };
 
-/// Construct an array of timestamps and trajectory points or a Python Orbit object.
-/// \param[in]  dtype  is NPY_FLOAT, NPY_DOUBLE, NPY_CFLOAT, NPY_CDOUBLE or NPY_OBJECT;
-/// \param[in]  traj   is the orbit (array of times and phase-space coordinates);
+/// Construct an Orbit interpolator object from the trajectory recorded during orbit integration.
+/// \param[in]  traj   is the trajectory (array of times and phase-space coordinates).
 /// \param[in]  Omega  is the angular frequency for integration in the rotating frame
-/// (needed because in this case v != dx/dt, so the derivatives for the splines need adjustment);
-/// \param[in]  outputTime  is a flag indicating whether to create both time and trajectory arrays
-/// (when true) or just the trajectory (when false, this is used for deviation vectors);
-/// applies only to dtype!=NPY_OBJECT.
-/// \param[in]  normFactor  is the additional multiplicative factor in unit conversion for dev.vectors
-/// \param[in/out]  output  is the pointer to the first element of the output storage.
-/// If dtype==NPY_OBJECT, the output array contains one PyObject* element per orbit,
-/// which will be filled with a newly created instance of Orbit class encapsulating
-/// the interpolators for the trajectory (unit-converted).
-/// In other cases, the output array will be populated with one (if outputTime==false) or two
-/// new PyObject* elements per orbit: the numpy array of timestamps (only if outputTime==true)
-/// and another numpy array of phase-space points.
-/// \return  true on success, false if failed to allocate arrays
-/// (in this case, PyErr_SetString is called to report the error)
-bool createOrbit(int dtype, const orbit::Trajectory &traj,
-    double Omega, bool outputTime, double normFactor, /*output*/ PyObject* output[])
+/// (needed since the interpolators represent the trajectory in the inertial frame).
+/// \param[in]  normFactor  is the additional multiplicative factor in unit conversion for dev.vectors.
+/// \return  an instance of Orbit class, or NULL on failure (in this case, it raises a Python exception).
+PyObject* createOrbitObject(const orbit::Trajectory &traj, double Omega, double normFactor)
 {
     npy_intp size = traj.size(), sizespl = 0;
-    if(dtype == NPY_OBJECT) {
-        // create an Orbit object containing three spline interpolators
-        OrbitObject* orbit = NULL;
-        {   // avoid concurrent non-readonly access to Python C API
-            PyAcquireGIL lock;
-            orbit = (OrbitObject*)PyObject_New(PyObject, &OrbitType);
-            if(orbit) {
-                // allocate three new Python Spline objects
-                orbit->x = PyObject_New(PyObject, &SplineType);
-                orbit->y = PyObject_New(PyObject, &SplineType);
-                orbit->z = PyObject_New(PyObject, &SplineType);
-                // make sure the smart pointers are initialized with zero before re-assigning them
-                if(orbit->x) {
-                    new (&(((SplineObject*)orbit->x)->spl)) math::PtrFunction;
-                    new (&(((SplineObject*)orbit->x)->name)) std::string;
-                }
-                if(orbit->y) {
-                    new (&(((SplineObject*)orbit->y)->spl)) math::PtrFunction;
-                    new (&(((SplineObject*)orbit->y)->name)) std::string;
-                }
-                if(orbit->z) {
-                    new (&(((SplineObject*)orbit->z)->spl)) math::PtrFunction;
-                    new (&(((SplineObject*)orbit->z)->name)) std::string;
-                }
-                if(!orbit->x || !orbit->y || !orbit->z) {
-                    Py_DECREF(orbit);  // this also XDECREFs and deletes all three Spline objects
-                    orbit = NULL;
-                }
+    // create an Orbit object containing three spline interpolators
+    OrbitObject* orbit = NULL;
+    {   // avoid concurrent non-readonly access to Python C API
+        PyAcquireGIL lock;
+        orbit = (OrbitObject*)PyObject_New(PyObject, &OrbitType);
+        if(orbit) {
+            // allocate three new Python Spline objects
+            orbit->x = PyObject_New(PyObject, &SplineType);
+            orbit->y = PyObject_New(PyObject, &SplineType);
+            orbit->z = PyObject_New(PyObject, &SplineType);
+            // make sure the smart pointers are initialized with zero before re-assigning them
+            if(orbit->x) {
+                new (&(((SplineObject*)orbit->x)->spl)) math::PtrFunction;
+                new (&(((SplineObject*)orbit->x)->name)) std::string;
             }
-        }  // end critical session, the remaining operations are thread-safe
-        if(!orbit)
-            return false;
-        std::vector<double> t(size), x(size), vx(size), y(size), vy(size), z(size), vz(size);
-        orbit->Omega = Omega * conv->timeUnit;  // frequency is in user units
-        // if the orbit is integrated backward in time, we need to reverse the order of points
-        orbit->reversed = size>1 && traj[1].second < traj[0].second;
-        for(npy_intp index=0; index<size; index++) {
-            double point[6];
-            unconvertPosVel(traj[orbit->reversed ? size-1-index : index].first, point);
-            double ti = traj[orbit->reversed ? size-1-index : index].second / conv->timeUnit;
-            // skip points with identical timestamps, since otherwise spline construction would fail
-            if(sizespl > 0 && ti == t[sizespl-1])
-                continue;
-            t [sizespl] = ti;
-            // if the orbit was provided in the rotating frame, transform it to a non-rotating one
-            // to construct the interpolators, and transform their output back to rotated frame
-            double ca, sa;
-            math::sincos(orbit->Omega * ti, sa, ca);
-            x [sizespl] = normFactor * (point[0] * ca - point[1] * sa);
-            y [sizespl] = normFactor * (point[1] * ca + point[0] * sa);
-            z [sizespl] = normFactor *  point[2];
-            vx[sizespl] = normFactor * (point[3] * ca - point[4] * sa);
-            vy[sizespl] = normFactor * (point[4] * ca + point[3] * sa);
-            vz[sizespl] = normFactor *  point[5];
-            sizespl++;
-        }
-        if(sizespl != size) {
-            t .resize(sizespl);
-            x .resize(sizespl);
-            y .resize(sizespl);
-            z .resize(sizespl);
-            vx.resize(sizespl);
-            vy.resize(sizespl);
-            vz.resize(sizespl);
-        }
-        try{
-            ((SplineObject*)orbit->x)->spl.reset(new math::QuinticSpline(t, x, vx));
-            ((SplineObject*)orbit->y)->spl.reset(new math::QuinticSpline(t, y, vy));
-            ((SplineObject*)orbit->z)->spl.reset(new math::QuinticSpline(t, z, vz));
-            ((SplineObject*)orbit->x)->name = "Quintic spline";
-            ((SplineObject*)orbit->y)->name = "Quintic spline";
-            ((SplineObject*)orbit->z)->name = "Quintic spline";
-            FILTERMSG(utils::VL_DEBUG, "Agama", "Created three quintic splines of size " +
-                utils::toString(x.size()) +
-                " at "+utils::toString(((SplineObject*)orbit->x)->spl.get()) +
-                ", "  +utils::toString(((SplineObject*)orbit->y)->spl.get()) +
-                ", "  +utils::toString(((SplineObject*)orbit->z)->spl.get()));
-        }
-        catch(std::exception& ex) {
-            PyAcquireGIL lock;
-            Py_DECREF(orbit);
-            raisePythonException(ex);
-            return false;
-        }
-        *output = (PyObject*)orbit;   // place the pointer for the newly created Orbit
-    } else {   // dtype is anything but NPY_OBJECT
-        npy_intp dims[] = {size, dtype==NPY_CFLOAT || dtype==NPY_CDOUBLE ? 3 : 6};
-        PyObject *time_obj = NULL, *traj_obj = NULL;
-        {   // access to Python C API for one thread at a time
-            PyAcquireGIL lock;
-            if(outputTime)
-                time_obj = PyArray_SimpleNew(1, dims, NPY_DOUBLE);
-            traj_obj = PyArray_SimpleNew(2, dims, dtype);
-            if((outputTime && !time_obj) || !traj_obj) {
-                Py_XDECREF(time_obj);
-                Py_XDECREF(traj_obj);
-                return false;
+            if(orbit->y) {
+                new (&(((SplineObject*)orbit->y)->spl)) math::PtrFunction;
+                new (&(((SplineObject*)orbit->y)->name)) std::string;
             }
-        }  // end critical section
+            if(orbit->z) {
+                new (&(((SplineObject*)orbit->z)->spl)) math::PtrFunction;
+                new (&(((SplineObject*)orbit->z)->name)) std::string;
+            }
+            if(!orbit->x || !orbit->y || !orbit->z) {
+                Py_DECREF(orbit);  // this also XDECREFs and deletes all three Spline objects
+                orbit = NULL;
+            }
+        }
+    }  // end critical session, the remaining operations are thread-safe
+    if(!orbit)
+        return NULL;
+    std::vector<double> t(size), x(size), vx(size), y(size), vy(size), z(size), vz(size);
+    orbit->Omega = Omega * conv->timeUnit;  // frequency is in user units
+    // if the orbit is integrated backward in time, we need to reverse the order of points
+    orbit->reversed = size>1 && traj[1].second < traj[0].second;
+    for(npy_intp index=0; index<size; index++) {
+        double point[6];
+        unconvertPosVel(traj[orbit->reversed ? size-1-index : index].first, point);
+        double ti = traj[orbit->reversed ? size-1-index : index].second / conv->timeUnit;
+        // skip points with identical timestamps, since otherwise spline construction would fail
+        if(sizespl > 0 && ti == t[sizespl-1])
+            continue;
+        t [sizespl] = ti;
+        // if the orbit was provided in the rotating frame, transform it to a non-rotating one
+        // to construct the interpolators, and transform their output back to rotated frame
+        double ca, sa;
+        math::sincos(orbit->Omega * ti, sa, ca);
+        x [sizespl] = normFactor * (point[0] * ca - point[1] * sa);
+        y [sizespl] = normFactor * (point[1] * ca + point[0] * sa);
+        z [sizespl] = normFactor *  point[2];
+        vx[sizespl] = normFactor * (point[3] * ca - point[4] * sa);
+        vy[sizespl] = normFactor * (point[4] * ca + point[3] * sa);
+        vz[sizespl] = normFactor *  point[5];
+        sizespl++;
+    }
+    if(sizespl != size) {
+        t .resize(sizespl);
+        x .resize(sizespl);
+        y .resize(sizespl);
+        z .resize(sizespl);
+        vx.resize(sizespl);
+        vy.resize(sizespl);
+        vz.resize(sizespl);
+    }
+    try{
+        ((SplineObject*)orbit->x)->spl.reset(new math::QuinticSpline(t, x, vx));
+        ((SplineObject*)orbit->y)->spl.reset(new math::QuinticSpline(t, y, vy));
+        ((SplineObject*)orbit->z)->spl.reset(new math::QuinticSpline(t, z, vz));
+        ((SplineObject*)orbit->x)->name = "Quintic spline for x(t)";
+        ((SplineObject*)orbit->y)->name = "Quintic spline for y(t)";
+        ((SplineObject*)orbit->z)->name = "Quintic spline for z(t)";
+        FILTERMSG(utils::VL_DEBUG, "Agama", "Created three quintic splines of size " +
+            utils::toString(x.size()) +
+            " at "+utils::toString(((SplineObject*)orbit->x)->spl.get()) +
+            ", "  +utils::toString(((SplineObject*)orbit->y)->spl.get()) +
+            ", "  +utils::toString(((SplineObject*)orbit->z)->spl.get()));
+    }
+    catch(std::exception& ex) {
+        PyAcquireGIL lock;
+        Py_DECREF(orbit);
+        raisePythonException(ex);
+        return NULL;
+    }
+    return (PyObject*)orbit;   // place the pointer for the newly created Orbit
+}
 
-        for(npy_intp index=0; index<size; index++) {
-            if(outputTime) {
-                // convert the time array
-                pyArrayElem<double>(time_obj, index) = traj[index].second / conv->timeUnit;
-            }
-            // convert the units and numerical type of the trajectory array
-            double point[6];
-            unconvertPosVel(traj[index].first, point);
-            switch(dtype) {
-                case NPY_DOUBLE:
-                    for(int c=0; c<6; c++)
-                        pyArrayElem<double>(traj_obj, index, c) = normFactor * point[c];
-                    break;
-                case NPY_FLOAT:
-                    for(int c=0; c<6; c++)
-                        pyArrayElem<float>(traj_obj, index, c) =
-                            static_cast<float>(normFactor * point[c]);
-                    break;
-                case NPY_CDOUBLE:
-                    for(int c=0; c<3; c++)
-                        pyArrayElem<std::complex<double> >(traj_obj, index, c) =
-                            std::complex<double>(normFactor * point[c+0], normFactor * point[c+3]);
-                    break;
-                case NPY_CFLOAT:
-                    for(int c=0; c<3; c++) {
-                        pyArrayElem<std::complex<float> >(traj_obj, index, c) =
-                            std::complex<float>(normFactor * point[c+0], normFactor * point[c+3]);
-                    }
-                    break;
-                default:
-                    assert(!"incorrect dtype");  // shouldn't happen, we checked dtype beforehand
-            }
-        }
-        // in this case, the output array has one or two elements per orbit
-        if(outputTime) {
-            output[0] = time_obj;
-            output[1] = traj_obj;
-        } else {
-            output[0] = traj_obj;
+/// Allocate numpy arrays for storing the trajectory (and optionally timestamps) for an orbit.
+/// \param[in]  traj   is the trajectory (array of times and phase-space coordinates).
+/// \param[in]  dtype  is the numerical storage type (NPY_FLOAT, NPY_DOUBLE, NPY_CFLOAT, NPY_CDOUBLE).
+/// \param[out] outputTimeArray if not NULL, will contain a newly allocated 1d array for timestamps.
+/// \param[out] outputTrajArray will contain a newly allocated 2d array of phase-space points.
+/// \return true on success, false if failed to allocate arrays
+/// (in this case, PyErr_SetString is called to report the error)
+bool allocOrbitArrays(const orbit::Trajectory &traj, int dtype,
+    /*output*/ PyObject** outputTimeArray, PyObject** outputTrajArray)
+{
+    npy_intp dims[] = {static_cast<npy_intp>(traj.size()),
+        dtype==NPY_CFLOAT || dtype==NPY_CDOUBLE ? 3 : 6};
+    // access to Python C API for one thread at a time - critical section until the end of this routine
+    PyAcquireGIL lock;
+    *outputTrajArray = PyArray_SimpleNew(2, dims, dtype);
+    if(*outputTrajArray == NULL)
+        return false;
+    if(outputTimeArray) {
+        *outputTimeArray = PyArray_SimpleNew(1, dims, NPY_DOUBLE);
+        if(*outputTimeArray == NULL) {
+            Py_DECREF(*outputTrajArray);
+            *outputTrajArray = NULL;
+            return false;
         }
     }
     return true;
+}
+
+/// Store the trajectory, and optionally timestamps, in previously allocated numpy arrays.
+/// \param[in]  traj   is the trajectory (array of times and phase-space coordinates).
+/// \param[in]  dtype  is the numerical storage type (NPY_FLOAT, NPY_DOUBLE, NPY_CFLOAT, NPY_CDOUBLE).
+/// \param[in]  normFactor  is the additional multiplicative factor in unit conversion for dev.vectors.
+/// \param[in]  trajSize  is the length of the allocated arrays: normally it would be the same as
+/// traj.size(), but in case when the arrays are pre-allocated for all orbits with a fixed size,
+/// but orbit integration ended earlier than planned, the remaining elements will be filled with NANs.
+/// \param[in,out]  outputTime  if not NULL, should point to an existing array of length trajSize,
+/// which will contain (unit-converted) timestamps; if NULL (for dev.vectors), these are not needed.
+/// \param[in,out]  outputTraj  should point to an existing array prepared to contain the trajectory
+/// with the given numerical storage type; both arrays can be created by allocOrbitArrays().
+void storeOrbitArrays(const orbit::Trajectory &traj, int dtype, double normFactor, npy_intp trajSize,
+    /*output*/ double* outputTime, void* outputTraj)
+{
+    for(npy_intp index=0, actualSize=traj.size(); index<trajSize; index++) {
+        if(outputTime) {
+            // convert the time array
+            outputTime[index] = index < actualSize ? traj[index].second / conv->timeUnit : NAN;
+        }
+        // convert the units and numerical type of the trajectory array
+        double point[6];
+        if(index < actualSize)
+            unconvertPosVel(traj[index].first, point);
+        else  // actual orbit size is smaller than required; fill the rest with NAN's
+            std::fill(point, point+6, NAN);
+        switch(dtype) {
+            case NPY_DOUBLE:
+                for(int c=0; c<6; c++)
+                    static_cast<double*>(outputTraj)[index * 6 + c] = normFactor * point[c];
+                break;
+            case NPY_FLOAT:
+                for(int c=0; c<6; c++)
+                    static_cast<float*>(outputTraj)[index * 6 + c] = float(normFactor * point[c]);
+                break;
+            case NPY_CDOUBLE:
+                for(int c=0; c<3; c++)
+                    static_cast<std::complex<double>*>(outputTraj)[index * 3 + c] =
+                        std::complex<double>(normFactor * point[c], normFactor * point[c+3]);
+                break;
+            case NPY_CFLOAT:
+                for(int c=0; c<3; c++) {
+                    static_cast<std::complex<float>*>(outputTraj)[index * 3 + c] =
+                        std::complex<float>(normFactor * point[c], normFactor * point[c+3]);
+                }
+                break;
+            default:
+                assert(!"incorrect dtype");  // shouldn't happen, we checked dtype beforehand
+        }
+    }
 }
 
 /// Apply a Target object to a stored orbit represented by interpolating splines:
@@ -7170,37 +7184,43 @@ int Target_init(TargetObject* self, PyObject* args, PyObject* namedArgs)
     }
     try{
         if(utils::stringsEqual(type_str.substr(0, 7), "Density")) {
-            // spatial grids
             std::vector<double> gridr = toDoubleArray(nargs.pop("gridr"));
-            std::vector<double> gridz = toDoubleArray(nargs.pop("gridz"));
             if(gridr.size()<2)
                 throw std::invalid_argument("gridr must be an array with >=2 elements");
-            if(gridz.size()<2 && utils::stringsEqual(type_str.substr(0, 18), "DensityCylindrical"))
-                throw std::invalid_argument("gridz must be an array with >=2 elements");
             math::blas_dmul(conv->lengthUnit, gridr);
-            math::blas_dmul(conv->lengthUnit, gridz);
-            // orders of angular expansion or number of lines partitioning a spherical shell into cells
-            int lmax = toInt(nargs.pop("lmax"), 0),
-                mmax = toInt(nargs.pop("mmax"), 0),
-                stripsPerPane = toInt(nargs.pop("stripsPerPane"), 2);
-            // flattening of the spheroidal grid
-            double
-                axisRatioY = toDouble(nargs.pop("axisRatioY"), 1.0),
-                axisRatioZ = toDouble(nargs.pop("axisRatioZ"), 1.0);
-            if(utils::stringsEqual(type_str, "DensityClassicTopHat"))
-                self->target.reset(new galaxymodel::TargetDensityClassic<0>(
-                    stripsPerPane, gridr, axisRatioY, axisRatioZ));
-            else if(utils::stringsEqual(type_str, "DensityClassicLinear"))
-                self->target.reset(new galaxymodel::TargetDensityClassic<1>(
-                    stripsPerPane, gridr, axisRatioY, axisRatioZ));
-            else if(utils::stringsEqual(type_str, "DensitySphHarm"))
+            if( utils::stringsEqual(type_str, "DensityClassicTopHat") ||
+                utils::stringsEqual(type_str, "DensityClassicLinear"))
+            {
+                double  // flattening of the spheroidal grid
+                    axisRatioY = toDouble(nargs.pop("axisRatioY"), 1.0),
+                    axisRatioZ = toDouble(nargs.pop("axisRatioZ"), 1.0);
+                int stripsPerPane = toInt(nargs.pop("stripsPerPane"), 2);
+                if(type_str[14]=='t' or type_str[14]=='T')  // TopHat
+                    self->target.reset(new galaxymodel::TargetDensityClassic<0>(
+                        stripsPerPane, gridr, axisRatioY, axisRatioZ));
+                else  // Linear
+                    self->target.reset(new galaxymodel::TargetDensityClassic<1>(
+                        stripsPerPane, gridr, axisRatioY, axisRatioZ));
+            } else if(utils::stringsEqual(type_str, "DensitySphHarm")) {
+                // orders of angular expansion or number of lines partitioning a spherical shell into cells
+                int lmax = toInt(nargs.pop("lmax"), 0),
+                    mmax = toInt(nargs.pop("mmax"), 0);
                 self->target.reset(new galaxymodel::TargetDensitySphHarm(lmax, mmax, gridr));
-            else if(utils::stringsEqual(type_str, "DensityCylindricalTopHat"))
-                self->target.reset(new galaxymodel::TargetDensityCylindrical<0>(mmax, gridr, gridz));
-            else if(utils::stringsEqual(type_str, "DensityCylindricalLinear"))
-                self->target.reset(new galaxymodel::TargetDensityCylindrical<1>(mmax, gridr, gridz));
-            else
-                throw std::invalid_argument("Unknown type='...' argument");
+            } else if(utils::stringsEqual(type_str, "DensityCylindricalTopHat") ||
+                      utils::stringsEqual(type_str, "DensityCylindricalLinear"))
+            {
+                std::vector<double> gridz = toDoubleArray(nargs.pop("gridz"));
+                if(gridz.size()<2)
+                    throw std::invalid_argument("gridz must be an array with >=2 elements");
+                math::blas_dmul(conv->lengthUnit, gridz);
+                int mmax = toInt(nargs.pop("mmax"), 0);  // order of azimuthal Fourier expansion
+                if(type_str[18]=='t' || type_str[18]=='T')  // TopHat
+                    self->target.reset(new galaxymodel::TargetDensityCylindrical<0>(mmax, gridr, gridz));
+                else  // Linear
+                    self->target.reset(new galaxymodel::TargetDensityCylindrical<1>(mmax, gridr, gridz));
+
+            } else
+                throw std::invalid_argument("Unknown type='"+type_str+"' argument");
             self->unitDensityProjection = conv->massUnit;
             self->unitDFProjection = conv->massUnit;
         }
@@ -7252,9 +7272,9 @@ int Target_init(TargetObject* self, PyObject* args, PyObject* namedArgs)
                 if(isFinite(psf))
                     params.spatialPSF.assign(1, galaxymodel::GaussianPSF(psf));
                 else {  // may be an array of several PSFs
-                    PyArrayObject* psf_arr = (PyArrayObject*)PyArray_FROM_OTF(psf_obj, NPY_DOUBLE, 0);
+                    PyArrayObjectRef psf_arr(
+                        (PyArrayObject*)PyArray_FROM_OTF(psf_obj, NPY_DOUBLE, NPY_ARRAY_ALIGNED));
                     if(psf_arr == NULL || PyArray_NDIM(psf_arr) != 2 || PyArray_DIM(psf_arr, 1) != 2) {
-                        Py_XDECREF(psf_arr);
                         throw std::invalid_argument(
                             "Argument 'psf' must be a single number (width of the Gaussian PSF), "
                             "or a Kx2 array of PSF widths and fractional weights");
@@ -7273,8 +7293,8 @@ int Target_init(TargetObject* self, PyObject* args, PyObject* namedArgs)
             // two possibilities: either apertures is a single 3d array of shape N_apert x N_vert x 2,
             // or a list/tuple/array of individual 2d arrays of shapes N_vert,i x 2
             for(size_t a=0; a<apertures.size(); a++) {
-                PyArrayObject* ap_arr =
-                    (PyArrayObject*)PyArray_FROM_OTF(apertures[a], NPY_DOUBLE, 0);
+                PyArrayObjectRef ap_arr(
+                    (PyArrayObject*)PyArray_FROM_OTF(apertures[a], NPY_DOUBLE, NPY_ARRAY_ALIGNED));
                 if( ap_arr != NULL &&
                     PyArray_NDIM(ap_arr)  == 2 &&
                     PyArray_DIM(ap_arr, 0) >= 3 &&
@@ -7306,12 +7326,10 @@ int Target_init(TargetObject* self, PyObject* args, PyObject* namedArgs)
                 } else {
                     if(PyErr_Occurred())
                         return -1;
-                    Py_XDECREF(ap_arr);
                     throw std::invalid_argument(
                         "Each element of the list or tuple provided in the 'apertures=...' argument "
                         "must be a Nx2 array defining a polygon on the sky plane, with N>=3 vertices");
                 }
-                Py_DECREF(ap_arr);
             }
             // degree of B-splines
             int degree = toInt(nargs.pop("degree"), -1);
@@ -7328,7 +7346,7 @@ int Target_init(TargetObject* self, PyObject* args, PyObject* namedArgs)
             self->unitDFProjection = conv->massUnit / conv->velocityUnit;
         }
         if(!self->target)  // none of the above variants worked
-            throw std::invalid_argument("Unknown type='...' argument");
+            throw std::invalid_argument("Unknown type='"+type_str+"' argument");
     }
     catch(std::exception& ex) {
         raisePythonException(ex, "Error in creating a Target object: ");
@@ -7543,7 +7561,7 @@ static PyTypeObject TargetType = {
 /// description of orbit function
 static const char* docstringOrbit =
     "Compute a single orbit or a bunch of orbits in the given potential.\n"
-    "Named arguments:\n"
+    "Named arguments (case-insensitive):\n"
     "  ic:  initial conditions - either an array of 6 numbers (3 positions and 3 velocities in "
     "Cartesian coordinates) for a single orbit, or a 2d array of Nx6 numbers for a bunch of orbits.\n"
     "  potential:  a Potential object or a compatible interface.\n"
@@ -7570,39 +7588,60 @@ static const char* docstringOrbit =
     "a chaos indicator (positive value means that the orbit is chaotic, zero - regular).\n"
     "  accuracy (optional, default 1e-8):  relative accuracy of the ODE integrator.\n"
     "  maxNumSteps (optional, default 1e8):  upper limit on the number of steps in the ODE integrator.\n"
-    "  dtype (optional, default 'float32'):  storage data type for trajectories (see below).\n"
+    "  dtype (optional, default 'float32'):  storage data type for trajectories and deviation vectors "
+    "(available variants: 'float32', 'float64', 'complex64', 'complex128' or 'object', see below).\n"
     "  method (optional, string):  choice of the ODE integrator, available variants are "
     "'dop853' (default; 8th order Runge-Kutta), 'dprkn8' (8th order Runge-Kutta-Nystrom method, "
     "usually somewhat more efficient than dop853), or 'hermite' (4th order, might be more efficient "
     "in the regime of low accuracy, but only works in static potentials).\n"
     "  verbose (optional, default True):  whether to display progress when integrating multiple orbits.\n"
+    "  separateTime (optional, default False, but in a future version will be changed to True): "
+    "controls how the trajectories are returned, see below.\n"
     "Returns:\n"
     "  depending on the arguments, one or a tuple of several data containers (one for each target, "
-    "plus an extra one for trajectories if trajsize>0, plus another one for deviation vectors "
+    "plus an extra one or two for trajectories if trajsize>0, plus another one for deviation vectors "
     "if der=True, plus another one for Lyapunov exponents if lyapunov=True). \n"
-    "  Each target produces a 2d array of floats with shape NxC, where N is the number of orbits, "
-    "and C is the number of constraints in the target (varies between targets); "
+    "  Each target produces a 2d array of floats with shape (N, C), where N is the number of orbits, "
+    "and C=len(target) is the number of constraints in the target (varies between targets); "
     "if there was a single orbit, then this would be a 1d array of length C. "
     "These data storage arrays should be provided to the `solveOpt()` routine. \n"
     "  Turning on the Lyapunov exponent estimation produces two numbers per orbit: "
     "the normalized Lyapunov exponent (lambda * Torb, where the orbital period is taken to be "
     "potential.Tcirc(ic) - values of order unity indicate strongly chaotic orbits, much smaller "
     "than unity - weakly chaotic ones), and the dimensionless timescale for the onset of chaos "
-    "(expressed in units of orbital period). In case of N orbits, this array has shape Nx2.\n"
+    "(expressed in units of orbital period). When there is no evidence for chaotic behaviour, "
+    "lambda=0 and Tchaos=infinity, whereas if the integration time is too short to obtain a reliable "
+    "estimate, both values are NaN. In case of N orbits, this array has shape (N, 2).\n"
     "  Trajectory output and deviation vectors can be requested in two alternative formats: "
     "arrays or Orbit objects.\n"
-    "In the first case, the output of the trajectory is a Nx2 array (or, in case of a single orbit, "
-    "a 1d array of length 2), with elements being objects themselves: "
-    "each row stands for one orbit, the first element in each row is a 1d array of length `trajsize` "
-    "containing the timestamps, and the second is a 2d array of phase-space coordinates "
-    "at the corresponding timestamps, in the format depending on dtype:\n"
+    "In the first case, a single trajectory is represented by two arrays: "
+    "timestamps (1d array of length S, which equals to `trajsize` if it was set to a positive number, "
+    "or to the actual length of the trajectory if `trajsize`=0) and phase-space coordinates "
+    "at these times (2d array of shape (S, {3 or 6}) in the format depending on dtype): \n"
     "'float' or 'double' means 6 64-bit floats (3 positions and 3 velocities) in each row;\n"
     "'float32' (default) means 6 32-bit floats;\n"
     "'complex' or 'complex128' or 'c16' means 3 128-bit complex values (pairs of 64-bit floats), "
     "with velocity in the imaginary part; and 'complex64' or 'c8' means 3 64-bit complex values.\n"
-    "The time array is always 64-bit float. "
-    "The choice of dtype only affects trajectories; arrays returned by each target always "
-    "contain 32-bit floats.\n"
+    "The choice of dtype only affects trajectories (and deviation vectors); arrays returned by "
+    "each target always contain 32-bit floats, and timestamps are always 64-bit floats.\n"
+    "When separateTime=True, these two arrays are then returned as separate elements "
+    "of the output tuple (timestamps, trajectories), otherwise as a single element (timetraj, "
+    "a 2d array of shape (N, 2) for N orbits, or a 1d array of length 2 for a single orbit).\n"
+    "The advantage of using separateTime=True is that when all orbits have the same trajsize=S>0, "
+    "the timestamps of all orbits are combined into a single array of shape (N, S), "
+    "and their trajectories - into a single array of shape (N, S, {3 or 6}). "
+    "When sizes are different, this is not possible, so timestamps will be a 1d array of length N "
+    "containing arrays of different length S_i, and trajectories will be another 1d array of length N "
+    "containing 2d arrays of shape (S_i, {3 or 6}). Regardless of the storage arrangement, one can "
+    "use the same the indexing convention: timestamps[i][k] is k'th timestamp in i'th trajectory, "
+    "and trajectories[i][k,d] is d'th dimension of k'th point in i'th trajectory.\n"
+    "On the other hand, when separateTime=False (this was the only possibility in earlier versions, "
+    "and remains the default option for now), the resulting timetraj array is always heterogeneous "
+    "(0th column contains timestamps and 1st column contains trajectories), so it is not possible "
+    "to combine them into a single array even if all trajsizes are the same. The indexing convention "
+    "is timetraj[i,0][k] for times and timetraj[i,1][k,d] for phase-space coordinates.\n"
+    "Thus separateTime=True is the recommended option that enables optimizations when all trajsizes "
+    "are the same, and in the future will become the default one (and eventually the only possibility).\n"
     "In the second case (dtype=object), the output is a 1d array of length N containing instances "
     "of a special class agama.Orbit, or just an Orbit object for a single orbit. "
     "The agama.Orbit class can only be returned by the orbit() routine and cannot be instantiated "
@@ -7610,39 +7649,41 @@ static const char* docstringOrbit =
     "its () operator takes one argument (a single value of time or an array of times), "
     "and returns one or more 6d phase-space coordinates at the requested times. "
     "It also exposes a sequence interface: len(orbit) returns the number of timestamps "
-    "in the interpolator, and orbit[i] returns the i-th timestamp, so that the full 6d trajectory "
+    "in the interpolator, and orbit[k] returns the k-th timestamp, so that the full 6d trajectory "
     "at these timestamps can be reconstructed by applying the () operator to the orbit object itself. "
     "Although such interpolator may be constructed from a regularly-spaced orbit, it makes more "
     "sense to leave trajsize=0 in this case, i.e., record the trajectory at every timestep "
     "of the orbit integrator. This is the default behaviour, and trajsize needs not be specified "
     "explicitly when setting dtype=object.\n"
-    "The output for deviation vectors, if they are requested, follows the same format as for "
-    "the trajectory, except that there are 6 such vectors for each orbit. "
+    "The output for deviation vectors, if they are requested, follows the same format as "
+    "the trajectory, except that there are 6 such vectors for each orbit, and no timestamps. "
     "Thus, if dtype=object, each orbit produces an array of 6 agama.Orbit objects, each one "
     "representing a single deviation vector; for other dtypes, the output for one orbit consists of "
-    "6 arrays of shape `trajsize`*6 (for dtype='float' or 'double'), or `trajsize`*3 "
-    "(for dtype='complex' or 'complex128'), each one representing a single deviation vector "
+    "6 arrays of shape (S, 6) when dtype='float' or 'double', "
+    "or (S, 3) when dtype='complex' or 'complex128'), each one representing a single deviation vector "
     "sampled at the same timestamps as the trajectory. "
-    "in case of N>1 orbits, the output is an array of shape Nx6 filled with agama.Orbit objects "
-    "or 2d arrays of deviation vectors.\n\n"
+    "in case of N>1 orbits, the output is an array of shape (N, 6) filled with agama.Orbit objects "
+    "or 2d arrays of deviation vectors. And if all trajsizes are the same (S) and dtype!=object, "
+    "the output is a single array of shape (N, 6, S, {3 or 6}).\n\n"
     "Examples:\n"
-    "# compute a single orbit and output the trajectory in a 2d array of size 1001x6:\n"
+    "# compute a single orbit and output the times as a 1d array of length 1001 and the trajectory "
+    "as a 2d array of shape (1001, 6):\n"
     ">>> times,traj = agama.orbit(potential=mypot, ic=[x,y,z,vx,vy,vz], time=100, trajsize=1001)\n"
     "# record the same orbit at its 'natural' timestep and represent it as an agama.Orbit object:\n"
     ">>> orbit = agama.orbit(potential=mypot, ic=[x,y,z,vx,vy,vz], time=100, dtype=object)\n"
-    ">>> traj_recorded = orbit(orbit)       # produces a 2d array of size len(orbit) x 6\n"
-    ">>> traj_interpolated = orbit(times)   # produces an array of size 1001x6 very close to traj\n"
+    ">>> traj_recorded = orbit(orbit)       # produces a 2d array of shape (len(orbit), 6)\n"
+    ">>> traj_interpolated = orbit(times)   # produces an array of shape (1001, 6) very close to traj\n"
     "# integrate a bunch of orbits with initial conditions taken from a Nx6 array `initcond`, "
     "for a time equivalent to 50 periods for each orbit, collecting the data for two targets "
-    "`target1` and `target2` and also storing their trajectories in a Nx2 array of "
-    "time and position/velocity arrays:\n"
-    ">>> stor1, stor2, trajectories = agama.orbit(potential=mypot, ic=initcond, "
-    "time=50*mypot.Tcirc(initcond), trajsize=500, targets=(target1, target2))\n"
+    "`target1` and `target2` and also storing their trajectories and associated timestamps into two "
+    "arrays of shape (N, 500) for timestamps and (N, 500, 6) for position/velocity:\n"
+    ">>> stor1, stor2, timestamps, trajectories = agama.orbit(potential=mypot, ic=initcond, "
+    "time=50*mypot.Tcirc(initcond), trajsize=500, targets=(target1, target2), separateTime=True)\n"
     "# compute a single orbit and its deviation vectors v0..v5, storing only the final values "
     "at t=tend, and estimate the Lyapunov exponent (if it is positive, the magnitude of deviation "
     "vectors grows exponentially with time, otherwise grows linearly):\n"
-    ">>> (time,endpoint), (v0,v1,v2,v3,v4,v5), lyap = agama.orbit(potential=mypot, "
-    "ic=[x,y,z,vx,vy,vz], time=100, trajsize=1, der=True, lyapunov=True)";
+    ">>> time, endpoint, (v0,v1,v2,v3,v4,v5), (lyap,Tchaos) = agama.orbit(potential=mypot, "
+    "ic=[x,y,z,vx,vy,vz], time=100, trajsize=1, der=True, lyapunov=True, separateTime=True)";
 
 /// run a single orbit or the entire orbit library for a Schwarzschild model
 PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
@@ -7650,107 +7691,75 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
     if(!onlyNamedArgs(args, namedArgs))
         return NULL;
 
-    // parse input arguments
-    orbit::OrbitIntParams params;
-    double Omega = 0.;
-    int haveDer  = 0;
-    int haveLyap = 0;
-    int verbose  = 1;
-    int dtype = NPY_FLOAT;
     PyObject *ic_obj = NULL, *time_obj = NULL, *timestart_obj = NULL, *pot_obj = NULL,
-        *targets_obj = NULL, *trajsize_obj = NULL, *dtype_obj = NULL, *method_obj = NULL;
-    static const char* keywords[] =
-        {"ic", "time", "timestart", "potential", "targets", "trajsize", "der",
-        "lyapunov", "Omega", "accuracy", "maxNumSteps", "dtype", "method", "verbose", NULL};
-    if(!PyArg_ParseTupleAndKeywords(args, namedArgs, "|OOOOOOiiddiOOi", const_cast<char**>(keywords),
-        &ic_obj, &time_obj, &timestart_obj, &pot_obj, &targets_obj, &trajsize_obj, &haveDer, &haveLyap,
-        &Omega, &params.accuracy, &params.maxNumSteps, &dtype_obj, &method_obj, &verbose))
-        return NULL;
-
-    // check if deviation vectors are needed (if yes, the output contains yet another array)
-    if(haveDer != 0 && haveDer != 1) {
-        PyErr_SetString(PyExc_TypeError, "Argument 'der' must be a boolean or an int 0/1");
-        return NULL;
+        *targets_obj = NULL, *trajsize_obj = NULL, *dtype_obj = NULL, *der_obj = NULL, 
+        *verbose_obj = NULL, *lyapunov_obj = NULL, *Omega_obj = NULL, *separateTime_obj = NULL,
+        *method_obj  = NULL, *accuracy_obj = NULL, *maxNumSteps_obj = NULL;
+    {   // parse function arguments in a case-insensitive way (all are borrowed references)
+        NamedArgs nargs(namedArgs);
+        ic_obj          = nargs.pop("ic");
+        time_obj        = nargs.pop("time");
+        timestart_obj   = nargs.pop("timestart");
+        pot_obj         = nargs.pop("potential");
+        targets_obj     = nargs.pop("targets");
+        trajsize_obj    = nargs.pop("trajsize");
+        dtype_obj       = nargs.pop("dtype");
+        der_obj         = nargs.pop("der");
+        verbose_obj     = nargs.pop("verbose");
+        lyapunov_obj    = nargs.pop("lyapunov");
+        Omega_obj       = nargs.pop("Omega");
+        separateTime_obj= nargs.pop("separateTime");
+        method_obj      = nargs.pop("method");
+        accuracy_obj    = nargs.pop("accuracy");
+        maxNumSteps_obj = nargs.pop("maxNumSteps");
     }
-
-    // check if Lyapunov exponent is needed (if yes, the output contains yet another extra item)
-    if(haveLyap != 0 && haveLyap != 1) {
-        PyErr_SetString(PyExc_TypeError, "Argument 'lyapunov' must be a boolean");
+    if(PyErr_Occurred())  // error in argument parsing, e.g. duplicate or unknown unknown arguments
         return NULL;
-    }
-
-    // choice of orbit integrator
-    if(method_obj != NULL) {
-        std::string method_str = toString(method_obj);
-        if(utils::stringsEqual(method_str, "hermite"))
-            params.method = orbit::OrbitIntParams::HERMITE;
-        else if(utils::stringsEqual(method_str, "dprkn8"))
-            params.method = orbit::OrbitIntParams::DPRKN8;
-        else if(utils::stringsEqual(method_str, "dop853"))
-            params.method = orbit::OrbitIntParams::DOP853;
-        else {
-            PyErr_SetString(PyExc_ValueError,
-                "Unknown ODE integation method (valid values are 'dop853', 'dprkn8' or 'hermite')");
-            return NULL;
-        }
-    }
-
-    // whether to show the progress indicator
-    if(verbose != 0 && verbose != 1) {
-        PyErr_SetString(PyExc_TypeError, "Argument 'verbose' must be a boolean or an int 0/1");
-        return NULL;
-    }
-
-    // unit-convert the pattern speed
-    Omega /= conv->timeUnit;
 
     // ensure that a potential object was provided
     potential::PtrPotential pot = getPotential(pot_obj);
     if(!pot) {
-        PyErr_SetString(PyExc_TypeError,
-            "Argument 'potential' must be a valid Potential object");
+        PyErr_SetString(PyExc_TypeError, "Argument 'potential' must be a valid Potential object");
         return NULL;
     }
 
-    // ensure that initial conditions were provided
-    PyArrayObject *ic_arr = ic_obj==NULL ? NULL :
-        (PyArrayObject*) PyArray_FROM_OTF(ic_obj, NPY_DOUBLE, NPY_ARRAY_IN_ARRAY);
+    // ensure that initial conditions were provided (the NumPy array does not have to be contiguous)
+    PyArrayObjectRef ic_arr(ic_obj ?
+        (PyArrayObject*)PyArray_FROM_OTF(ic_obj, NPY_DOUBLE, NPY_ARRAY_ALIGNED) :
+        NULL);
     if(ic_arr == NULL || !(
         (PyArray_NDIM(ic_arr) == 1 && PyArray_DIM(ic_arr, 0) == 6) ||
         (PyArray_NDIM(ic_arr) == 2 && PyArray_DIM(ic_arr, 1) == 6) ) )
     {
-        Py_XDECREF(ic_arr);
         PyErr_SetString(PyExc_TypeError, "Argument 'ic' does not contain a valid array of length Nx6");
         return NULL;
     }
-    bool singleOrbit = PyArray_NDIM(ic_arr) == 1; // in this case all output arrays have one dimension less
 
-    // unit-convert initial conditions
+    // if the IC is a 1d array (i.e. just a single orbit), all output arrays have one fewer dimension;
+    // this is a stronger condition than numOrbits==1, the latter could also correspond to the case
+    // that ic is a 2d array of shape (1,6), which is treated in the general way (singleOrbit=false).
+    // Note that a 2d IC array with zero rows is also allowed and treated in the general way.
+    bool singleOrbit = PyArray_NDIM(ic_arr) == 1;
     npy_intp numOrbits = singleOrbit ? 1 : PyArray_DIM(ic_arr, 0);
-    std::vector<coord::PosVelCar> initCond(numOrbits);
-    for(npy_intp i=0; i<numOrbits; i++)
-        initCond[i] = convertPosVel(PyArray_NDIM(ic_arr) == 1 ?
-            &pyArrayElem<double>(ic_arr, 0) : &pyArrayElem<double>(ic_arr, i, 0));
-    Py_DECREF(ic_arr);
 
     // check that integration time(s) were provided
-    PyArrayObject *time_arr = time_obj==NULL ? NULL :
-        (PyArrayObject*) PyArray_FROM_OTF(time_obj, NPY_DOUBLE, 0);
+    PyArrayObjectRef time_arr(time_obj ?
+        (PyArrayObject*) PyArray_FROM_OTF(time_obj, NPY_DOUBLE, NPY_ARRAY_ALIGNED) :
+        NULL);
     if(time_arr == NULL || !( PyArray_NDIM(time_arr) == 0 ||
-        (PyArray_NDIM(time_arr) == 1 && (int)PyArray_DIM(time_arr, 0) == numOrbits) ) )
+        (PyArray_NDIM(time_arr) == 1 && PyArray_DIM(time_arr, 0) == numOrbits) ) )
     {
-        Py_XDECREF(time_arr);
         PyErr_SetString(PyExc_ValueError,
             "Argument 'time' must either be a scalar or have the same length "
             "as the number of points in the initial conditions");
         return NULL;
     }
-    PyArrayObject *timestart_arr = timestart_obj==NULL ? NULL :
-        (PyArrayObject*) PyArray_FROM_OTF(timestart_obj, NPY_DOUBLE, 0);
+    PyArrayObjectRef timestart_arr(timestart_obj ?
+        (PyArrayObject*) PyArray_FROM_OTF(timestart_obj, NPY_DOUBLE, NPY_ARRAY_ALIGNED) :
+        NULL);
     if(timestart_arr != NULL && !( PyArray_NDIM(timestart_arr) == 0 ||
-         (PyArray_NDIM(timestart_arr) == 1 && (int)PyArray_DIM(timestart_arr, 0) == numOrbits) ) )
+         (PyArray_NDIM(timestart_arr) == 1 && PyArray_DIM(timestart_arr, 0) == numOrbits) ) )
     {
-        Py_DECREF(timestart_arr);
         PyErr_SetString(PyExc_ValueError,
             "Argument 'timestart' must either be a scalar or have the same length "
             "as the number of points in the initial conditions");
@@ -7771,8 +7780,16 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
     else
         for(npy_intp i=0; i<numOrbits; i++)
             timestart[i] = pyArrayElem<double>(timestart_arr, i) * conv->timeUnit;
-    Py_DECREF(time_arr);
-    Py_XDECREF(timestart_arr);
+
+    // unit-convert the pattern speed, if provided
+    double Omega = 0.;
+    if(Omega_obj) {
+        Omega = toDouble(Omega_obj) / conv->timeUnit;
+        if(!isFinite(Omega)) {
+            PyErr_SetString(PyExc_TypeError, "Argument 'Omega' must be a float");
+            return NULL;
+        }
+    }
 
     // check that valid targets were provided
     std::vector<PyObject*> targets_vec = toPyObjectArray(targets_obj);
@@ -7790,6 +7807,7 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
     }
 
     // determine the output datatype for trajectory
+    int dtype = NPY_FLOAT;
     if(dtype_obj != NULL && dtype_obj != Py_None) {
         PyArray_Descr* dtype_descr = NULL;
         dtype = PyArray_DescrConverter2(dtype_obj, &dtype_descr) ? dtype_descr->type_num : NPY_NOTYPE;
@@ -7802,23 +7820,37 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
             return NULL;
         }
     }
+    // when storing trajectory as complex numbers (real part for position, imaginary part for velocity),
+    // the corresponding dimension of the array is 3,
+    // otherwise (the usual case) it is 6: three positions followed by three velocities
+    int dimPhaseSpace = dtype==NPY_CFLOAT || dtype==NPY_CDOUBLE ? 3 : 6;
+    // memory footprint of a single phase-space point, depending on the float type,
+    // but independent of whether it is stored as real or complex numbers
+    int sizeofPhaseSpace = (dtype==NPY_CFLOAT || dtype==NPY_FLOAT ? sizeof(float) : sizeof(double)) * 6;
 
-    // check if trajectory needs to be recorded: in this case the output tuple contains one extra item
-    std::vector<int> trajSizes;
+    // check if trajectory needs to be recorded:
+    // in this case the output tuple contains one or two extra items
+    std::vector<int> trajSizes;    // possibly different sizes for each orbit
+    int trajSize = 0;              // single setting for all orbits; 0 means different sizes
     bool haveTraj = trajsize_obj != NULL;
     if(haveTraj) {
-        PyArrayObject *trajsize_arr =
-            (PyArrayObject*) PyArray_FROM_OTF(trajsize_obj, NPY_INT, NPY_ARRAY_FORCECAST);
+        PyArrayObjectRef trajsize_arr(
+            (PyArrayObject*) PyArray_FROM_OTF(trajsize_obj, NPY_INT, NPY_ARRAY_FORCECAST));
         if(!trajsize_arr)
             return NULL;
         if(PyArray_NDIM(trajsize_arr) == 0) {
-            trajSizes.assign(numOrbits, PyInt_AsLong(trajsize_obj));
+            trajSize = PyInt_AsLong(trajsize_obj);
+            trajSizes.assign(numOrbits, trajSize);
         } else if(PyArray_NDIM(trajsize_arr) == 1 && (int)PyArray_DIM(trajsize_arr, 0) == numOrbits) {
             trajSizes.resize(numOrbits);
-            for(npy_intp i=0; i<numOrbits; i++)
+            for(npy_intp i=0; i<numOrbits; i++) {
                 trajSizes[i] = pyArrayElem<int>(trajsize_arr, i);
+                if(i==0)
+                    trajSize = trajSizes[i];
+                else if(trajSizes[i] != trajSizes[i-1])
+                    trajSize = 0;  // means sizes are different
+            }
         }
-        Py_DECREF(trajsize_arr);
         bool nonneg = true;
         for(npy_intp i=0; i<numOrbits; i++)
             nonneg &= trajSizes[i] >= 0;
@@ -7836,15 +7868,108 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
         haveTraj = true;
     }
 
+    // check if deviation vectors are needed (if yes, the output contains yet another array)
+    int haveDer = 0;
+    if(der_obj) {
+        haveDer = toBool(der_obj, -1);
+        if(haveDer != 0 && haveDer != 1) {
+            PyErr_SetString(PyExc_TypeError, "Argument 'der' must be a boolean or an int 0/1");
+            return NULL;
+        }
+    }
+
+    // check if Lyapunov exponent is needed (if yes, the output contains yet another extra item)
+    int haveLyapunov = 0;
+    if(lyapunov_obj) {
+        haveLyapunov = toBool(lyapunov_obj, -1);
+        if(haveLyapunov != 0 && haveLyapunov != 1) {
+            PyErr_SetString(PyExc_TypeError, "Argument 'lyapunov' must be a boolean");
+            return NULL;
+        }
+    }
+
+    // whether to return the timestamps and trajectories in separate arrays (when dtype!=object)
+    int separateTime = 0;
+    if(separateTime_obj) {
+        separateTime = toBool(separateTime_obj, -1);
+        if(separateTime != 0 && separateTime != 1) {
+            PyErr_SetString(PyExc_TypeError, "Argument 'separateTime' must be a boolean or an int 0/1");
+            return NULL;
+        }
+    }
+
+    // whether to show the progress indicator
+    int verbose = 1;
+    if(verbose_obj) {
+        verbose = toBool(verbose_obj, -1);
+        if(verbose != 0 && verbose != 1) {
+            PyErr_SetString(PyExc_TypeError, "Argument 'verbose' must be a boolean or an int 0/1");
+            return NULL;
+        }
+    }
+
+    // tune the orbit integrator parameters
+    orbit::OrbitIntParams params;
+    if(method_obj) {
+        const char* method_str = PyString_AsString(method_obj);  // NULL if it's not a string
+        if(utils::stringsEqual(method_str, "hermite"))
+            params.method = orbit::OrbitIntParams::HERMITE;
+        else if(utils::stringsEqual(method_str, "dprkn8"))
+            params.method = orbit::OrbitIntParams::DPRKN8;
+        else if(utils::stringsEqual(method_str, "dop853"))
+            params.method = orbit::OrbitIntParams::DOP853;
+        else {
+            if(!PyErr_Occurred())
+                PyErr_SetString(PyExc_ValueError,
+                    "Unknown ODE integation method (valid values are 'dop853', 'dprkn8' or 'hermite')");
+            return NULL;
+        }
+    }
+    if(accuracy_obj) {
+        params.accuracy = toDouble(accuracy_obj, /*default*/ 0);
+        if(!(params.accuracy>0))
+            PyErr_SetString(PyExc_TypeError,
+                "Argument 'accuracy', if provided, should be a nonnegative float");
+    }
+    if(maxNumSteps_obj) {
+        params.maxNumSteps = toInt(maxNumSteps_obj, /*default*/ -1);
+        if(params.maxNumSteps<=0)
+            PyErr_SetString(PyExc_TypeError,
+                "Argument 'maxNumSteps', if provided, should be a nonnegative integer");
+    }
+
+    /*  Different output conventions are used for the trajectory, depending on the situation:
+    If dtype==object,
+        add a single element to the results tuple, which is is a 1d array of length numOrbits
+        containing instances of agama.Orbit.
+    Otherwise, it depends on the separateTime argument:
+        if separateTime==false, add a single 2d array of shape (numOrbits,2) and dtype=object:
+            first  column contains 1d arrays of length trajsize[i]  (timestamps),
+            second column contains 2d arrays of shape (trajsize[i],D)  (trajectories),
+            where D=6 if dtype==float32/float64, or 3 if dtype==complex64/complex128.
+        if separateTime==true, add two elements to the tuple: timestamps and trajectories.
+            if trajsizes are different between orbits, both elements are 1d arrays of
+                length numOrbits and dtype=object:
+                timestamps   containing 1d arrays of length trajsize[i],
+                trajectories containing 2d arrays of shape (trajsize[i],D).
+            if trajsizes are the same for all orbits, this turns on an optimization:
+                timestamps   is a 2d array of shape (numOrbits,trajsize),
+                trajectories is a 3d array of shape (numOrbits,trajsize,D).
+    Finally, if singleOrbit==true (this a more restrictive condition than numOrbits==1),
+        all output arrays have one dimension fewer, removing the first dimension(numOrbits),
+        and if the result is zero-dimensional, a scalar is returned (e.g. a single instance
+        of agama.Orbit when dtype==object). */
+    int haveTime = haveTraj && dtype != NPY_OBJECT && separateTime;  // add two elements to the tuple
+
     // the output is one or more Numpy arrays:
     // each target corresponds to a NumPy array where the collected information for all orbits is stored,
+    // plus optionally an array of timestamps corresponding to trajectories (if requested separately),
     // plus optionally an array containing the trajectories of all orbits if they are requested,
     // plus optionally an array containing the deviation vectors of all orbits if requested,
     // plus optionally an array of Lyapunov exponents if requested.
-    // We first allocate and keep these arrays in a std::vector, then convert it into a tuple
-    // at the end, once the data is ready: at this stage, zero-dimension arrays are converted to scalars.
-    // The vector result_numCols contains the number of entries per orbit for each output array.
-    size_t numOutputs = numTargets + haveTraj + haveLyap + haveDer;
+    // First allocate and keep these arrays in a std::vector, then convert it into a tuple at the end,
+    // once the data are ready: at this stage, zero-dimension arrays are converted to scalars.
+    size_t numOutputs = numTargets + haveTime + haveTraj + haveDer + haveLyapunov;
     if(numOutputs == 0) {
         PyErr_SetString(PyExc_RuntimeError, "No output is requested: "
             "if you just need the trajectory, provide trajsize=... for array output "
@@ -7858,43 +7983,105 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
         return NULL;
     }
     std::vector<PyArrayObject*> result_arrays(numOutputs);
-    std::vector<npy_intp> result_numCols(result_arrays.size());
+    // indices of result_arrays corresponding to different kinds of outputs
+    npy_intp indexTime = -1, indexTraj = -1, indexDer = -1, indexLyap = -1;
 
-    // allocate the arrays for storing the information for each target,
-    // and optionally for the output trajectory(ies) and/or Lyapunov exponents.
-    // the array of trajectories is an array of shape (N,) or (N,2) of Python objects
     volatile bool fail = false;  // error flag (e.g., insufficient memory)
+    // allocate the arrays for storing the information for each target,
+    // and optionally for the output trajectory(-es), deviation vectors and Lyapunov exponents.
     for(size_t t=0; !fail && t < numOutputs; t++) {
-        npy_intp numCols;
-        int datatype;
-        if(t < numTargets) {                      // ordinary target objects
-            numCols  = targets[t]->numCoefs();
-            datatype = STORAGE_NUM_T;
-        } else if(haveTraj && t == numTargets) {  // trajectory storage
-            // one element per orbit when the output dtype is Orbit objects,
-            // otherwise two elements per orbit (time and trajectory arrays)
-            numCols  = dtype == NPY_OBJECT ? 1 : 2;
-            datatype = NPY_OBJECT;
-        } else if(haveDer && t == numTargets + haveTraj) {  // deviation vectors storage
-            // 6 dev vectors per orbit, stored as arrays or Orbit objects
-            numCols  = 6;
-            datatype = NPY_OBJECT;
-        } else if(haveLyap && t == numTargets + haveTraj + haveDer) {  // Lyapunov exponent and Tchaos
-            numCols  = 2;
-            datatype = NPY_DOUBLE;
+        // dimensions, shape and datatype of output arrays will depend on the kind of output
+        int datatype = NPY_NOTYPE;
+        npy_intp ndim = 0;
+        npy_intp size[4] = {numOrbits, 0, 0, 0};
+        if(t < numTargets) {
+            // ordinary target objects
+            ndim     = 2;
+            size[1]  = targets[t]->numCoefs();
+            datatype = STORAGE_NUM_T;    // numerical type for storage
+        } else if(haveTime && t == numTargets) {
+            // separate storage for timestamps (when not stored together with trajectories)
+            indexTime    = t;
+            assert(separateTime);
+            if(trajSize) {  // when nonzero, this indicates that the size is the same for all orbits
+                ndim     = 2;
+                size[1]  = trajSize;     // single 2d array of shape (numOrbits, trajSize)
+                datatype = NPY_DOUBLE;   // containing timestamps for all orbits
+            } else {
+                ndim     = 1;            // 1d array of timestamps
+                datatype = NPY_OBJECT;   // containing 1d NumPy arrays of different sizes
+            }
+        } else if(haveTraj && t == numTargets + haveTime) {
+            // trajectories and optionally timestamps, stored in various ways depending on the situation
+            indexTraj = t;
+            if(       dtype == NPY_OBJECT) {
+                ndim     = 1;            // 1d array with one element per orbit,
+                datatype = NPY_OBJECT;   // containing instances of agama.Orbit
+            } else if(dtype != NPY_OBJECT && !separateTime) {
+                ndim     = 2;            // 2d array with two elements per orbit:
+                size[1]  = 2;            // 0th column is timestamps, 1st column is trajectories;
+                datatype = NPY_OBJECT;   // both columns contains 1d/2d NumPy arrays of different sizes
+            } else if(dtype != NPY_OBJECT &&  separateTime && !trajSize) {
+                ndim     = 1;            // 1d array with one element per orbit (trajectories only),
+                datatype = NPY_OBJECT;   // containing 2d NumPy arrays of different sizes
+            } else if(dtype != NPY_OBJECT &&  separateTime &&  trajSize) {
+                ndim     = 3;            // single 3d output array for all trajectories:
+                size[1]  = trajSize;     // number of timestamps per orbit
+                size[2]  = dimPhaseSpace;// size of each phase-space point (3 or 6 depending on dtype)
+                datatype = dtype;        // numerical type for storage (float/double/complex...)
+            } else {
+                assert(!"logic error in determining storage for trajectory");  // shouldn't happen
+            }
+        } else if(haveDer && t == numTargets + haveTime + haveTraj) {
+            // deviation vectors: 6 dev vectors per orbit, stored as arrays or agama.Orbit objects
+            indexDer = t;
+            size[1]  = 6;
+            if(dtype != NPY_OBJECT && trajSize) {
+                ndim     = 4;            // single 4d output array for all dev vectors of all orbits
+                size[2]  = trajSize;     // number of timestamps per orbit
+                size[3]  = dimPhaseSpace;// size of each phase-space point
+                datatype = dtype;        // same numerical type as trajectories
+            } else {
+                ndim     = 2;            // 2d array with 6 dev vectors per orbit:
+                datatype = NPY_OBJECT;   // either agama.Orbit instances or 2d NumPy arrays
+            }
+        } else if(haveLyapunov && t == numTargets + haveTime + haveTraj + haveDer) {
+            // Lyapunov exponent and Tchaos (two numbers per orbit)
+            indexLyap = t;
+            ndim      = 2;
+            size[1]   = 2;
+            datatype  = NPY_DOUBLE;
         } else
             assert(!"Counting error in allocating output arrays");  // shouldn't happen
-        result_numCols[t] = numCols;
-        // if there is only a single orbit, the output array is 1-dimensional,
-        // otherwise 2-dimensional (numOrbits rows, numCols columns);
-        // but if numCols==1, the dimension of the output array is further reduced by one
-        npy_intp size[2] = {numOrbits, numCols};
+        assert(datatype != NPY_NOTYPE && ndim > 0);
+
+        // if there is only a single orbit, the leftmost dimension (numOrbits) is removed,
+        // and the output array has one fewer dimension (if it becomes zero-dimensional,
+        // it will be converted to a scalar at the end, e.g. a single instance of agama.Orbit)
         result_arrays[t] = (PyArrayObject*)( singleOrbit ?
-            PyArray_SimpleNew(1 - (numCols==1), &size[1], datatype) :
-            PyArray_SimpleNew(2 - (numCols==1), size, datatype) );
+            PyArray_SimpleNew(ndim-1, size+1, datatype) :
+            PyArray_SimpleNew(ndim  , size,   datatype) );
         if(!result_arrays[t])
             fail = true;
     }
+
+    // separateTime=true is intended to be the main (and eventually the only) calling convention,
+    // but earlier versions of the code operated only in the opposite regime (separateTime=false).
+    // To prepare the users for the eventual transition to the new API in the case when it would
+    // change the output format, issue a deprecation warning suggesting to turn on this option,
+    // unless the user explicitly set this option to false
+    #define ENDMSG \
+    "(see docstring for details). This will become the default option in a future version. " \
+    "Or add separateTime=False if you want to keep the deprecated format and suppress this warning."
+    if(haveTraj && dtype != NPY_OBJECT && (numOrbits > 1 || numOutputs > 1) &&
+        !separateTime && !separateTime_obj)
+        PyErr_WarnEx(PyExc_FutureWarning, trajSize ?
+            "Consider using separateTime=True, which would enable optimized output storage: "
+            "timestamps for all orbits put into a single 2d numpy array, "
+            "and trajectories - into a single 3d array " ENDMSG :
+            "Consider using separateTime=True: it would not make any difference in this case "
+            "(except rearranging output arrays), but would enable optimized output storage "
+            "when trajsize is the same for all orbits " ENDMSG, 1);
 
     // optionally show a progress bar
     ProgressBar progressBar(numOrbits, "orbit", /*minTotalTime*/ 1.0);
@@ -7927,7 +8114,7 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
                 // plus optionally the trajectory and Lyapunov exponent recording functions
                 for(size_t t=0; t<numTargets; t++) {
                     galaxymodel::StorageNumT* output = static_cast<galaxymodel::StorageNumT*>(
-                        PyArray_DATA(result_arrays[t])) + orb * result_numCols[t];
+                        PyArray_DATA(result_arrays[t])) + orb * targets[t]->numCoefs();
                     orbint.addRuntimeFnc(orbit::PtrRuntimeFnc(
                         new galaxymodel::RuntimeFncTarget(orbint, *targets[t], output)));
                 }
@@ -7939,7 +8126,7 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
                     orbint.addRuntimeFnc(orbit::PtrRuntimeFnc(
                         new orbit::RuntimeTrajectory(orbint, trajStep, traj)));
                 }
-                if(haveLyap || haveDer) {
+                if(haveLyapunov || haveDer) {
                     double trajStep = 0;
                     if(haveDer) {  // implies trajSizes is not empty
                         trajStep = trajSizes[orb]>1 ?
@@ -7947,10 +8134,8 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
                         trajSizes[orb]==1 ? INFINITY :  // store only the last point
                         0;  // store at every integration timestep
                     }
-                    double* outputLyap = haveLyap ?
-                        static_cast<double*>(
-                        PyArray_DATA(result_arrays[numTargets + haveTraj + haveDer])) +
-                        orb * result_numCols[numTargets + haveTraj + haveDer] :
+                    double* outputLyap = haveLyapunov ?
+                        static_cast<double*>(PyArray_DATA(result_arrays[indexLyap])) + orb * 2 :
                         NULL;  // Lyapunov exponent will not be computed if not requested
                     orbint.addRuntimeFnc(orbit::PtrRuntimeFnc(
                         new orbit::RuntimeVariational(orbint, trajStep,
@@ -7958,7 +8143,8 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
                 }
 
                 // integrate the orbit
-                orbint.init(initCond[orb], timestart[orb]);
+                coord::PosVelCar initCond = convertPosVel(ic_arr, orb);
+                orbint.init(initCond, timestart[orb]);
                 orbint.run(timetotal[orb]);
                 // finalize the output of runtime functions - they are destroyed along with orbint,
                 // performing any necessary procedures before going out of scope
@@ -7971,39 +8157,81 @@ PyObject* orbit(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
 
             // convert the units for matrices produced by targets
             for(size_t t=0; t<numTargets; t++) {
+                npy_intp numCoefs = targets[t]->numCoefs();
                 galaxymodel::StorageNumT mult = conv->massUnit / unitConversionFactors[t];
                 galaxymodel::StorageNumT* output = static_cast<galaxymodel::StorageNumT*>(
-                    PyArray_DATA(result_arrays[t])) + orb * result_numCols[t];
-                for(npy_intp index=0; index<result_numCols[t]; index++)
+                    PyArray_DATA(result_arrays[t])) + orb * numCoefs;
+                for(npy_intp index=0; index<numCoefs; index++)
                     output[index] *= mult;
             }
 
-            // if the trajectory was recorded, store it in the corresponding item of the output tuple
+            // if the trajectory was recorded, store it in the corresponding element(s) of result_arrays
             if(haveTraj) {
-                // pointer to the beginning of storage for the given orbit (one or two PyObject* items)
-                PyObject** output = static_cast<PyObject**>(
-                    PyArray_DATA(result_arrays[numTargets])) +
-                    orb * result_numCols[numTargets];
-                // store the orbit in the output array in the form depending on dtype
-                if(!createOrbit(dtype, traj, Omega, /*outputTime*/true, /*normFactor*/1, output))
-                    fail = true;
+                if(dtype == NPY_OBJECT) {
+                    // create a new agama.Orbit instance and put it into result_arrays[indexTraj][orb]
+                    PyObject* orbitObject = createOrbitObject(traj, Omega, /*normFactor*/1);
+                    if(orbitObject)
+                        static_cast<PyObject**>(PyArray_DATA(result_arrays[indexTraj]))[orb] = orbitObject;
+                    else
+                        fail = true;
+                } else {  // dtype != object
+                    if(separateTime && trajSize) {
+                        // output arrays for timestamps and trajectories are already pre-allocated
+                        storeOrbitArrays(traj, dtype, /*normFactor*/ 1, trajSize,
+                            static_cast<double*>(PyArray_DATA(result_arrays[indexTime])) +
+                                orb * trajSize,
+                            static_cast<char*>(PyArray_DATA(result_arrays[indexTraj])) +
+                                orb * trajSize * sizeofPhaseSpace);
+                    } else {
+                        // depending on separateTime, the two pointers for timestamps and trajectory
+                        // are in the same or in different elements of result_arrays
+                        PyObject** outputTimeArray = separateTime ?
+                            static_cast<PyObject**>(PyArray_DATA(result_arrays[indexTime])) + orb :
+                            static_cast<PyObject**>(PyArray_DATA(result_arrays[indexTraj])) + orb * 2;
+                        PyObject** outputTrajArray =
+                            static_cast<PyObject**>(PyArray_DATA(result_arrays[indexTraj])) +
+                                (separateTime ? orb : orb * 2 + 1);
+                        if( allocOrbitArrays(traj, dtype, /*output*/ outputTimeArray, outputTrajArray)) {
+                            storeOrbitArrays(traj, dtype, /*normFactor*/ 1, traj.size(),
+                                static_cast<double*>(PyArray_DATA((PyArrayObject*)(*outputTimeArray))),
+                                PyArray_DATA((PyArrayObject*)(*outputTrajArray)));
+                        } else
+                            fail = true;
+                    }
+                }
             }
 
             // if deviation vectors were recorded, store them in the corresponding item of the output
             if(haveDer) {
-                // pointer to the beginning of storage for the given orbit (six PyObject* items)
-                PyObject** output = static_cast<PyObject**>(
-                    PyArray_DATA(result_arrays[numTargets + haveTraj])) +
-                    orb * result_numCols[numTargets + haveTraj];
-                // store the deviation vectors in the output array in the form depending on dtype
-                for(int vec=0; vec<6; vec++, output++) {
+                for(int vec=0; vec<6; vec++) {
                     // since the deviation vectors are components of the Jacobian of mapping
                     // between the initial conditions and the current point on the orbit,
                     // their dimensions should be scaled by position (first 3 vectors) or velocity
                     double normFactor = vec<3 ? conv->lengthUnit : conv->velocityUnit;
-                    if(!createOrbit(dtype, deviationVectors[vec], Omega,
-                        /*outputTime*/false, normFactor, output))
-                        fail = true;
+                    if(dtype != NPY_OBJECT && trajSize) {
+                        // store dev.vectors in the single big pre-allocated array
+                        storeOrbitArrays(deviationVectors[vec], dtype, normFactor, trajSize,
+                            /*no timestamps*/ NULL,
+                            static_cast<char*>(PyArray_DATA(result_arrays[indexDer])) +
+                            (orb * 6 + vec) * trajSize * sizeofPhaseSpace);  // offset in bytes
+                    } else {
+                        // pointer to the beginning of storage for the given orbit (six PyObject* items)
+                        PyObject** output = 
+                            static_cast<PyObject**>(PyArray_DATA(result_arrays[indexDer])) +
+                            orb * 6;
+                        if(dtype == NPY_OBJECT) {
+                            output[vec] = createOrbitObject(deviationVectors[vec], Omega, normFactor);
+                        } else if(dtype != NPY_OBJECT && !trajSize) {
+                            if( allocOrbitArrays(deviationVectors[vec], dtype, NULL, output + vec)) {
+                                storeOrbitArrays(deviationVectors[vec], dtype, normFactor, traj.size(),
+                                    /*no timestamps*/ NULL,
+                                    PyArray_DATA((PyArrayObject*)(output[vec])));
+                             }
+                        } else
+                            assert(!"logic error in storing dev.vectors");  // shouldn't happen
+                        if(output[vec] == NULL)
+                            fail = true;
+                    }
                 }
             }
 
@@ -8143,13 +8371,13 @@ PyObject* ghMoments(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
 
     // matrix of B-spline amplitudes of LOSVD in each aperture (columns)
     // for each element of the model (e.g. an orbit) (rows)
-    PyArrayObject *mat_arr = mat_obj?
-        (PyArrayObject*) PyArray_FROM_OTF(mat_obj, STORAGE_NUM_T, NPY_ARRAY_FORCECAST) : NULL;
+    PyArrayObjectRef mat_arr(mat_obj ?
+        (PyArrayObject*) PyArray_FROM_OTF(mat_obj, STORAGE_NUM_T, NPY_ARRAY_FORCECAST) :
+        NULL);
     npy_intp numApertures = -1;
     if(mat_arr && (PyArray_NDIM(mat_arr) == 1 || PyArray_NDIM(mat_arr) == 2))
         numApertures = PyArray_DIM(mat_arr, PyArray_NDIM(mat_arr)-1) / numBasisFnc;
     if(!mat_arr || numApertures * numBasisFnc != PyArray_DIM(mat_arr, PyArray_NDIM(mat_arr)-1)) {
-        Py_XDECREF(mat_arr);
         PyErr_SetString(PyExc_ValueError, ("Argument 'matrix' should be a 1d array "
             "of length numApertures * numBasisFnc (the latter is " + utils::toString(numBasisFnc) +
             " for the provided gridv and degree), or a 2d array with this number of columns").c_str());
@@ -8159,12 +8387,12 @@ PyObject* ghMoments(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
     npy_intp numComponents = ndim==1 ? 1 : PyArray_DIM(mat_arr, 0);
 
     // parameters of Gauss-Hermite expansion(s), if provided
-    PyArrayObject *gh_arr = gh_obj? (PyArrayObject*) PyArray_FROM_OTF(gh_obj, NPY_DOUBLE, 0) : NULL;
+    PyArrayObjectRef gh_arr(gh_obj ?
+        (PyArrayObject*) PyArray_FROM_OTF(gh_obj, NPY_DOUBLE, NPY_ARRAY_ALIGNED) :
+        NULL);
     if( gh_obj != NULL && (gh_arr == NULL || PyArray_NDIM(gh_arr) != 2 ||
         PyArray_DIM(gh_arr, 0) != numApertures || PyArray_DIM(gh_arr, 1) != 3))
     {
-        Py_XDECREF(gh_arr);
-        Py_DECREF(mat_arr);
         PyErr_SetString(PyExc_ValueError,
             "Argument 'ghbasis', if provided, should be a 2d array with 3 columns: "
             "amplitude,center,width, and the number of rows equal to the number of apertures");
@@ -8174,11 +8402,8 @@ PyObject* ghMoments(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
     // prepare the output array of Gauss-Hermite moments (and possibly the parameters of GH expansion)
     npy_intp size[2] = {numComponents, numApertures * (gh_arr ? ghorder+1 : ghorder+4)};
     PyObject* output_arr = PyArray_SimpleNew(ndim, &size[2-ndim], STORAGE_NUM_T);
-    if(!output_arr) {
-        Py_XDECREF(gh_arr);
-        Py_DECREF(mat_arr);
+    if(!output_arr)
         return NULL;
-    }
 
     volatile bool fail = false;
     std::string errorMessage;
@@ -8283,8 +8508,6 @@ PyObject* ghMoments(PyObject* /*self*/, PyObject* args, PyObject* namedArgs)
             }
         }
     }
-    Py_XDECREF(gh_arr);
-    Py_DECREF(mat_arr);
     if(fail) {
         raisePythonException(errorMessage);
         Py_DECREF(output_arr);
@@ -8616,19 +8839,20 @@ public:
         PyAcquireGIL lock;
         bool typeerror   = false;
         npy_intp dims[]  = { (npy_intp)npoints, nvars};
-        PyObject* args   = PyArray_SimpleNewFromData(2, dims, NPY_DOUBLE, const_cast<double*>(vars));
-        PyObject* result = PyObject_CallFunctionObjArgs(fnc, args, NULL);
-        Py_DECREF(args);
+        PyObjectRef result(PyObject_CallFunctionObjArgs(fnc,
+            /*args*/ (PyObject*)PyObjectRef(
+                PyArray_SimpleNewFromData(2, dims, NPY_DOUBLE, const_cast<double*>(vars))),
+            /*end args*/ NULL));
         if(result == NULL) {
             if(PyErr_Occurred() && PyErr_ExceptionMatches(PyExc_KeyboardInterrupt))
                 throw std::runtime_error(utils::CtrlBreakHandler::message());
             else
                 throw std::runtime_error("Exception occurred inside integrand");
         } else if(PyArray_Check(result) &&
-            PyArray_NDIM((PyArrayObject*)result) == 1 &&
-            PyArray_DIM ((PyArrayObject*)result, 0) == (npy_intp)npoints)
+            PyArray_NDIM((PyArrayObject*)(void*)result) == 1 &&
+            PyArray_DIM ((PyArrayObject*)(void*)result, 0) == (npy_intp)npoints)
         {
-            int type = PyArray_TYPE((PyArrayObject*) result);
+            int type = PyArray_TYPE((PyArrayObject*)(void*)result);
             for(size_t p=0; p<npoints; p++) {
                 switch(type) {
                     case NPY_DOUBLE: values[p] = pyArrayElem<double>(result, p); break;
@@ -8642,7 +8866,6 @@ public:
             values[0] = PyFloat_AsDouble(result);
         else
             typeerror = true;
-        Py_XDECREF(result);
         if(typeerror) {
             PyErr_SetString(PyExc_TypeError, "Invalid data type returned from user-defined function");
             throw std::runtime_error("Invalid data type returned from user-defined function");
@@ -8683,11 +8906,9 @@ bool parseLowerUpperBounds(PyObject* lower_obj, PyObject* upper_obj,
     }
     // if the first parameter is not the number of dimensions, then it must be the lower boundary,
     // and the second one must be the upper boundary
-    PyArrayObject *lower_arr = (PyArrayObject*) PyArray_FROM_OTF(lower_obj, NPY_DOUBLE, 0);
+    PyArrayObjectRef lower_arr((PyArrayObject*) PyArray_FROM_OTF(lower_obj, NPY_DOUBLE, NPY_ARRAY_ALIGNED));
     if(lower_arr == NULL || PyArray_NDIM(lower_arr) != 1) {
-        Py_XDECREF(lower_arr);
-        PyErr_SetString(PyExc_TypeError,
-            "Argument 'lower' does not contain a valid array");
+        PyErr_SetString(PyExc_TypeError, "Argument 'lower' does not contain a valid array");
         return false;
     }
     ndim = PyArray_DIM(lower_arr, 0);
@@ -8695,11 +8916,9 @@ bool parseLowerUpperBounds(PyObject* lower_obj, PyObject* upper_obj,
         PyErr_SetString(PyExc_TypeError, "Must provide both 'lower' and 'upper' arguments if both are arrays");
         return false;
     }
-    PyArrayObject *upper_arr = (PyArrayObject*) PyArray_FROM_OTF(upper_obj, NPY_DOUBLE, 0);
+    PyArrayObjectRef upper_arr((PyArrayObject*) PyArray_FROM_OTF(upper_obj, NPY_DOUBLE, NPY_ARRAY_ALIGNED));
     if(upper_arr == NULL || PyArray_NDIM(upper_arr) != 1 || PyArray_DIM(upper_arr, 0) != ndim) {
-        Py_XDECREF(upper_arr);
-        PyErr_Format(PyExc_TypeError,
-            "Argument 'upper' does not contain a valid array of length %i", ndim);
+        PyErr_Format(PyExc_TypeError, "Argument 'upper' does not contain a valid array of length %i", ndim);
         return false;
     }
     xlow.resize(ndim);
@@ -8708,8 +8927,6 @@ bool parseLowerUpperBounds(PyObject* lower_obj, PyObject* upper_obj,
         xlow[d] = pyArrayElem<double>(lower_arr, d);
         xupp[d] = pyArrayElem<double>(upper_arr, d);
     }
-    Py_DECREF(lower_arr);
-    Py_DECREF(upper_arr);
     return true;
 }
 

@@ -367,24 +367,6 @@ BandMatrix<double> computeOverlapMatrix(const std::vector<double> &knots)
     return computeOverlapMatrix<N>(knots, numBasisFnc, GLORDER, bsplineDerivs<N, D>);
 }
 
-/** compute the coefficients c of a polynomial of degree N from its values at N+1 points:
-    P(x) = c_0 + c_1 x + c_2 x^2 + ... + c_N x^N;  P(x_i) = y_i, i=0..N
-    Adapted from the implementation of the algorithm of Bjorck & Pereyra (1970) by John Burkardt.
-    NB: the alternative version given in Numerical Recipes has *much* worse accuracy!
-*/
-template<int N>
-void vandermonde(/*input*/ const double x[], const double y[], /*output*/ double c[])
-{
-    for(int i=0; i<=N; i++)
-        c[i] = y[i];
-    for(int i=0; i<N; i++)
-        for(int j=N; j>i; j--)
-            c[j] = (c[j] - c[j-1]) / (x[j] - x[j-i-1]);
-    for(int i=N-1; i>=0; i--)
-        for(int j=i; j<N; j++)
-            c[j] -= x[i] * c[j+1];
-}
-
 inline bool swapIfNeeded(double& x1, double& x2)
 {
     if(x1 > x2) {
@@ -811,7 +793,7 @@ double integratePiecewise(const BaseInterpolator1d& S, const IFunctionIntegral& 
             v[k] = S(yk);
         }
         // (2) determine the coefficients c_n in front of each monomial t^n
-        vandermonde<N>(t, v, c);
+        vandermonde(N, t, v, c);
         // (3) for each monomial, compute the integral  c_n F(t) t^n,
         // reusing the cached values for n=0
         double t1 = CONV ? x-y2 : std::max(x1, y1), t2 = CONV ? x-y1 : std::min(x2, y2);
@@ -2065,7 +2047,7 @@ void FiniteElement1d<N>::addPointConv(const double x, double mult, const IFuncti
             }
             // obtain the coefficients of the polynomial, given its values at these N+1 points
             double c[N+1];
-            vandermonde<N>(/*input*/ z, v, /*output*/ c);
+            vandermonde(N, /*input*/ z, v, /*output*/ c);
             // obtain the integrals of the kernel times each monomial term z^n over this segment
             double integr = 0;
             for(int n=0; n<=N; n++)
@@ -3697,6 +3679,7 @@ private:
     const unsigned int numBasisFnc;   ///< shortcut for the number of B-splines (equal to numNodes)
     const unsigned int numAmpl;       ///< the number of amplitudes that may be varied (numBasisFnc-1)
     const ptrdiff_t numData;          ///< number of sample points
+    ptrdiff_t numDataUsed;            ///< number of actually used sample points (with nonzero weights)
     const FitOptions options;         ///< whether the definition interval extends to +-inf
     static const int GLORDER = 8;     ///< order of GL quadrature for computing the normalization
     std::vector<double> Vbasis;       ///< basis likelihoods: V_k = \sum_i w_i B_k(x_i)
@@ -3720,6 +3703,7 @@ SplineLogDensityFitter<N>::SplineLogDensityFitter(
     numBasisFnc(numNodes),
     numAmpl(numBasisFnc - 1),
     numData(xvalues.size()),
+    numDataUsed(0),
     options(_options),
     params(_params),
     sumWeights(0),
@@ -3740,6 +3724,25 @@ SplineLogDensityFitter<N>::SplineLogDensityFitter(
     checkFiniteAndMonotonic(grid, "splineLogDensity", "x");
     double xmin = grid[0], xmax = grid[numNodes-1];
 
+    // quick scan to analyze the weights
+    double minWeight = INFINITY;
+    double avgx = 0, avgx2 = 0;
+    for(ptrdiff_t p=0; p<numData; p++) {
+        double xval = xvalues[p], weight = weights[p];
+        if(!(weight >= 0))
+            throw std::invalid_argument("splineLogDensity: sample weights must be non-negative");
+        // if the interval is (semi-)finite, samples beyond its boundaries are ignored
+        if( (xval < xmin && !infLeft)  ||
+            (xval > xmax && !infRight) ||
+            !isFinite(xval) || weight == 0)
+            continue;
+        numDataUsed++;
+        sumWeights += weight;
+        avgx       += weight * xval;
+        avgx2      += weight * pow_2(xval);
+        minWeight   = std::min(minWeight, weight);
+    }
+
     // prepare the roughness penalty matrix
     // (integrals over products of certain derivatives of basis functions)
     if(N==3) {
@@ -3755,31 +3758,13 @@ SplineLogDensityFitter<N>::SplineLogDensityFitter(
         // hence the integrals of  [B^(K)]^2  are proportional to  (xmax-xmin)^(1-2K);
         // additional balancing factors make the characteristic value of smoothing parameter 'lambda'
         // roughly independent of the number of data points and of the use of 2nd vs 3rd deriv
-        double norm = pow( xmax-xmin, der3 ? 5 : 3) / numData * (der3 ? 1./numNodes : 1);
+        double norm = pow( xmax-xmin, der3 ? 5 : 3) / numDataUsed * (der3 ? 1./numNodes : 1);
         blas_dmul(norm, roughnessMatrix);
     } else {
         assert(N==1);
         // in this case, the penalty matrix contains integrals of 1st derivatives
         roughnessMatrix = Matrix<double>(computeOverlapMatrix<1,1>(grid));
-        blas_dmul((xmax-xmin) * numNodes / numData, roughnessMatrix);
-    }
-
-    // quick scan to analyze the weights
-    double minWeight = INFINITY;
-    double avgx = 0, avgx2 = 0;
-    for(ptrdiff_t p=0; p<numData; p++) {
-        double xval = xvalues[p], weight = weights[p];
-        if(!(weight >= 0))
-            throw std::invalid_argument("splineLogDensity: sample weights must be non-negative");
-        // if the interval is (semi-)finite, samples beyond its boundaries are ignored
-        if( (xval < xmin && !infLeft)  ||
-            (xval > xmax && !infRight) ||
-            !isFinite(xval) || weight == 0)
-            continue;
-        sumWeights += weight;
-        avgx       += weight * xval;
-        avgx2      += weight * pow_2(xval);
-        minWeight   = std::min(minWeight, weight);
+        blas_dmul((xmax-xmin) * numNodes / numDataUsed, roughnessMatrix);
     }
 
     // sanity check
@@ -3914,7 +3899,7 @@ double SplineLogDensityFitter<N>::logLrms(const std::vector<double>& ampl) const
     assert(ampl.size() == numAmpl);
     double GdG0[2];
     logG(&ampl[0], NULL, NULL, GdG0);
-    double rms = sumWeights * sqrt((GdG0[1] - pow_2(GdG0[0])) / numData);
+    double rms = sumWeights * sqrt((GdG0[1] - pow_2(GdG0[0])) / numDataUsed);
     FILTERMSG(utils::VL_VERBOSE, "splineLogDensity",
         "Expected log L=" + utils::toString(
             sumWeights * (GdG0[0] + log(sumWeights) - logG(&ampl[0]))) +  // average logL
@@ -4157,8 +4142,8 @@ private:
         double logL   = fitter.logL(result);
         double logLcv = fitter.logLcv(result);
         FILTERMSG(utils::VL_VERBOSE, "splineLogDensity",
-            "lambda="+utils::toString(params.lambda)+", #iter="+utils::toString(numIter)+
-            ", logL= "+utils::toString(logL)+", CV="+utils::toString(logLcv)+
+            "lambda=" + utils::toString(params.lambda) + ", #iter=" + utils::toString(numIter) +
+            ", logL=" + utils::toString(logL, 12) + ", CV=" + utils::toString(logLcv, 12) +
             (!converged ? " did not converge" : params.best < logLcv ? " improved" : ""));
         if(useCV) {  // we are searching for the highest cross-validation score
             if( params.best < logLcv && converged) {

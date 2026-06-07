@@ -94,8 +94,8 @@ def getLyapunovExponent(times, logDeviationVector, orbitalPeriod, ax, color):
 
 def onclick(event):
     which = numpy.where(use)[0][event.ind[0]]
-    (time,traj), devvec, (lyap,tch) = agama.orbit(potential=pot, ic=ic[which], time=numPeriods*Torb[which],
-        trajsize=0, der=True, lyapunov=True, dtype=float)
+    time, traj, devvec, (lyap,tch) = agama.orbit(potential=pot, ic=ic[which], time=numPeriods*Torb[which],
+        trajsize=0, der=True, lyapunov=True, dtype=float, separateTime=True)
     time = time[1:]  # exclude 0th point (initial conditions)
     devvec = numpy.dstack(devvec)[1:]  # shape: len(times) * 6 (phase-space dimension) *  6 (num of vectors)
     # construct a linear superposition of six dev.vectors, equivalent to a fiducial vector

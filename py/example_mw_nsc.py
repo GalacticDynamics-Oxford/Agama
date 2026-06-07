@@ -2,7 +2,7 @@
 '''
 Construct a self-consistent DF-based model of the Milky Way nuclear star cluster (NSC)
 embedded into the nuclear stellar disk (NSD) and with a supermassive black hole at the center,
-as described in Vasiliev+2026 (ApJ, in press; arXiv:2603.29502).
+as described in Vasiliev et al. 2026 (ApJ, 1002, 71).
 When this script is run for the first time, it creates the model described by the DF parameters
 using the iterative self-consistent method, stores its potential and density profiles into files,
 constructs 3-dimensional interpolators for the velocity distribution functions (VDFs) across

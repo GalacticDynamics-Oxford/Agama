@@ -43,10 +43,10 @@ public:
 
     /// number of values recorded internally for each element of the additive model
     /// (orbit or DF component), i.e., is the size of the intermediate datacube;
-    /// needs not be the same as the number of output coefficients numValues()
+    /// needs not be the same as the number of output coefficients numCoefs()
     virtual unsigned int numValues() const = 0;
 
-    /// number of values (coefficients) stored for each component of the additive model
+    /// number of output coefficients stored for each component of the additive model at the end
     virtual unsigned int numCoefs() const { return numValues(); }  //  (default, may be overriden)
 
     /// allocate an empty matrix for internal storage of the datacube;
@@ -55,7 +55,7 @@ public:
         return math::Matrix<double>(1, numValues(), 0.);
     }
 
-    /** convert the intermediate datacube into array of output values;
+    /** convert the intermediate datacube into array of output coefficients;
         \param[in] datacube  is the matrix allocated by newDatacube() and filled by repeated calls
         to addPoint();
         it is allowed to be modified inside this routine, but is supposed to be discarded afterwards.

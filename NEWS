@@ -1,6 +1,10 @@
 This file lists the most important updates in Agama (in reverse chronological order);
 breaking changes in API are listed at the end.
 
+May 2026:
+Optimized integration of multiple orbits in Python and computation of Evolving
+BasisSet potentials.
+
 September 2025:
 Improved the accuracy of N-dimensional sampling (at the expense of a moderate
 increase in computational cost) and added several options for its output.
@@ -148,6 +152,13 @@ Some of this functionality is not yet ported to Agama.
 
 -----------
 API Changes
+
+May 2026:
+[Python] updated the interface for the orbit() routine to enable optimized storage of
+output matrices when separateTime=True and all orbits have the same length.
+Enabled construction of Evolving potentials directly from Python.
+Removed the option of using trajectories represented by matrices in sampleOrbitLibrary
+(now it only works with Orbit interpolators).
 
 September 2025:
 [C++,Python] changed the interface for sampleNdim and related routines, adding several

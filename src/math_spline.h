@@ -114,6 +114,9 @@ public:
     /** return the upper end of definition interval */
     double xmax() const { return xval.empty() ? NAN : xval.back(); }
 
+    /** return the (maximum) polynomial degree of the interpolated function on each grid segment */
+    virtual int degree() const = 0;
+
     /** return the integral of the interpolator function times x^n on the interval [x1..x2];
         the interpolator is set to zero outside the interval xmin..xmax.
         Implemented in the derived classes.
@@ -163,6 +166,8 @@ public:
     LinearInterpolator(const std::vector<double>& xvalues, const std::vector<double>& fvalues);
 
     using BaseInterpolator1d::evalDeriv;
+
+    virtual int degree() const { return 1; }
 
     /** compute the value of interpolator and optionally its derivatives at point x; if the input
         location is outside the definition interval, a linear extrapolation is performed.
@@ -252,6 +257,8 @@ public:
 
     using BaseInterpolator1d::evalDeriv;
 
+    virtual int degree() const { return 3; }
+
     /** compute the value of spline and optionally its derivatives at point x;
         if the input location is outside the definition interval, a linear extrapolation is performed.
     */
@@ -335,6 +342,8 @@ public:
         const std::vector<double>& fderivs, const std::vector<double>& fderivs2);
 
     using BaseInterpolator1d::evalDeriv;
+
+    virtual int degree() const { return 5; }
 
     /** compute the value of spline and optionally its derivatives at point x;
         if the input location is outside the definition interval, a linear extrapolation is performed.
@@ -441,6 +450,8 @@ public:
     BsplineWrapper(const std::vector<double>& xval, const std::vector<double>& ampl);
 
     using BaseInterpolator1d::evalDeriv;
+
+    virtual int degree() const { return N; }
 
     /** compute the value of B-spline and optionally its derivatives at point x;
         if the point is outside the definition interval, return NaN (no extrapolation).

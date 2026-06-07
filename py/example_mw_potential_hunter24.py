@@ -21,7 +21,7 @@ See also example_mw_potential_khalil25.py for another non-axisymmetric potential
 """
 import agama, numpy, matplotlib.pyplot as plt, scipy.special
 from example_mw_bar_potential import makeBarDensity
-
+numpy.seterr(all='ignore')  # disable overflow warnings
 agama.setUnits(length=1, mass=1, velocity=1)  # 1 kpc, 1 Msun, 1 km/s
 filename_full     = 'MWPotentialHunter24_full.ini'
 filename_axi      = 'MWPotentialHunter24_axi.ini'
@@ -220,7 +220,7 @@ ic_rot = numpy.column_stack([
     ic[:,4] * cosa - ic[:,3] * sina,
     ic[:,5],
 ])
-times, orbits = agama.orbit(potential=pot_full, ic=ic_rot, time=time, trajsize=trajsize, Omega=Omega_bar).T
+times, orbits = agama.orbit(potential=pot_full, ic=ic_rot, time=time, trajsize=trajsize, Omega=Omega_bar, separateTime=True)
 for i in range(numorbits):
     ax[1].plot(
         orbits[i][:,0] * cosa - orbits[i][:,1] * sina,  # rotate back by the same angle
@@ -231,7 +231,7 @@ for i in range(numorbits):
 # but change the orientation of the potential (keeping it fixed at angle_bar, *not* rotating with time);
 # orbit integration is still carried out in the frame corotating with the bar.
 pot_rotated = agama.Potential(potential=pot_full, rotation=angle_bar)
-times, orbits = agama.orbit(potential=pot_rotated, ic=ic, time=time, trajsize=trajsize, Omega=Omega_bar).T
+times, orbits = agama.orbit(potential=pot_rotated, ic=ic, time=time, trajsize=trajsize, Omega=Omega_bar, separateTime=True)
 for i in range(numorbits):
     ax[1].plot(orbits[i][:,0], orbits[i][:,1], color=colors[i], lw=0.5, dashes=[4,2])
 
@@ -241,7 +241,7 @@ for i in range(numorbits):
 # and its orientation at t=0 is already set to angle_bar.
 # This option is more general than the first two, since it can be used with a more complicated potential
 # pot_spiral, which has two components rotating with different pattern speeds.
-times, orbits = agama.orbit(potential=pot_rotating, ic=ic, time=time, trajsize=trajsize).T
+times, orbits = agama.orbit(potential=pot_rotating, ic=ic, time=time, trajsize=trajsize, separateTime=True)
 for i in range(numorbits):
     sina, cosa = numpy.sin(times[i] * Omega_bar), numpy.cos(times[i] * Omega_bar)
     ax[1].plot(

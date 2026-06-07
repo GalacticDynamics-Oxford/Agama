@@ -490,10 +490,7 @@ std::vector<std::string> splitString(const std::string& str, const std::string& 
     return result;
 }
 
-bool endsWithStr(const std::string& str, const std::string& end)
-{
-    return end.size()<=str.size() && str.find(end, str.size()-end.size())!=str.npos;
-}
+inline char tolower(char c) { return c>=65 && c<=90 ? c+32 : c; }  // ASCII characters only!
 
 bool stringsEqual(const std::string& str1, const std::string& str2)
 {
@@ -501,7 +498,7 @@ bool stringsEqual(const std::string& str1, const std::string& str2)
     if(len!=str2.size())
         return false;
     for(std::string::size_type i=0; i<len; i++)
-        if(tolower((unsigned char)str1[i]) != tolower((unsigned char)str2[i]))
+        if(tolower(str1[i]) != tolower(str2[i]))
             return false;
     return true;
 }
@@ -510,10 +507,24 @@ bool stringsEqual(const std::string& str1, const char* str2)
 {
     if(str2==NULL)
         return false;
-    for(std::string::size_type i=0; i<str1.size(); i++)
-        if(str2[i]==0 || tolower((unsigned char)str1[i]) != tolower((unsigned char)str2[i]))
+    std::string::size_type len=str1.size();
+    for(std::string::size_type i=0; i<len; i++)
+        if(str2[i]=='\0' || tolower(str1[i]) != tolower(str2[i]))
             return false;
-    return str2[str1.size()]==0;  // ensure that the 2nd string length is the same as the 1st
+    return str2[len]=='\0';  // ensure that the 2nd string length is the same as the 1st
+}
+
+bool stringsEqual(const char* str1, const char* str2)
+{
+    if(str1==NULL || str2==NULL)
+        return false;
+    for(size_t i=0; i<65536; i++) {
+        if(tolower(str1[i]) != tolower(str2[i]))
+            return false;  // this also happens when one string is shorter than the other
+        if(str1[i] == '\0')
+            return true;
+    }
+    return false;  // should not reach here
 }
 
 }  // namespace

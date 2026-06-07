@@ -64,22 +64,22 @@ def test(gpot, Gpot, Apot):
     t2 = time.time()
     g_orb_A = Apot.integrate_orbit(ic.T, dt=10, n_steps=100, Integrator=gala.integrate.DOPRI853Integrator, Integrator_kwargs=dict(rtol=1e-8,atol=0))
     t3 = time.time()
-    a_orb_G = numpy.dstack(agama.orbit(potential=Gpot, ic=ic, time=1000, trajsize=101, dtype=float)[:,1])
+    a_orb_G = agama.orbit(potential=Gpot, ic=ic, time=1000, trajsize=101, dtype=float, separateTime=True)[1]
     t4 = time.time()
-    a_orb_A = numpy.dstack(agama.orbit(potential=Apot, ic=ic, time=1000, trajsize=101, dtype=float)[:,1])
+    a_orb_A = agama.orbit(potential=Apot, ic=ic, time=1000, trajsize=101, dtype=float, separateTime=True)[1]
     t5 = time.time()
     print("gala  orbit integration for g (native): %.4g s" % (t1-t0) +
          ", G (wrapper): %.4g s" % (t2-t1) + ", A: %.4g s" % (t3-t2))
     print("agama orbit integration for G: %.4g s" % (t4-t3) + ", A: %.4g s" % (t5-t4))
     deltaEg = numpy.max(abs(g_orb_G.energy()[-1] / g_orb_G.energy()[0] - 1))
-    Eainit  = Apot.potential(a_orb_A[0, 0:3].T) + 0.5*numpy.sum(a_orb_A[0, 3:6]**2, axis=0)
-    Eafinal = Apot.potential(a_orb_A[-1,0:3].T) + 0.5*numpy.sum(a_orb_A[-1,3:6]**2, axis=0)
+    Eainit  = Apot.potential(a_orb_A[:, 0,0:3]) + 0.5*numpy.sum(a_orb_A[:, 0,3:6]**2, axis=1)
+    Eafinal = Apot.potential(a_orb_A[:,-1,0:3]) + 0.5*numpy.sum(a_orb_A[:,-1,3:6]**2, axis=1)
     deltaEa = numpy.max(abs(Eafinal / Eainit - 1))
-    # shape of the output is different: for gala, it is 3 x nsteps x norbits; for agama (dstack'ed) - nsteps x 6 x norbits
+    # shape of the output is different: for gala, it is 3 x nsteps x norbits; for agama - norbits x nsteps x 6
     g_orb_G = g_orb_G.xyz.reshape(3, len(g_orb_G.t), len(ic))
     g_orb_A = g_orb_A.xyz.reshape(3, len(g_orb_A.t), len(ic))
-    a_orb_G = numpy.swapaxes(a_orb_G*lu, 0, 1)[0:3]  # now the shape is 3 x nsteps x norbits
-    a_orb_A = numpy.swapaxes(a_orb_A*lu, 0, 1)[0:3]
+    a_orb_G = numpy.swapaxes(a_orb_G*lu, 0, 2)[0:3]  # now the shape is 3 x nsteps x norbits
+    a_orb_A = numpy.swapaxes(a_orb_A*lu, 0, 2)[0:3]
     maxrad  = numpy.max(numpy.sum(a_orb_A**2, axis=0)**0.5, axis=0)  # normalization factor for relative deviations in position
     print("gala  orbits G vs A: %.3g" % numpy.max(numpy.sum(abs(g_orb_G - g_orb_A), axis=0) / maxrad))
     print("agama orbits G vs A: %.3g" % numpy.max(numpy.sum(abs(a_orb_G - a_orb_A), axis=0) / maxrad))

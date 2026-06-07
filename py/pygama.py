@@ -121,10 +121,14 @@ def makeRotationMatrix(alpha, beta, gamma):
     and the rotated ones -- with the observer; in this case X,Y are the coordinates in
     the image plane: Y axis points up/north, X axis points left(!)/east, and Z axis
     points along the line of sight away from the observer.
-    alpha, beta, gamma are the three Euler rotation angles:
+    alpha, beta, gamma are the three Euler rotation angles (in radians):
     alpha is the rotation in the equatorial plane of the stellar system,
     beta is the inclination angle,
     gamma is the rotation in the sky plane (if gamma=0, the z axis projects onto the Y axis).
+    If xyz and XYZ are column-vectors (or 1d numpy arrays of length 3),
+    and R is the rotation matrix returned by this routine, then  XYZ = R.dot(xyz);
+    however, if xyz and XYZ are 2d arrays of shape (N,3), then one needs to
+    swap the order of multiplication and transpose R:  XYZ = xyz.dot(R.T)
     '''
     sinalpha, sinbeta, singamma = _numpy.sin([alpha, beta, gamma])
     cosalpha, cosbeta, cosgamma = _numpy.cos([alpha, beta, gamma])
@@ -140,6 +144,28 @@ def makeRotationMatrix(alpha, beta, gamma):
           cosbeta ] ])
     result[abs(result)<1e-15] = 0  # round small values like sin(pi) to zero
     return result
+
+
+def getEulerAngles(mat):
+    '''
+    Obtain Euler angles (in radians) from a rotation matrix produced by makeRotationMatrix.
+    The transformation from Euler angles to a rotation matrix is invertible
+    as long as beta is between 0 and pi and the other two angles are between -pi and pi,
+    except for degenerate cases of beta=0 or pi.
+    '''
+    # beta is between 0 and pi; sin(beta) >= 0,
+    # and while beta=arccos(mat[2,2]) is mathematically correct, it has poor accuracy
+    # when beta is close to 0 or pi; the alternative formula with arctan2 works in all cases.
+    beta = _numpy.arctan2((mat[0,2]**2 + mat[1,2]**2)**0.5, mat[2,2])
+    if mat[0,2] == 0 and mat[1,2] == 0 and mat[2,0] == 0 and mat[2,1] == 0:
+        # degenerate case: beta=0 or beta=pi;
+        # in this case we can determine only the sum or the difference of the other two angles
+        alpha = 0.
+        gamma = _numpy.arctan2(mat[0,1], mat[0,0]) * (1 if mat[2,2]>0 else -1)
+    else:
+        gamma = _numpy.arctan2(mat[0,2], mat[1,2])
+        alpha = _numpy.arctan2(mat[2,0],-mat[2,1])
+    return alpha, beta, gamma
 
 
 def makeCelestialRotationMatrix(lon, lat, psi):
@@ -614,29 +640,19 @@ def sampleOrbitLibrary(nbody, orbits, weights, returnIndices=False):
     Construct an N-body snapshot from an orbit library
     Arguments:
       nbody:    the required number of particles in the output snapshot.
-      orbits:   an array of trajectories returned by the `orbit()` routine.
+      orbits:   an array of agama.Orbit instances produced by the `orbit()` routine
+                invoked with dtype=object.
       weights:  an array of orbit weights, returned by the `solveOpt()` routine.
       returnIndices: if True, return the index of the parent orbit for each particle.
-    Returns: a tuple of two elements: the flag indicating success or failure, and the result.
-    In case of success, the result is a tuple of two or three arrays:
-    particle coordinates/velocities (2d Nx6 array), particle masses (1d array of length N),
+    Returns: a tuple of two or three (if returnIndices=True) arrays:
+    positions/velocities (2d array of shape Nx6), particle masses (1d array of length N),
     and optionally the indices of orbits from which particles were drawn (1d array of length N).
-    A failure indicates that some of the orbits, usually with high weights, had fewer points
-    recorded from their trajectories during orbit integration than is needed to represent them
-    in the N-body snapshot. This can only happen when the output of the `orbit()` routine was
-    requested in the form of arrays of regularly sampled points from trajectories.
-    When the output was requested as an array of `Orbit` interpolators, these can produce any
-    desired number of samples from the orbit, so a failure should not occur.
-    In case of failure, the result is a different tuple of two arrays:
-    list of orbit indices which did not have enough trajectory samples (length is anywhere
-    from 1 to N), and corresponding required numbers of samples for each orbit from this list.
     Note that this routine uses `numpy` random number generators, unlike the rest of Agama,
     so the seed is controlled by `numpy.random.seed()` rather than `agama.setRandomSeed()`.
     '''
     nbody = int(nbody)
     if nbody <= 0:
         raise ValueError("Argument 'nbody' must be a positive integer")
-
     # check that orbit weights are correct and their sum is positive
     numOrbits = len(weights)
     if numOrbits <= 0:
@@ -647,54 +663,30 @@ def sampleOrbitLibrary(nbody, orbits, weights, returnIndices=False):
         raise ValueError("The sum of weights must be positive")
     if not (_numpy.min(weights) >= 0):
         raise ValueError("Weights must be non-negative")
-
-    # check that the trajectories are provided: it should be an array with PyObjects as elements
-    # (they must be arrays themselves, which will be checked later); the shape of this array should be
-    # either numOrbits or numOrbits x 2 (the latter variant is returned by the `orbit()` routine).
-    if len(orbits.shape) == 2:
-        orbits = orbits[:,1]  # take only the trajectories (1st column), not timestamps (0th column)
-    if orbits.shape != (numOrbits,):
-        raise ValueError("'orbits' must be an array of numpy arrays with the same length as 'weights'")
-    # check the number of available samples from each orbit
-    orbitLengths = _numpy.zeros(numOrbits, int)
-    for iorb, orb in enumerate(orbits):
-        length = len(orb)
-        # an orbit could be an instance of agama.Orbit class, but since it is not exported by the C++ module,
-        # we cannot check its type directly; instead, if it is callable and has a length>1, it is assumed to be
-        # and instance of Orbit that can produce an unlimited number of samples
-        if callable(orb) and length>1: length = nbody
-        orbitLengths[iorb] = length
+    # check that the trajectories are provided correctly (although we cannot check the element type,
+    # since the class agama.Orbit is not exported by the module)
+    if not isinstance(orbits, _numpy.ndarray) or orbits.shape != (numOrbits,):
+        raise ValueError("'orbits' must be an array of agama.Orbit instances with the same length as 'weights'")
     # index of first output point for each orbit
     outPointIndex = _numpy.hstack((0, _numpy.round( cumulMass / totalMass * nbody ))).astype(int)
     # number of output points to sample from each orbit
     pointsToSample = outPointIndex[1:] - outPointIndex[:-1]
-    # indices of orbits whose length of recorded trajectory is less than the required number of samples
-    badOrbitIndices = _numpy.where(pointsToSample > orbitLengths)[0]
-    # if this list is not empty, the procedure failed and we return the indices of orbits for reintegration
-    if len(badOrbitIndices) > 0:
-        return False, (badOrbitIndices, pointsToSample[badOrbitIndices])
-    # otherwise scan the array of orbits and sample appropriate number of points from each trajectory
-    dtype = float if callable(orbits[0]) else orbits[0].dtype
-    posvel = _numpy.zeros((nbody, 6), dtype=dtype)
-    for iorb, orb in enumerate(orbits):
-        if pointsToSample[iorb] == 0: continue
-        if callable(orb):
-            # if the orbit is a callable function, it is assumed to be an instance of agama.Orbit class
-            # that can produce any required number of points on the trajectory for the given array of times
-            tmin, tmax = orb[0], orb[-1]   # interval of time spanned by the orbit
-            samples = orb(_numpy.random.random(size=pointsToSample[iorb]) * (tmax-tmin) + tmin)
-        else:
-            # copy a random [non-repeating] selection of points from this orbit into the output array
-            samples = orb[_numpy.random.choice(orbitLengths[iorb], pointsToSample[iorb], replace=False)]
-        posvel[outPointIndex[iorb] : outPointIndex[iorb+1]] = samples
-    # return a success flag and a tuple of posvel, mass, and possibly orbit indices
-    result = (posvel, _numpy.ones(nbody, dtype=dtype) * totalMass / nbody)
+    # scan the array of orbits and sample appropriate number of points from each trajectory
+    posvel = _numpy.zeros((nbody, 6))
     if returnIndices:
         orbitIndices = _numpy.zeros(nbody, dtype=int)
-        for iorb in range(numOrbits):
+    for iorb, orb in enumerate(orbits):
+        if pointsToSample[iorb] == 0: continue
+        tmin, tmax = orb[0], orb[-1]   # interval of time spanned by the orbit
+        samples = orb(_numpy.random.random(size=pointsToSample[iorb]) * (tmax-tmin) + tmin)
+        posvel[outPointIndex[iorb] : outPointIndex[iorb+1]] = samples
+        if returnIndices:
             orbitIndices[outPointIndex[iorb] : outPointIndex[iorb+1]] = iorb
+    # return a tuple of posvel, mass, and possibly orbit indices
+    result = (posvel, _numpy.ones(nbody) * totalMass / nbody)
+    if returnIndices:
         result += (orbitIndices,)
-    return True, result
+    return result
 
 
 ### -------------------

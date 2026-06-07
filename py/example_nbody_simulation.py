@@ -88,7 +88,8 @@ def runRestrictedNbody():
         t_pot = agama.Potential(g_pot,
                 agama.Potential(potential=cpot, center=numpy.column_stack((time_center, orbit_center))))
         # compute the trajectories of all particles moving in the combined potential of the host galaxy and the moving satellite
-        snap = numpy.vstack(agama.orbit(ic=snap, potential=t_pot, time=interval, timestart=time, trajsize=1, accuracy=1e-5, verbose=False)[:,1])
+        snap = agama.orbit(ic=snap, potential=t_pot, time=interval, timestart=time, trajsize=1, accuracy=1e-5,
+            verbose=False, separateTime=True)[1].reshape(-1,6)
         # update the potential of the satellite (using a spherical monopole approximation)
         cpot = agama.Potential(type='multipole', particles=(snap[:,0:3] - orbit_center[(i+1)*num_subint, 0:3], m), symmetry='s')
     filename = 'example_nbody_simulation_last.nemo'

@@ -60,22 +60,11 @@ weights = agama.solveOpt(matrix=(data0.T, data.T), rhs=([mass], rhs),
     rpenl=([numpy.inf], numpy.ones(len(rhs))*numpy.inf),
     xpenq=numpy.ones(len(initcond)) )
 
-#numpy.savetxt('orbits', numpy.column_stack((initcond, weights, inttimes))[numpy.argsort(inttimes)], '%g')
-
-# export an N-body model
-nbody=100000
-status,result = agama.sampleOrbitLibrary(nbody, trajs, weights)
-if not status:
-    # this may occur if there was not enough recorded trajectory points for some high-weight orbits:
-    # in this case their indices and the required numbers of points are returned in the result tuple.
-    # This cannot happen if orbits are represented by interpolator objects rather than pre-recorded arrays.
-    indices,trajsizes = result
-    print("reintegrating %i orbits; max # of sampling points is %i" % (len(indices), max(trajsizes)))
-    trajs[indices] = agama.orbit(potential=pot, ic=initcond[indices], time=inttimes[indices], \
-        trajsize=trajsizes)
-    status,result = agama.sampleOrbitLibrary(nbody,trajs[:,1],weights)
-    if not status: print("Failed to produce output N-body model")
-agama.writeSnapshot("flattened_rotating_model.nemo", result,'n')
+# export an N-body model (the central black hole needs to be added separately as the 0th particle)
+nbody = 100000
+xv, mass = agama.sampleOrbitLibrary(nbody, trajs, weights)  # only stars, not the black hole
+agama.writeSnapshot("example_schwarzschild_flattened_rotating.nemo",
+    (numpy.vstack([[0,0,0,0,0,0], xv]), numpy.hstack([potbh.totalMass(), mass])), 'n')
 
 
 # various diagnostic plots
@@ -99,7 +88,6 @@ ax[0].set_xlabel('mean radius')
 ax[0].set_ylabel('orbit weight')
 
 # plot particle kinematics
-xv = result[0]
 R  = (xv[:,0]**2+xv[:,1]**2)**0.5
 vR = (xv[:,0]*xv[:,3]+xv[:,1]*xv[:,4]) / R
 vt = (xv[:,0]*xv[:,4]-xv[:,1]*xv[:,3]) / R

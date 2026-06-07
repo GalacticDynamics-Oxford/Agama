@@ -160,7 +160,7 @@ def createModel(
         kappa = (-deriv.T[0] - 3*force.T[0]/r)**0.5
         Sigma = diskparams['surfaceDensity'] * numpy.exp(-r / diskparams['scaleRadius'])
         sigmar = sigmar0 * numpy.exp(-r / rsigmar)
-        return sigmar * kappa / Sigma / 3.36
+        return sigmar * kappa / Sigma / 3.36 / agama.G
     r = numpy.logspace(-2, 2, 401)
     sigmar0 *= Qmin / min(toomreQ(r))
 
@@ -245,10 +245,10 @@ def createModel(
         pt1 = (8.0, 0, 1.0)
         pt2 = (1.0, 0, 0.0)
         pt3 = (0.0, 0, 8.0)
-        print("Disk  total mass=%g, rho(R=%g,z=%g)=%g, rho(R=%g,z=%g)=%g" %
-            (densDisk.totalMass(), pt0[0], pt0[2], densDisk.density(pt0), pt1[0], pt1[2], densDisk.density(pt1)))
         print("Bulge total mass=%g, rho(R=%g,z=%g)=%g" %
             (densBulge.totalMass(), pt2[0], pt2[2], densBulge.density(pt2)))
+        print("Disk  total mass=%g, rho(R=%g,z=%g)=%g, rho(R=%g,z=%g)=%g" %
+            (densDisk.totalMass(), pt0[0], pt0[2], densDisk.density(pt0), pt1[0], pt1[2], densDisk.density(pt1)))
         print("Halo  total mass=%g, rho(R=%g,z=%g)=%g, rho(R=%g,z=%g)=%g" %
             (densHalo.totalMass(), pt0[0], pt0[2], densHalo.density(pt0), pt3[0], pt3[2], densHalo.density(pt3)))
         print("Escape speed at origin=%g, total mass=%g" %
@@ -369,7 +369,7 @@ def createModel(
     # ratios of resulting to "expected" (initial) values of 3d and surface density and radial velocity dispersion
     force, deriv = pottotal.eval(xyz, acc=True, der=True)
     kappa = (-deriv[:,0] - 3*force[:,0] / R)**0.5
-    ToomreQ = sigma[:,0,0]**0.5 * kappa / 3.36 / Sigma
+    ToomreQ = sigma[:,0,0]**0.5 * kappa / 3.36 / Sigma / agama.G
     ax[4].plot(R, Sigma  / Sigma0, c='r', label=r'$\Sigma/\Sigma_{\rm init}$')
     ax[4].plot(R, rho[:,0] / rho0, c='b', label=r'$\rho_{z=0} / \rho_{\rm init}$')
     ax[4].plot(R, sigma[:,0,0]**0.5 / (sigmar0 * numpy.exp(-R/rsigmar)), c='g', label=r'$\sigma_r / \sigma_{\rm init}$')
@@ -410,5 +410,5 @@ def createModel(
 # now can create a bunch of models with different properties and see how they evolve
 # (in many cases, develop a bar, but this does not mean the model was not in equilibrium initially)
 
-createModel(fracstars=0.50, fracbulge=0.1, Qmin=2.0, rsigmar=8.0, massrefinement=False)
+createModel(fracstars=0.50, fracbulge=0.1, Qmin=2.0, rsigmar=8.0, massrefinement=True)
 #createModel(fracstars=0.40, fracbulge=0.0, Qmin=1.5, rsigmar=8.0, hdisk=0.2)

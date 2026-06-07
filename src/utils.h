@@ -107,14 +107,11 @@ public:
 */
 std::vector<std::string> splitString(const std::string& src, const std::string& delim);
 
-/// check if a string ends with another string
-bool endsWithStr(const std::string& str, const std::string& end);
-
-/// compare two strings in a case-insensitive way
+/// compare two strings in a case-insensitive way (different specializations for cases
+/// when one or both arguments are either C-style NULL-terminated strings or std::string instances)
 bool stringsEqual(const std::string& str1, const std::string& str2);
-
-/// overloaded routine that compares two strings in a case-insensitive way
 bool stringsEqual(const std::string& str1, const char* str2);
+bool stringsEqual(const char* str1, const char* str2);
 
 
 /** convert a string to a number: initial whitespace is skipped,

@@ -15,8 +15,25 @@ namespace math{
 
 namespace {  // internal
 
-/// relative accuracy in computing the moments of LOSVD (total normalization, mean value and dispersion)
+/// relative accuracy in computing the moments of LOSVD (total normalization, mean value and width)
+/// for the initial guess of the parameters of the Gauss-Hermite expansion
+/// (these are later refined by finding a true best-fit Gaussian approximation to the input LOSVD,
+/// so do not need to be computed very accurately).
 static const double EPSREL_MOMENTS = 1e-3;
+
+/// relative accuracy of finding a best-fit Gaussian for the given function
+static const double EPSREL_GAUSSIAN_FIT = 1e-8;
+
+/** Accuracy parameter for integrating the product f(x) * exp(-x^2) over the entire real axis.
+    When f is a polynomial, this integral can be exactly computed using the Gauss-Hermite
+    quadrature rule, but for a general function f(x) there is another very simple-minded but
+    surprisingly efficient approach: integration nodes are 2N^2+1 equally spaced points
+    -N, ..., -1/N, 0, 1/N, 2/N, ..., N,
+    and the integral is approximated as
+    \f$   \int_{-\infty}^{\infty}  f(x) \exp(-x^2) dx  \approx
+    (1/N) \sum_{i=-N^2}^{N^2}  f(i/N) \exp(-(i/N)^2)   \f$.
+*/
+static const int QUADORDER = 7;  // N=7, i.e. 99 integration nodes
 
 
 /// helper class for computing the integrals of f(x) times 1,x,x^2, using scaled integration variable
@@ -30,13 +47,9 @@ public:
         // input scaled variable z ranges from 0 to 1, and maps to x as follows:
         double z = vars[0], x = exp(1/(1-z) - 1/z), j = x * (1/pow_2(1-z) + 1/pow_2(z));
         double fp = fnc(x), fm = fnc(-x);
-        if((fp==0 && fm==0) || j==INFINITY) {
-            values[0] = values[1] = values[2] = 0;
-        } else {
-            values[0] = (fp + fm) * j;
-            values[1] = (fp - fm) * j * x;
-            values[2] = (fp + fm) * j * x * x;
-        }
+        values[0] = nan2num((fp + fm) * j);
+        values[1] = nan2num((fp - fm) * j * x);
+        values[2] = nan2num((fp + fm) * j * x * x);
     }
 };
 
@@ -46,24 +59,21 @@ public:
 /// f2 = ((\int_{-\infty}^{\infty} f(x) x^2 dx) / f0 - f1^2)^{1/2}  (standard deviation of x)
 /// Note: this routine may fail to find the region of non-zero input function
 /// if it is significantly offset from origin
-std::vector<double> computeClassicMoments(const IFunction& fnc)
+void computeClassicMoments(const IFunction& fnc, /*output*/ double moments[3])
 {
-    double result[3], zlower[1]={0.0}, zupper[1]={+1.0};
+    double zlower[1]={0.0}, zupper[1]={+1.0};
     integrateNdim(MomentsIntegrand(fnc),
-        zlower, zupper, EPSREL_MOMENTS, /*maxNumEval*/1000, /*output*/result);
-    std::vector<double> moments(3);
-    moments[0] = result[0];
-    moments[1] = result[0] != 0 ? result[1] / result[0] : 0;
-    moments[2] = result[0] != 0 ? sqrt(fmax(0, result[2] / result[0] - pow_2(moments[1]))) : 0;
-    return moments;
+        zlower, zupper, EPSREL_MOMENTS, /*maxNumEval*/ 1000, /*output*/ moments);
+    if(moments[0] != 0) {
+        moments[1] /= moments[0];
+        moments[2] = sqrt(fmax(0, moments[2] / moments[0] - pow_2(moments[1])));
+    }
 }
-
 
 /// same as above, but for a function f(x) that is a piecewise-polynomial
 /// (robust w.r.t. shifts from origin, unlike the above function)
-std::vector<double> computeClassicMoments(const BaseInterpolator1d& fnc)
+void computeClassicMoments(const BaseInterpolator1d& fnc, /*output*/ double moments[3])
 {
-    std::vector<double> moments(3);
     for(int m=0; m<=2; m++)
         moments[m] = fnc.integrate(fnc.xmin(), fnc.xmax(), m);
     if(moments[0] != 0) {
@@ -74,22 +84,10 @@ std::vector<double> computeClassicMoments(const BaseInterpolator1d& fnc)
         // To prevent it from becoming very small or even negative, impose the lower limit
         // of std.dev. to be the width of one grid cell near the peak of the function.
         ptrdiff_t ind = std::max((ptrdiff_t)0, std::min((ptrdiff_t)fnc.xvalues().size()-2,
-            math::binSearch(moments[1], &fnc.xvalues()[0], fnc.xvalues().size())));
+            binSearch(moments[1], &fnc.xvalues()[0], fnc.xvalues().size())));
         moments[2] = sqrt(fmax(pow_2(fnc.xvalues()[ind+1]-fnc.xvalues()[ind]), disp));
     }
-    return moments;
 }
-
-/** Accuracy parameter for integrating the product f(x)*exp(-x^2) over the entire real axis.
-    When f is a polynomial, this integral can be exactly computed using the Gauss-Hermite
-    quadrature rule, but for a general function f(x) there is another very simple-minded but
-    surprisingly efficient approach: integration nodes are 2N^2+1 equally spaced points
-    -N, ..., -1/N, 0, 1/N, 2/N, ..., N,
-    and the integral is approximated as
-    \f$   \int_{-\infty}^{\infty}  f(x) \exp(-x^2) dx  \approx
-    (1/N) \sum_{i=-N^2}^{N^2}  f(i/N) \exp(-(i/N)^2)   \f$.
-*/
-static const int QUADORDER = 7;  // N=7, i.e. 99 integration nodes
 
 
 /// compute the array of Hermite polynomials up to and including degree nmax at the given point
@@ -116,7 +114,7 @@ void hermiteArray(const int nmax, const double x, double* result)
 
 
 /// compute the coefficients of GH expansion for an arbitrary function f(x)
-inline std::vector<double> computeGaussHermiteMoments(const IFunction& fnc,
+std::vector<double> computeGaussHermiteMoments(const IFunction& fnc,
     unsigned int order, double ampl, double center, double width)
 {
     std::vector<double> hpoly(order+1);   // temp.storage for Hermite polynomials
@@ -133,26 +131,61 @@ inline std::vector<double> computeGaussHermiteMoments(const IFunction& fnc,
     return result;
 }
 
-
-/// compute the coefficients of GH expansion for a function f(x) that is a piecewise-polynomial
-inline std::vector<double> computeGaussHermiteMoments(const BaseInterpolator1d& fnc,
+/** compute the coefficients of GH expansion for a function f(x) that is a piecewise-polynomial
+    with a maximum degree N on each segment. The expression for the GH moment h_m is
+    \f$  h_m = \sqrt{2} / \Xi  \int_{-\infty}^{\infty}  f(x)  \exp(-y^2/2) H_m(y)  \f$,  where
+    H_m(y)  are Hermite polynomials, y = (x-m)/s  is the scaled variable,
+    m is the center, s is the width, and Xi is the amplidude of the base Gaussian.
+    For obvious reasons, the integration is carried out separately in each segment of the grid
+    of the input interpolator, and since the product of H_m(y) f(x(y)) is a polynomial of degree
+    P = M + N  (where M is the order of GH expansion), the integral on each segment y_i..y_{i+1}
+    can be computed analytically, using the Gaussian.integrate() method that provides the integral
+    of the base Gaussian times y^p.
+    To decompose the polynomial  H_m(y) * f(y * s + m)  into monomials on each segment for each m,
+    we record its values at P+1 equally-spaced points on this segment, and then convert them into
+    \f$  \sum_{p=0}^P  c_p y^p  \f$  using the vandermonde function.
+*/
+std::vector<double> computeGaussHermiteMoments(const BaseInterpolator1d& fnc,
     unsigned int order, double ampl, double center, double width)
 {
     const std::vector<double>& grid = fnc.xvalues();
-    const int NnodesGL = 4;  // number of nodes per segment of the B-spline grid
-    const double *glnodes = GLPOINTS[NnodesGL], *glweights = GLWEIGHTS[NnodesGL];
-    std::vector<double> hpoly(order+1);    // temp.storage for Hermite polynomials
     std::vector<double> result(order+1);
+    const Gaussian gaussian(1.0);        // unit Gaussian in scaled variable y
+    const int P = order + fnc.degree();  // max degree of monomials
+    const double mult = 2*M_SQRTPI / ampl * width;
+    // coordinates of equally-spaced points on the current grid segment (in the scaled variable y)
+    double* ynodes = static_cast<double*>(alloca((P+1) * sizeof(double)));
+    // values of  f(x(y)) * H_m(y)  for all these points and all m<=M Hermite polynomials
+    double* yvalues = static_cast<double*>(alloca((P+1) * (order+1) * sizeof(double)));
+    // values of all Hermite polynomials H_m(y), m<=M, at the current point y
+    double* hpoly = static_cast<double*>(alloca((order+1) * sizeof(double)));
+    // coefficients  c_m  of the decomposition of  f(x(y)) * H_m(y)  into monomials y^p
+    double* monomialCoefs = static_cast<double*>(alloca((P+1) * sizeof(double)));
+    // integrals of  exp(-y^2/2) * y^p  for all p<=P on the current grid segment
+    double* monomialIntegrals = static_cast<double*>(alloca((P+1) * sizeof(double)));
+    // integration is carried out separately on each grid segment of the input interpolator
     for(size_t i=0; i<grid.size()-1; i++) {
-        double x1= grid[i], x2=grid[i+1];  // endpoints of the current grid segment
-        for(int k=0; k<NnodesGL; k++) {
-            double
-            x = glnodes[k] * x2 + (1-glnodes[k]) * x1,  // GL integration node within the segment
-            y = (x-center) / width,
-            mult = M_SQRT2 / ampl * exp(-0.5*y*y) * glweights[k] * (x2-x1) * fnc(x);
-            hermiteArray(order, y, &hpoly[0]);
+        // first, loop over P+1 equally-spaced points on this grid segment, collecting
+        // the values of f(x) and all M+1 Hermite polynomials H_m at each point y_p, 0<=p<=P,
+        // as well as the integrals of  exp(-y^2/2) * y^p  over this segment.
+        for(int p=0; p<=P; p++) {
+            monomialIntegrals[p] = gaussian.integrate(
+                (grid[i] - center) / width, (grid[i+1] - center) / width, p);
+            double x  = grid[i] + (grid[i+1] - grid[i]) * (p+0.5) / (P+1);
+            ynodes[p] = (x-center) / width;
+            double fx = fnc(x);
+            hermiteArray(order, ynodes[p], /*output*/ hpoly);
             for(unsigned int m=0; m<=order; m++)
-                result[m] += mult * hpoly[m];
+                yvalues[m * (P+1) + p] = fx * hpoly[m];
+        }
+        // second, loop over the M+1 Hermite polynomials, determining the coefficients c_m
+        // of the decomposition of  f(x(y)) * H_m(y)  into monomials y^p on this grid segment,
+        // and then collect the contribution of each monomial to the integral for h_m.
+        for(unsigned int m=0; m<=order; m++) {
+            vandermonde(P, ynodes, yvalues + m * (P+1), /*output*/ monomialCoefs);
+            // finally
+            for(int p=0; p<=P; p++)
+                result[m] += mult * monomialCoefs[p] * monomialIntegrals[p];
         }
     }
     return result;
@@ -161,41 +194,71 @@ inline std::vector<double> computeGaussHermiteMoments(const BaseInterpolator1d& 
 
 /** compute the coefs of GH expansion for an array of B-spline basis functions of degree N.
     A function f(x) represented as a B-spline expansion with an array of amplitudes A_k
-    f(x) = \sum_{j=1}^J A_j B_j(x)   (where B_j(x) are N-th degree B-splines over some grid)
-    has the Gauss-Hermite coefficients given by h_m = C_{mj} A_j, where C_{mj} is the matrix
-    returned by this routine.
+    \f$  f(x) = \sum_{j=1}^J A_j B_j(x)  \f$,
+    where B_j(x) are N-th degree B-splines over some grid,
+    has the Gauss-Hermite coefficients given by  \f$  h_m = C_{mj} A_j  \f$,
+    where C_{mj} is the matrix returned by this routine.
+    The approach for computing the coefficients C_{mj} is similar to the previous routine:
+    add up the integrals over each grid segment of the B-spline,
+    which are calculated analytically by decomposing the integrand into monomials.
 */
 template<int N>
 Matrix<double> computeGaussHermiteMatrix(const BsplineInterpolator1d<N>& interp, 
     unsigned int order, double ampl, double center, double width)
 {
-    // the product of B-spline of degree N and a Hermite polynomial of degree 'order' is a polynomial
-    // of degree N+order multiplied by an exponential function; we don't try to integrate it exactly,
-    // but use a Gauss-Legendre quadrature with Nnodes per each segment of the B-spline grid
-    const int NnodesGL = std::min<int>(6, std::max<int>(3, (N+order+1)/2+1));
-    const double *glnodes = GLPOINTS[NnodesGL], *glweights = GLWEIGHTS[NnodesGL];
-    std::vector<double> hpoly(order+1);   // temp.storage for Hermite polynomials
-    double bspl[N+1];                     // temp.storage for B-splines
-    const int gridSize = interp.xvalues().size(), numBsplines = interp.numValues();
+    const std::vector<double>& grid = interp.xvalues();
+    const int numBsplines = interp.numValues();
     Matrix<double> result(order+1, numBsplines, 0.);
-    double* dresult = result.data();      // shortcut for raw matrix storage
-    for(int n=0; n<gridSize-1; n++) {
-        const double x1 = interp.xvalues()[n], x2 = interp.xvalues()[n+1], dx = x2-x1;
-        for(int k=0; k<NnodesGL; k++) {
-            // evaluate the possibly non-zero B-splines and keep track of the index of the leftmost one
-            const double x = x1 + dx * glnodes[k];
-            unsigned int leftInd = interp.nonzeroComponents(x, /*derivOrder*/0, /*output*/ bspl);
-            // evaluate the Hermite polynomials
-            const double y = (x - center) / width;
-            hermiteArray(order, y, &hpoly[0]);
-            // overall multiplicative factor
-            const double mult = M_SQRT2 / ampl * dx * glweights[k] * exp(-0.5*y*y);
-            // add the contribution of this GL point to the integrals of H_m(x) * B_j(x),
-            // where the index j runs from leftInd to leftInd+N
+    double* dresult = result.data();  // shortcut for raw matrix storage
+    double bspl[N+1];                 // temp.storage for B-splines
+    const Gaussian gaussian(1.0);     // unit Gaussian in scaled variable y
+    const int P = order + N;          // max degree of monomials
+    const double mult = 2*M_SQRTPI / ampl * width;
+    // coordinates of equally-spaced points on the current grid segment (in the scaled variable y)
+    double* ynodes = static_cast<double*>(alloca((P+1) * sizeof(double)));
+    // values of  H_m(y) * B_j(x(y))  for all these points, all m<=M Hermite polynomials
+    // and all b<=N nonzero B-spline basis functions
+    double* yvalues = static_cast<double*>(alloca((P+1) * (order+1) * (N+1) * sizeof(double)));
+    // values of all Hermite polynomials H_m(y), m<=M, at the current point y
+    double* hpoly = static_cast<double*>(alloca((order+1) * sizeof(double)));
+    // coefficients  c_m  of the decomposition of  B_b(x(y)) * H_m(y)  into monomials y^p
+    double* monomialCoefs = static_cast<double*>(alloca((P+1) * sizeof(double)));
+    // integrals of  exp(-y^2/2) * y^p  for all p<=P on the current grid segment
+    double* monomialIntegrals = static_cast<double*>(alloca((P+1) * sizeof(double)));
+    // integration is carried out separately on each grid segment of the input B-spline interpolator
+    for(size_t i=0; i<grid.size()-1; i++) {
+        unsigned int leftInd = i;  // index of the first nonzero B-spline basis function on this segment
+        // first, loop over P+1 equally-spaced points y_p on this grid segment, collecting
+        // the values of all N+1 B-spline basis functions and all M+1 Hermite polynomials H_m,
+        // as well as the integrals of  exp(-y^2/2) * y^p  over this segment.
+        for(int p=0; p<=P; p++) {
+            // integrals of exp(-y^2/2) * y^p over this grid segment for all monomial degrees p<=P
+            monomialIntegrals[p] = gaussian.integrate(
+                (grid[i] - center) / width, (grid[i+1] - center) / width, p);
+            double x  = grid[i] + (grid[i+1] - grid[i]) * (p+0.5) / (P+1);
+            ynodes[p] = (x-center) / width;
+            // evaluate all N+1 possibly non-zero B-spline basis functions B_b(x(y)) at this point y_p
+            leftInd = interp.nonzeroComponents(x, /*derivOrder*/0, /*output*/ bspl);
+            // evaluate all M+1 Hermite polynomials at this point y_p
+            hermiteArray(order, ynodes[p], hpoly);
+            // store the products of all combinations of B-spline basis functions and Hermite polynomials
             for(unsigned int m=0; m<=order; m++)
                 for(int b=0; b<=N; b++)
+                    yvalues[(m * (N+1) + b) * (P+1) + p] = bspl[b] * hpoly[m];
+        }
+        // second, loop over the M+1 Hermite polynomials and N+1 B-spline basis functions,
+        // determining the coefficients c_m of the decomposition of  B_b(x(y)) * H_m(y)
+        // into monomials y^p on this grid segment, and then collect the contribution of
+        // each monomial to the integral for H_m(x) * B_j(x), where the index j = leftInd + b
+        // and  0<=b<=N  enumerates all nonzero B-spline basis functions on this segment.
+        for(unsigned int m=0; m<=order; m++) {
+            for(int b=0; b<=N; b++) {
+                vandermonde(P, ynodes, yvalues + (m * (N+1) + b) * (P+1), /*output*/ monomialCoefs);
+                for(int p=0; p<=P; p++)
                     //result(m, b+leftInd) = ...
-                    dresult[ m * numBsplines + b + leftInd ] += mult * hpoly[m] * bspl[b];
+                    dresult[ m * numBsplines + b + leftInd ] +=
+                        mult * monomialCoefs[p] * monomialIntegrals[p];
+            }
         }
     }
     return result;
@@ -203,107 +266,178 @@ Matrix<double> computeGaussHermiteMatrix(const BsplineInterpolator1d<N>& interp,
 
 
 /** A helper class to be used in multidimensional minimization with the Levenberg-Marquardt method,
-    when constructing the best-fit Gauss-Hermite approximation of a given function f(x).
-    The GH expansion of the given order M has M+1 free parameters:
-    amplitude, center and width of the base gaussian,
-    and M-2 GH coefficients h_3, h_4, ..., h_M, with the convention that h_0=1, h_1=h_2=0.
-    The fit minimizes the rms deviation between f(x) and the GH expansion g(x) specified by these 
-    parameters over the set of Q points (Q = 2*QUADORDER^2+1 is fixed, and the points are equally spaced,
-    but their location of these points depends on the mean and width of the current set of parameters).
-    The evalDeriv() method returns the difference between f(x_k) and g(x_k) for each of these points x_k,
-    and its partial derivatives w.r.t. all parameters of GH expansion, all used in the Levenberg-Marquardt
-    fitting routine.
+    when constructing the best-fit Gaussian approximation g(x) of a given function f(x),
+    which has three free parameters:  amplitude, center and width.
+    The fit minimizes the rms deviation between f(x) and the Gaussian expansion g(x)
+    over the set of Q points (Q = 2*QUADORDER^2+1 is fixed, and the points are equally spaced,
+    but their location of these points depends on the mean and width of the Gaussian).
+    The evalDeriv() method returns the difference between f(x_k) and g(x_k) for each of
+    these points x_k, and its partial derivatives w.r.t. parameters the Gaussian,
+    all used in the Levenberg-Marquardt fitting routine.
+    The free parameters in the fit are renormalized to make them of order unity,
+    as explained in the docstring of GaussianFitterInterp.
 */
-class GaussHermiteFitterFnc: public IFunctionNdimDeriv {
-    const unsigned int order;  ///< order of GH expansion
-    const IFunction& fnc;      ///< function to be approximated
+class GaussianFitterFnc: public IFunctionNdimDeriv {
+    const IFunction& fnc;  ///< function to be approximated
+    const double a0, s0;   ///< renormalization factors
 public:
-    GaussHermiteFitterFnc(unsigned int _order, const IFunction& _fnc) : order(_order), fnc(_fnc) {}
+    GaussianFitterFnc(const IFunction& _fnc, double _a0, double _s0) :
+        fnc(_fnc), a0(_a0), s0(_s0)
+    {}
+
     virtual void evalDeriv(const double vars[], double values[], double *derivs=NULL) const
     {
         double ampl = vars[0], center = vars[1], width = vars[2], sqwidth = sqrt(width);
-        double* hpoly = static_cast<double*>(alloca((order+1) * sizeof(double)));
         for(int p=0; p <= 2*pow_2(QUADORDER); p++) {
             double y = (1./QUADORDER) * (p - pow_2(QUADORDER));  // equally spaced points
             double x = center + width * y;
-            double sum = 1.;
-            if(order>2) {
-                hermiteArray(order, y, hpoly);
-                for(unsigned int n=3; n<=order; n++)
-                    sum += vars[n] * hpoly[n];
-            }
-            double mult = 1./M_SQRT2/M_SQRTPI * exp(-0.5*y*y) * sum / sqwidth;
+            double mult = 1./M_SQRT2/M_SQRTPI * exp(-0.5*y*y) / sqwidth;
             if(values)
-                values[p] = sqwidth * fnc(x) - mult * ampl;
+                values[p] = sqwidth * fnc(x * s0) * s0 / a0 - mult * ampl;
             if(derivs) {
-                derivs[p*(order+1)  ] = -mult;
-                derivs[p*(order+1)+1] = -mult * ampl / width * y;
-                derivs[p*(order+1)+2] =  mult * ampl / width * (1-y*y);
-                for(unsigned int n=3; n<=order; n++)
-                    derivs[p*(order+1)+n] = -mult * ampl / sum * hpoly[n];
+                derivs[p*3  ] = -mult;
+                derivs[p*3+1] = -mult * ampl / width * y;
+                derivs[p*3+2] =  mult * ampl / width * (1-y*y);
             }
         }
     }
-    virtual unsigned int numVars()   const { return order+1; }
+    virtual unsigned int numVars()   const { return 3; }
     virtual unsigned int numValues() const { return 2*pow_2(QUADORDER)+1; };
 };
 
-/** Another helper class performing the same task (Levenberg-Marquardt fitting) but specialized
-    to the case of input function represented by a piecewise-polynomial function (e.g., a B-spline).
-    The difference lies in the method for computing the integral  \int |f(x)-g(x)|^2 dx:
-    for a general function, we use a fixed uniform grid in the scaled variable y (argument of the
-    exponent in GH expansion), while for a B-spline we use a fixed grid in the unscaled variable x
-    tailored to the B-spline grid, to improve the integration accuracy for a non-smooth f(x).
+/** Another helper class performing the same task: find the best-fit Gaussian approximation
+    \f$  g(x) = a / \sqrt(2\pi) / s * \exp(-0.5 * (x-m)^2 / s^2)  \f$
+    of an input function  f(x), specialized to the case of a piecewise-polynomial function f(x)
+    (e.g., a B-spline).
+    Here  a = amplitude of the Gaussian, m = center, s = width  are the parameters to be optimized.
+    Unlike the previous class, this one is used with the derivative-assisted multidimensional
+    minimization routine rather than the Levenberg-Marquardt routine, and for each choice of these
+    three parameters of the Gaussian, returns the integral of the squared difference between f and g:
+    \f$  E = (1/2) \int_{-\infty}^\infty { |f(x) - g(x)|^2  -  f(x)^2 }  dx  \f$.
+    The last term in the integrand, f(x)^2, is a constant that does not depend on the parameters,
+    so is subtracted for simplicity, hence the integrand is  (1/2) g(x)^2 - f(x) * g(x).
+    The integration is carried out analytically using the same approach as in the routines
+    computeGaussHermiteMoments() and computeGaussHermiteMatrix(), namely, splitting the integral
+    into the segments in which the input function f(x) is decomposed into monomials.
+    An additional complication arises from the fact that the multidimensional minimization routine
+    uses an absolute tolerance on the function gradient as the stopping criterion.
+    To make the procedure truly scale-invariant, the fit is carried out for renormalized parameters:
+    a / a0, m / s0, s / s0, where a0 is the initial guess for the overall amplitude (0th moment of f)
+    and s0 is its characteristic scale (square root of the full 2nd moment of f).
+    Thus the renormalized parameters, as well as the integrated error E, should all be of order unity.
 */
-class GaussHermiteFitterInterp: public IFunctionNdimDeriv {
-    const unsigned int order;  ///< order of GH expansion
-    /// nodes and weights of integration grid for B-spline, and function values at these points
-    std::vector<double> nodes, weights, fvalues;
+class GaussianFitterInterp: public IFunctionNdimDeriv {
+    /// polynomial degree of the input function
+    const int N;
+    /// grid of the input piecewise-polynomial function, renormalized by s0
+    std::vector<double> grid;
+    /// values of the input function at N+1 points on each grid segment, renormalized by a0/s0
+    std::vector<double> fncValues;
 public:
-    GaussHermiteFitterInterp(unsigned int _order, const BaseInterpolator1d& fnc) :
-        order(_order)
+    GaussianFitterInterp(const BaseInterpolator1d& fnc, double a0, double s0) :
+        N(fnc.degree())
     {
-        const std::vector<double>& grid = fnc.xvalues();
-        const int NnodesGL = 3;  // integration points per one segment of B-spline grid
-        const double *glnodes = GLPOINTS[NnodesGL], *glweights = GLWEIGHTS[NnodesGL];
-        nodes.  resize((grid.size()-1) * NnodesGL);
-        weights.resize(nodes.size());
-        fvalues.resize(nodes.size());
-        for(size_t i=0; i<grid.size()-1; i++) {
-            double x1= grid[i], x2=grid[i+1];  // endpoints of the current grid segment
-            for(int k=0; k<NnodesGL; k++) {
-                nodes  [i*NnodesGL+k] = glnodes[k] * x2 + (1-glnodes[k]) * x1;
-                weights[i*NnodesGL+k] = sqrt(glweights[k] * (x2 - x1));
-                fvalues[i*NnodesGL+k] = fnc(nodes[i*NnodesGL+k]);
-            }
+        const std::vector<double>& origGrid = fnc.xvalues();
+        grid.resize(origGrid.size());
+        fncValues.resize((origGrid.size()-1) * (N+1));
+        for(size_t i=0; i<origGrid.size(); i++) {
+            grid[i] = origGrid[i] / s0;
+            if(i == origGrid.size()-1) continue;
+            for(int n=0; n<=N; n++)
+                fncValues[i * (N+1) + n] =
+                    fnc(origGrid[i] + (origGrid[i+1] - origGrid[i]) * (n+0.5) / (N+1)) / a0 * s0;
         }
     }
+
+    /// computes the integral E, and optionally its first and second derivatives w.r.t. a,m,s.
+    void evalDeriv2(const double vars[], double values[], double derivs[], double derivs2[]) const
+    {
+        double a = vars[0], m = vars[1], s = vars[2];  // parameters of the Gaussian g(x)
+        if(values)  // contribution of the integral of 0.5 * g(x)^2 over the real axis
+            values[0] = 0.25 / M_SQRTPI * a * a / fabs(s);
+        // derivatives of E w.r.t. a, m, s
+        if(derivs) {  // derivatives of the same integral
+            derivs[0] = 0.5 / M_SQRTPI * a / fabs(s);
+            derivs[1] = 0;
+            derivs[2] = -0.5 * derivs[0] * a / s;
+        }
+        if(derivs2) {  // second derivatives
+            derivs2[0] = 0.5 / M_SQRTPI / fabs(s);  // d2E / da2
+            derivs2[1] = 0;                         // d2E / da dm;  derivs[3] is the same
+            derivs2[2] = -derivs2[0] * a / s;       // d2E / da ds;  derivs[6] is the same
+            derivs2[4] = 0;                         // d2E / dm2
+            derivs2[5] = 0;                         // d2E / dm ds;  derivs[7] is the same
+            derivs2[8] = -derivs2[2] * a / s;       // d2E / ds2
+        }
+        // the input function is a polynomial of degree at most N on each segment,
+        // so to decompose it into monomials, its values at N+1 equally-spaced points
+        // on each segment were recorded in the constructor;
+        // here we only need to convert the coordinates of these points into the scaled variable y.
+        double* ynodes = static_cast<double*>(alloca((N+1) * sizeof(double)));
+        // coefficients c_n of the input function expressed as \f$  \sum_{n=0}^N c_n y^n  \f$.
+        double* monomialCoefs = static_cast<double*>(alloca((N+1) * sizeof(double)));
+        // integrals of  \f$  1/\sqrt(2\pi) \exp[-(1/2) y^2] y^p  \f$  over the current grid segment
+        // for all monomials with p<=P  (the max degree P<=N+4 is higher than the input function,
+        // since the first and second derivatives of E involve additional powers of y).
+        const int P = derivs2 ? N+4 : derivs ? N+2 : N;
+        double* gaussianIntegrals = static_cast<double*>(alloca((P+1) * sizeof(double)));
+        Gaussian gaussian(1);
+        // integration is carried out separately on each grid segment of the input function
+        for(size_t i=0; i<grid.size()-1; i++) {
+            // endpoints of the current segment in the scaled variable  y = (x-m) / s
+            double yleft = (grid[i] - m) / s, yright = (grid[i+1] - m) / s;
+            // analytic integrals of the unit Gaussian times various monomials on this segment
+            for(int p=0; p<=P; p++)
+                gaussianIntegrals[p] = gaussian.integrate(yleft, yright, p);
+            // decompose the input function into the sum of monomial terms in y on this segment
+            for(int n=0; n<=N; n++)
+                ynodes[n] = yleft + (yright - yleft) * (n+0.5) / (N+1);
+            vandermonde(N, ynodes, &(fncValues[i * (N+1)]), /*output*/ monomialCoefs);
+            // add the contribution of each monomial term to the total integral and its derivatives
+            for(int n=0; n<=N; n++) {
+                if(values) {
+                    values[0] += -a * monomialCoefs[n] * gaussianIntegrals[n];
+                }
+                if(derivs) {
+                    derivs[0] += -monomialCoefs[n] * gaussianIntegrals[n];
+                    derivs[1] += -a / s * monomialCoefs[n] * gaussianIntegrals[n+1];
+                    derivs[2] +=  a / s * monomialCoefs[n] *
+                        (gaussianIntegrals[n] - gaussianIntegrals[n+2]);
+                }
+               if(derivs2) {
+                    // d2E / da2  has no contribution from F
+                    // d2E / da dm
+                    derivs2[1] += -1 / s * monomialCoefs[n] * gaussianIntegrals[n+1];
+                    // d2E / da ds
+                    derivs2[2] +=  1 / s * monomialCoefs[n] *
+                        (gaussianIntegrals[n] - gaussianIntegrals[n+2]);
+                    // d2E / dm2
+                    derivs2[4] += a / pow_2(s) * monomialCoefs[n] *
+                        (gaussianIntegrals[n] - gaussianIntegrals[n+2]);
+                    // d2E / dm ds
+                    derivs2[5] += a / pow_2(s) * monomialCoefs[n] *
+                        (3 * gaussianIntegrals[n+1] - gaussianIntegrals[n+3]);
+                    // d2E / ds2
+                    derivs2[8] += a / pow_2(s) * monomialCoefs[n] *
+                        (5 * gaussianIntegrals[n+2] - 2 * gaussianIntegrals[n] - gaussianIntegrals[n+4]);
+                }
+            }
+        }
+        // second derivatives are symmetric, so copy the upper half of this matrix into the lower half
+        if(derivs2) {
+            derivs2[3] = derivs2[1];
+            derivs2[6] = derivs2[2];
+            derivs2[7] = derivs2[5];
+        }
+    }
+
+    /// this is the method used in the minimization, which only needs values and first derivatives
     virtual void evalDeriv(const double vars[], double values[], double *derivs=NULL) const
     {
-        double ampl = vars[0], center = vars[1], width = vars[2];
-        double* hpoly = static_cast<double*>(alloca((order+1) * sizeof(double)));
-        for(size_t p=0; p<nodes.size(); p++) {
-            double y = (nodes[p] - center) / width;
-            double sum = 1.;
-            if(order>2) {
-                hermiteArray(order, y, hpoly);
-                for(unsigned int n=3; n<=order; n++)
-                    sum += vars[n] * hpoly[n];
-            }
-            double mult = 1./M_SQRT2/M_SQRTPI * exp(-0.5*y*y) * weights[p] * sum / width;
-            if(values)
-                values[p] = weights[p] * fvalues[p] - mult * ampl;
-            if(derivs) {
-                derivs[p*(order+1)  ] = -mult;
-                derivs[p*(order+1)+1] = -mult * ampl / width * y;
-                derivs[p*(order+1)+2] =  mult * ampl / width * (1-y*y);
-                for(unsigned int n=3; n<=order; n++)
-                    derivs[p*(order+1)+n] = -mult * ampl / sum * hpoly[n];
-            }
-        }
+        evalDeriv2(vars, values, derivs, NULL);
     }
-    virtual unsigned int numVars()   const { return order+1; }
-    virtual unsigned int numValues() const { return nodes.size(); };
+    virtual unsigned int numVars()   const { return 3; }
+    virtual unsigned int numValues() const { return 1; }
 };
 
 }  // internal ns
@@ -317,37 +451,37 @@ GaussHermiteExpansion::GaussHermiteExpansion(const IFunction& fnc,
         throw std::invalid_argument("GaussHermiteExpansion: order must be >=2");
     if(!isFinite(ampl + center + width)) {
         // estimate the first 3 moments of the function, which are used as starting values in the fit
-        std::vector<double> params = computeClassicMoments(fnc);
+        double params[3];
+        computeClassicMoments(fnc, params);
+
         // now that we have a reasonable initial values for the moments of the input function,
-        // perform a Levenberg-Marquardt optimization to find the best-fit parameters of the GH expansion.
-        // Note that there are two conceptually different ways of fitting these parameters:
-        // 1) determine only the overall amplitude, center and width of the best-fit Gaussian,
-        // fixing h_0=1, h_1=h_2=0 and not considering higher-order terms.
-        // 2) determine simultaneously the parameters ampl, center, width, h_3, ... h_M, while still
-        // fixing h_0=1, h_1=h_2=0.
-        // The latter approach, although seemingly natural, does not, in fact, fit a GH expansion:
-        // if one computes all GH coefficients for the best-fit values, it turns out that h_1,h_2 != 0,
-        // but they were ignored during the fit. Moreover, the best-fit values of center and sigma
-        // (and hence all GH moments) depend on the chosen order of expansion.
-        // By contrast, in the first case, the 0th basis function (the gaussian) is always the same,
-        // and increasing the order of expansion does not change the values of previous terms.
-        // This first choice also produces h_1=h_2=0, as is typically implied.
-        // Note, however, that this is not the best-fit approximation at the given order
-        // (neither is var.2 -- to obtain the absolute best fit, one would need to freely adjust
-        // h_1 and h_2 during the fit).
-        const unsigned int fitorder = 2;  // either "2" for the 1st var or "order" for the 2nd var
-        params.resize(fitorder+1);
-        nonlinearMultiFit(GaussHermiteFitterFnc(fitorder, fnc),
-            /*init*/ &params[0], /*accuracy*/ 1e-6, /*max.num.fnc.eval.*/ 100, /*output*/ &params[0]);
-        Ampl   = params[0];
-        Center = params[1];
-        Width  = params[2];
+        // perform a Levenberg-Marquardt optimization to find the best-fit parameters of
+        // the Gaussian approximation to this function.
+        // This results in the first three GH coefficients being h_0=1, h_1=h_2=0.
+        // For numerical stability and to make the procedure invariant w.r.t. changes in
+        // the magnitude and spatial size of the input function, the fitted parameters
+        // are renormalized: amplitude divided by a0 and mean&width divided by s0, defined below
+        double a0 = params[0], s0 = sqrt(pow_2(params[1]) + pow_2(params[2]));
+        params[0] /= a0;
+        params[1] /= s0;
+        params[2] /= s0;
+
+        nonlinearMultiFit(GaussianFitterFnc(fnc, a0, s0),
+            /*init*/ params,
+            /*accuracy*/ EPSREL_GAUSSIAN_FIT,
+            /*maxNumIter*/ 100,
+            /*output(updated)*/ params);
+
+        // renormalize back the fitted parameters
+        Ampl   = params[0] * a0;
+        Center = params[1] * s0;
+        Width  = params[2] * s0;
     }
     moments = computeGaussHermiteMoments(fnc, order, Ampl, Center, Width);
 }
 
 // constructor specialized to piecewise-polynomial functions - same as above, just with a different
-// implementations of GaussHermiteFitter, computeClassicMoments and computeGaussHermiteMoments
+// implementations of GaussianFitter, computeClassicMoments and computeGaussHermiteMoments
 GaussHermiteExpansion::GaussHermiteExpansion(const BaseInterpolator1d& fnc,
     unsigned int order, double ampl, double center, double width) :
     Ampl(ampl), Center(center), Width(width)
@@ -355,14 +489,48 @@ GaussHermiteExpansion::GaussHermiteExpansion(const BaseInterpolator1d& fnc,
     if(order<2)
         throw std::invalid_argument("GaussHermiteExpansion: order must be >=2");
     if(!isFinite(ampl + center + width)) {
-        std::vector<double> params = computeClassicMoments(fnc);
-        const unsigned int fitorder = 2;
-        params.resize(fitorder+1);
-        nonlinearMultiFit(GaussHermiteFitterInterp(fitorder, fnc),
-            /*init*/ &params[0], /*accuracy*/ 1e-6, /*max.num.fnc.eval.*/ 100, /*output*/ &params[0]);
-        Ampl   = params[0];
-        Center = params[1];
-        Width  = params[2];
+        // estimate the first 3 moments of the function, which are used as starting values in the fit
+        double params[3];
+        computeClassicMoments(fnc, params);
+
+        // the next step (finding the best-fit Gaussian approximation) is carried out for
+        // renormalized parameters: amplitude divided by a0 and mean&width divided by s0, defined as
+        double a0 = params[0], s0 = sqrt(pow_2(params[1]) + pow_2(params[2]));
+        params[0] /= a0;
+        params[1] /= s0;
+        params[2] /= s0;
+        // this ensures that the procedure remains invariant w.r.t. the magnitude of these values,
+        // despite using an absolute threshold on the gradient as a stopping criterion
+
+        GaussianFitterInterp fitter(fnc, a0, s0);
+        findMinNdimDeriv(fitter,
+            /*init*/ params,
+            /*step*/ 0.5,
+            /*accuracy*/ EPSREL_GAUSSIAN_FIT, 
+            /*maxNumIter*/ 100,
+            /*output(updated)*/ params);
+
+        // the above call should have found a very good approximation to the best-fit Gaussian,
+        // but it can be further improved by one Newton correction step involving second derivs
+        std::vector<double> derivs(3);  // derivs should be close to zero, but not exactly zero
+        Matrix<double> derivs2(3, 3);   // second derivs are also computed analytically
+        fitter.evalDeriv2(&params[0], NULL, &derivs[0], derivs2.data());
+        std::vector<double> correction = SVDecomp(derivs2).solve(derivs);
+        for(int i=0; i<=2; i++)
+            params[i] -= correction[i];
+         fitter.evalDeriv(&params[0], NULL, &derivs[0]);  // should now be zero to machine precision
+
+        // renormalize back the fitted parameters
+        Ampl   = params[0] * a0;
+        Center = params[1] * s0;
+        Width  = params[2] * s0;
+
+        // the fitted width may turn out to be negative (this is mathematically allowed,
+        // but should be corrected by flipping the signs of both amplitude and width, but not center).
+        if(Width < 0) {
+            Ampl   = -Ampl;
+            Width  = -Width;
+        }
     }
     moments = computeGaussHermiteMoments(fnc, order, Ampl, Center, Width);
 }

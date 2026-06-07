@@ -65,25 +65,39 @@ print("rho_appr(1)=%.8g, rho_app2(1)=%.8g  (true value=%.8g,  user value=%.8g)" 
     ( pot_appr.density(1,0,0), pot_app2.density(1,0,0), pot_orig.density(1,0,0),
     MyPlummer(numpy.array([[1,0,0]]))[0] ))
 
-# user-defined distribution function, again it must be a function of a single argument --
-# a 2d array Mx3, where the columns are Jr,Jz,Jphi, and rows are M independent points
-# in action space where the function should be evaluated simultaneously.
+# user-defined distribution function, again it must be a function that takes a single
+# positional argument -- a 2d array Mx3, where the columns are Jr,Jz,Jphi, and rows are
+# M independent points in action space where the function should be evaluated simultaneously.
+# It may also take an optional keyword argument der=True and return derivatives of the DF
+# w.r.t. actions, if required by the calling code (this is only needed if the call to the DF
+# explicitly requests derivatives; no functions inside agama do it on their own initiative,
+# so in most cases the user-defined DF does not need to provide derivatives).
 # Here, instead of creating a lambda function, we fix the internal constants at the outset.
 J0   = 2.0    # constants -- parameters of the DF
 Beta = 5.0
-def MyDF(J):
-    return (J[:,0] + J[:,1] + abs(J[:,2]) + J0) ** -Beta
+def MyDF(J, der=False):
+    df_val =  (J[:,0] + J[:,1] + abs(J[:,2]) + J0) ** -Beta
+    if der:
+        df_der = -Beta * df_val**(1 + 1/Beta)
+        return df_val, numpy.column_stack((df_der, df_der, df_der * numpy.sign(J[:,2])))
+    else:
+        return df_val
+df_user = agama.DistributionFunction(MyDF)
 
 # original DF using a C++ object
 df_orig = agama.DistributionFunction( \
     type="DoublePowerLaw", J0=J0, slopeIn=0, slopeOut=Beta, norm=2*numpy.pi**3)
+
+# compare the values and derivs of the user-defined and built-in DFs
+df_orig_val, df_orig_der = df_orig([[1,2,-3],[4,3,2]], der=True)
+df_user_val, df_user_der = df_user([[1,2,-3],[4,3,2]], der=True)
 
 # to compute the total mass, we create an proxy instance of DistributionFunction class
 # with a composite DF consisting of a single component (the user-supplied function);
 # this proxy class provides the totalMass() method
 # that the user-defined Python function itself does not have
 mass_orig = df_orig.totalMass()
-mass_user = agama.DistributionFunction(MyDF).totalMass()
+mass_user = df_user.totalMass()
 print("Integration in the 3d action space: DF mass=%.8g  (orig value=%.8g)" % (mass_user, mass_orig))
 
 # GalaxyModel objects constructed from the C++ DF and from the Python function
@@ -135,6 +149,9 @@ def my_moments(potential, df, point):
 dens_manual = my_moments(pot_appr, MyDF, (1,0,0))
 print("manually computed : density=%.8g" % dens_manual)
 
+import warnings
+warnings.filterwarnings('ignore', category=RuntimeWarning)  # disable overflow warning
+
 # spatial selection function for the GalaxyModel class, defining a spherical region
 # centered at (0,1,2) with a radius 3 and an infinitely sharp cutoff
 def MySF(x):
@@ -168,6 +185,8 @@ if (abs(pot0_orig-pot0_appr)<1e-6    and
     abs(mass_gm_sf_orig-numpy.sum(m_orig))<2e-2 and
     all(abs(meanxv_orig-meanxv_user)<0.005) and
     abs(m_orig[0]/m_user[0]-1)<0.001 and
+    numpy.all(abs(df_orig_val-df_user_val)<1e-15) and
+    numpy.all(abs(df_orig_der-df_user_der)<1e-15) and
     # test the equivalence of the two selection functions by directly comparing their output at points
     all(MySF(xv_user).astype(float) == sf_orig(xv_user))):
     print("\033[1;32mALL TESTS PASSED\033[0m")

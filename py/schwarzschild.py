@@ -214,9 +214,7 @@ def runComponent(comp, pot):
 
     # create an N-body model if needed
     if hasattr(comp, 'nbody'):
-        status, particles = agama.sampleOrbitLibrary(comp.nbody, traj, weights)
-        if not status: raise RuntimeError("Failed to produce output N-body model")
-        comp.nbodymodel = particles
+        comp.nbodymodel = agama.sampleOrbitLibrary(comp.nbody, traj, weights)
 
     # output
     comp.weights = weights

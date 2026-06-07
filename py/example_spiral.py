@@ -24,6 +24,7 @@ We then integrate some orbits in the rotating spiral potential.
 """
 
 import numpy, agama
+numpy.seterr(all='ignore')  # disable overflow and other numpy warnings
 
 # A factory function creating a potential with the given parameters
 # (it needs to be a free function and not an instance of some class)
@@ -100,8 +101,8 @@ rhoMax = numpy.max(rhoD) * 3.0
 rhoMin = rhoMax * 1e-3
 levels = numpy.logspace(numpy.log10(rhoMin), numpy.log10(rhoMax), 32)
 norm = matplotlib.colors.LogNorm()
-ax[0].contour(X, Y, rhoD.reshape(len(X), len(Y)).T, levels=levels, cmap='hell_r', norm=norm)
-ax[1].contour(X, Y, rhoT.reshape(len(X), len(Y)).T, levels=levels, cmap='hell_r', norm=norm)
+ax[0].contour(X, Y, numpy.maximum(rhoD, rhoMin/10).reshape(len(X), len(Y)).T, levels=levels, cmap='hell_r', norm=norm)
+ax[1].contour(X, Y, numpy.maximum(rhoT, rhoMin/10).reshape(len(X), len(Y)).T, levels=levels, cmap='hell_r', norm=norm)
 # overplot the log-spiral
 RR = numpy.logspace(-2, 0.7, 200) * scaleRadius
 phi = numpy.log(RR / scaleRadius) / numpy.tan(pitchAngle) + phi0
@@ -136,7 +137,7 @@ for i in range(nsteps):
         XYZ[:,1] * cosa[i] - XYZ[:,0] * sina[i], XYZ[:,2]))
     rhoT = pot_total.density(XYZrot)
     ax[1].cla()
-    ax[1].contour(X, Y, rhoT.reshape(len(X), len(Y)).T, levels=levels, cmap='hell_r', norm=norm)
+    ax[1].contour(X, Y, numpy.maximum(rhoT, rhoMin/10).reshape(len(X), len(Y)).T, levels=levels, cmap='hell_r', norm=norm)
     # overplot the current position (for the left panel, which is not cleared) in the inertial frame
     ax[0].plot(orbit_disk_x[i], orbit_disk_y[i], 'ko', ms=3)
     # overplot the past trajectory up to the current time (for the right panel, which is cleared each time)
